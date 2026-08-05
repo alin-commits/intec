@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ChangeEvent } from "react";
-import { businessUnits, campaigns, monthlyStats } from "@/lib/demo-data";
+import { businessUnits as allBusinessUnits, campaigns, monthlyStats } from "@/lib/demo-data";
 import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { KpiCard } from "@/components/kpi-card";
@@ -10,7 +10,7 @@ import { StatusBars } from "@/components/charts/status-bars";
 import type { MonthlyStat } from "@/lib/types";
 
 type ViewMode = "month" | "year";
-type CompareMode = "previous" | "previous_year" | "none";
+type CompareMode = "previous" | "current" | "previous_year" | "none";
 
 type Totals = { web: number; phone: number; leads: number; won: number; saleValue: number };
 
@@ -31,6 +31,15 @@ function variation(current: number, previous: number): number | null {
 function deltaProps(value: number | null) {
   return value === null ? { delta: "Sin comparación", positive: true } : { delta: formatPercent(Math.abs(value)), positive: value >= 0 };
 }
+
+const businessUnits = allBusinessUnits.filter((unit) => unit.active);
+
+const compareModeHelpers: Record<CompareMode, string> = {
+  previous: "frente al mes anterior",
+  current: "frente al mes actual",
+  previous_year: "frente al mismo mes del año anterior",
+  none: "sin periodo de comparación",
+};
 
 export function DashboardClient() {
   const currentMonthKey = monthKey();
@@ -55,9 +64,9 @@ export function DashboardClient() {
   const previousRows = useMemo(() => {
     if (viewMode === "year") return filtered.filter((row) => yearOfMonth(row.month) === selectedYear - 1);
     if (compareMode === "none") return [];
-    const key = compareMode === "previous" ? previousMonthKey(selectedMonth) : previousYearMonthKey(selectedMonth);
+    const key = compareMode === "current" ? currentMonthKey : compareMode === "previous" ? previousMonthKey(selectedMonth) : previousYearMonthKey(selectedMonth);
     return filtered.filter((row) => row.month === key);
-  }, [compareMode, filtered, selectedMonth, selectedYear, viewMode]);
+  }, [compareMode, currentMonthKey, filtered, selectedMonth, selectedYear, viewMode]);
 
   const hasComparison = previousRows.length > 0;
   const current = sumRows(currentRows);
@@ -75,9 +84,7 @@ export function DashboardClient() {
   const conversionDelta = hasComparison && previousConversion !== null ? conversion - previousConversion : null;
   const saleValueDelta = hasComparison ? variation(current.saleValue, previous.saleValue) : null;
 
-  const comparisonHelper = viewMode === "year"
-    ? `frente a ${selectedYear - 1}`
-    : compareMode === "previous" ? "frente al mes anterior" : compareMode === "previous_year" ? "frente al mismo mes del año anterior" : "sin periodo de comparación";
+  const comparisonHelper = viewMode === "year" ? `frente a ${selectedYear - 1}` : compareModeHelpers[compareMode];
 
   const trendYear = viewMode === "year" ? selectedYear : yearOfMonth(selectedMonth);
   const trendMonths = useMemo(
@@ -132,6 +139,7 @@ export function DashboardClient() {
             <span>Comparar con</span>
             <select value={compareMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setCompareMode(event.target.value as CompareMode)}>
               <option value="previous">Mes anterior</option>
+              <option value="current">Mes actual</option>
               <option value="previous_year">Mismo mes del año anterior</option>
               <option value="none">Sin comparación</option>
             </select>
@@ -199,10 +207,10 @@ export function DashboardClient() {
             <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th></tr></thead>
             <tbody>
               {campaigns.map((campaign) => {
-                const unit = businessUnits.find((item) => item.id === campaign.businessUnitId);
+                const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);
                 return (
                   <tr key={campaign.id}>
-                    <td><strong>{campaign.name}</strong></td><td>{unit?.name}</td>
+                    <td><strong>{campaign.name}</strong></td><td>{unit?.name ?? "—"}</td>
                     <td><span className={campaign.status === "Activa" ? "badge badge-active" : "badge"}>{campaign.status}</span></td>
                     <td>{campaign.leads}</td><td>{campaign.won}</td><td>{formatPercent((campaign.won / campaign.leads) * 100)}</td>
                     <td>{currencyFormatter.format(campaign.value)}</td>

@@ -1,12 +1,14 @@
 import type { BusinessUnit, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile } from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
-  { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true },
-  { id: "blizzcool", name: "BlizzCool", slug: "blizzcool", accent: "#0891b2", active: true },
-  { id: "sumifluid", name: "Sumifluid", slug: "sumifluid", accent: "#7c3aed", active: true },
-  { id: "jender", name: "Jender", slug: "jender", accent: "#ea580c", active: true },
-  { id: "cst", name: "CST Ibérica", slug: "cst-iberica", accent: "#16a34a", active: true },
-  { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: true },
+  { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp" },
+  { id: "blizzcool", name: "BlizzCool", slug: "blizzcool", accent: "#0891b2", active: true, logo: "/logo-blizzcool.webp" },
+  { id: "sumifluid", name: "Sumifluid", slug: "sumifluid", accent: "#7c3aed", active: true, logo: "/logo-sumifluid.webp" },
+  { id: "jender", name: "Jender", slug: "jender", accent: "#ea580c", active: true, logo: "/logo-jender.webp" },
+  // Marcas sin actividad comercial por ahora: se conservan (histórico de leads/campañas)
+  // pero no aparecen en registro de consultas ni en comparativas activas.
+  { id: "cst", name: "CST Ibérica", slug: "cst-iberica", accent: "#16a34a", active: false },
+  { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: false },
 ];
 
 const monthKeys = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"];
@@ -19,7 +21,7 @@ const baseByUnit: Record<string, { web: number; phone: number; leads: number; wo
   blizztherm: { web: 22, phone: 16, leads: 7, won: 1 },
 };
 
-export const monthlyStats: MonthlyStat[] = businessUnits.flatMap((unit, unitIndex) =>
+export const monthlyStats: MonthlyStat[] = businessUnits.filter((unit) => unit.active).flatMap((unit, unitIndex) =>
   monthKeys.map((month, monthIndex) => {
     const base = baseByUnit[unit.id];
     const progression = 0.72 + monthIndex * 0.06 + unitIndex * 0.012;

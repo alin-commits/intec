@@ -16,6 +16,7 @@ export type BusinessUnit = {
   slug: string;
   accent: string;
   active: boolean;
+  logo?: string | null;
 };
 
 export type LeadStatusEvent = {
