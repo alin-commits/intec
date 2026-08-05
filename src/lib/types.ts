@@ -1,5 +1,6 @@
 export type InquiryType = "phone" | "chat" | "email_form" | "whatsapp" | "portal_rrss";
 export type AppRole = "admin" | "commercial" | "viewer";
+export type CampaignStatus = "draft" | "active" | "finished" | "archived";
 export type LeadStatus =
   | "new"
   | "contact_attempt"
@@ -46,6 +47,20 @@ export type Lead = {
   notes?: string;
   saleValue: number | null;
   statusHistory?: LeadStatusEvent[];
+};
+
+export type Campaign = {
+  id: string;
+  businessUnitId: string;
+  name: string;
+  channel: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  status: CampaignStatus;
+  budget: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt?: string;
 };
 
 export type InquiryRecord = {

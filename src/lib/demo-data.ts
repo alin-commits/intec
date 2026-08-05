@@ -1,4 +1,4 @@
-import type { BusinessUnit, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile } from "@/lib/types";
+import type { BusinessUnit, Campaign, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile } from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
   { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp" },
@@ -199,12 +199,12 @@ export const demoLeads: Lead[] = [
   },
 ];
 
-export const campaigns = [
-  { id: "CP-001", name: "Distribuidores verano", businessUnitId: "blizzcool", status: "Activa", leads: 34, won: 6, value: 9140 },
-  { id: "CP-002", name: "Generadores profesionales", businessUnitId: "intec", status: "Activa", leads: 16, won: 4, value: 11360 },
-  { id: "CP-003", name: "Soluciones de bombeo", businessUnitId: "sumifluid", status: "Activa", leads: 12, won: 2, value: 3260 },
-  { id: "CP-004", name: "Mantenimiento industrial", businessUnitId: "cst", status: "Finalizada", leads: 5, won: 1, value: 1460 },
-  { id: "CP-005", name: "Equipamiento verano", businessUnitId: "jender", status: "Finalizada", leads: 8, won: 1, value: 980 },
+export const campaigns: Campaign[] = [
+  { id: "CP-001", businessUnitId: "blizzcool", name: "Distribuidores verano", channel: "Email", startDate: "2026-06-01", endDate: "2026-08-31", status: "active", budget: 4500, notes: "Campaña dirigida a distribuidores del norte peninsular.", createdAt: "2026-06-01T08:00:00Z" },
+  { id: "CP-002", businessUnitId: "intec", name: "Generadores profesionales", channel: "Landing", startDate: "2026-05-15", endDate: "2026-08-15", status: "active", budget: 6000, notes: "Promoción de generadores para obra e industria.", createdAt: "2026-05-15T08:00:00Z" },
+  { id: "CP-003", businessUnitId: "sumifluid", name: "Soluciones de bombeo", channel: "Web", startDate: "2026-06-10", endDate: null, status: "active", budget: 2200, notes: null, createdAt: "2026-06-10T08:00:00Z" },
+  { id: "CP-004", businessUnitId: "cst", name: "Mantenimiento industrial", channel: "Teléfono", startDate: "2026-03-01", endDate: "2026-05-31", status: "finished", budget: 1800, notes: "Contratos anuales de mantenimiento.", createdAt: "2026-03-01T08:00:00Z" },
+  { id: "CP-005", businessUnitId: "jender", name: "Equipamiento verano", channel: "RRSS", startDate: "2026-05-01", endDate: "2026-07-31", status: "finished", budget: 1200, notes: null, createdAt: "2026-05-01T08:00:00Z" },
 ];
 
 export const demoProfiles: Profile[] = [

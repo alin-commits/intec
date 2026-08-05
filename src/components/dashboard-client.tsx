@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState, type ChangeEvent } from "react";
-import { businessUnits as allBusinessUnits, campaigns, monthlyStats } from "@/lib/demo-data";
+import { businessUnits as allBusinessUnits, campaigns, demoLeads, monthlyStats } from "@/lib/demo-data";
+import { campaignStatusLabels } from "@/lib/constants";
 import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { KpiCard } from "@/components/kpi-card";
@@ -208,12 +209,15 @@ export function DashboardClient() {
             <tbody>
               {campaigns.map((campaign) => {
                 const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);
+                const campaignLeads = demoLeads.filter((lead) => lead.campaignId === campaign.id);
+                const won = campaignLeads.filter((lead) => lead.status === "won").length;
+                const value = campaignLeads.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
                 return (
                   <tr key={campaign.id}>
                     <td><strong>{campaign.name}</strong></td><td>{unit?.name ?? "—"}</td>
-                    <td><span className={campaign.status === "Activa" ? "badge badge-active" : "badge"}>{campaign.status}</span></td>
-                    <td>{campaign.leads}</td><td>{campaign.won}</td><td>{formatPercent((campaign.won / campaign.leads) * 100)}</td>
-                    <td>{currencyFormatter.format(campaign.value)}</td>
+                    <td><span className={campaign.status === "active" ? "badge badge-active" : "badge"}>{campaignStatusLabels[campaign.status]}</span></td>
+                    <td>{campaignLeads.length}</td><td>{won}</td><td>{formatPercent(campaignLeads.length ? (won / campaignLeads.length) * 100 : 0)}</td>
+                    <td>{currencyFormatter.format(value)}</td>
                   </tr>
                 );
               })}
