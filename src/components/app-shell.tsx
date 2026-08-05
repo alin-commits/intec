@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Logo } from "@/components/logo";
 import { roleLabels } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { AppRole } from "@/lib/types";
@@ -125,8 +126,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <Link href="/dashboard" className="brand">
-          <span className="brand-mark">I</span>
-          <span><strong>Intec</strong><small>Commercial Hub</small></span>
+          <span className="brand-logo-chip"><Logo className="brand-logo" priority /></span>
+          <small>Commercial Hub</small>
         </Link>
         <nav>
           {navigation.filter((item) => !item.adminOnly || profile.role === "admin").map((item) => {
