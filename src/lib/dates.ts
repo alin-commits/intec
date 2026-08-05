@@ -85,6 +85,24 @@ export function yearOfMonth(value: string): number {
   return Number(value.split("-")[0]);
 }
 
+export function previousMonthKey(value: string): string {
+  const [year, month] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 2, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export function previousYearMonthKey(value: string): string {
+  const [year, month] = value.split("-").map(Number);
+  return `${year - 1}-${String(month).padStart(2, "0")}`;
+}
+
+export function monthShortLabel(value: string): string {
+  const [year, month] = value.split("-").map(Number);
+  const raw = new Intl.DateTimeFormat("es-ES", { month: "short", timeZone: "Europe/Madrid" }).format(new Date(Date.UTC(year, month - 1, 1)));
+  const clean = raw.replace(".", "");
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
 export function yearRange(year: number): { start: string; end: string } {
   return {
     start: new Date(Date.UTC(year, 0, 1)).toISOString(),

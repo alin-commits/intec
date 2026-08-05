@@ -2,44 +2,99 @@
 
 import { useMemo, useState, type ChangeEvent } from "react";
 import { businessUnits, campaigns, monthlyStats } from "@/lib/demo-data";
+import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { StatusBars } from "@/components/charts/status-bars";
+import type { MonthlyStat } from "@/lib/types";
+
+type ViewMode = "month" | "year";
+type CompareMode = "previous" | "previous_year" | "none";
+
+type Totals = { web: number; phone: number; leads: number; won: number; saleValue: number };
+
+function sumRows(rows: MonthlyStat[]): Totals {
+  return rows.reduce((acc, row) => ({
+    web: acc.web + row.web,
+    phone: acc.phone + row.phone,
+    leads: acc.leads + row.leads,
+    won: acc.won + row.won,
+    saleValue: acc.saleValue + row.saleValue,
+  }), { web: 0, phone: 0, leads: 0, won: 0, saleValue: 0 });
+}
+
+function variation(current: number, previous: number): number | null {
+  return previous ? ((current - previous) / previous) * 100 : null;
+}
+
+function deltaProps(value: number | null) {
+  return value === null ? { delta: "Sin comparación", positive: true } : { delta: formatPercent(Math.abs(value)), positive: value >= 0 };
+}
 
 export function DashboardClient() {
+  const currentMonthKey = monthKey();
   const [businessUnitId, setBusinessUnitId] = useState("all");
-  const [period, setPeriod] = useState("aug-2026");
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
+  const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
+  const [compareMode, setCompareMode] = useState<CompareMode>("previous");
+
+  const availableYears = useMemo(() => Array.from(new Set(monthlyStats.map((row) => yearOfMonth(row.month)))).sort(), []);
 
   const filtered = useMemo(
     () => monthlyStats.filter((item) => businessUnitId === "all" || item.businessUnitId === businessUnitId),
     [businessUnitId],
   );
 
-  const currentMonth = filtered.filter((item) => item.month === "Ago");
-  const previousMonth = filtered.filter((item) => item.month === "Jul");
-  const total = (rows: typeof filtered, key: keyof (typeof filtered)[number]) =>
-    rows.reduce((sum, row) => sum + Number(row[key]), 0);
+  const currentRows = useMemo(
+    () => (viewMode === "month" ? filtered.filter((row) => row.month === selectedMonth) : filtered.filter((row) => yearOfMonth(row.month) === selectedYear)),
+    [filtered, selectedMonth, selectedYear, viewMode],
+  );
 
-  const web = total(currentMonth, "web");
-  const phone = total(currentMonth, "phone");
-  const leads = total(currentMonth, "leads");
-  const won = total(currentMonth, "won");
-  const saleValue = total(currentMonth, "saleValue");
-  const previousTotal = total(previousMonth, "web") + total(previousMonth, "phone");
-  const currentTotal = web + phone;
-  const totalDelta = previousTotal ? ((currentTotal - previousTotal) / previousTotal) * 100 : 0;
-  const conversion = leads ? (won / leads) * 100 : 0;
+  const previousRows = useMemo(() => {
+    if (viewMode === "year") return filtered.filter((row) => yearOfMonth(row.month) === selectedYear - 1);
+    if (compareMode === "none") return [];
+    const key = compareMode === "previous" ? previousMonthKey(selectedMonth) : previousYearMonthKey(selectedMonth);
+    return filtered.filter((row) => row.month === key);
+  }, [compareMode, filtered, selectedMonth, selectedYear, viewMode]);
 
-  const trendData = ["Mar", "Abr", "May", "Jun", "Jul", "Ago"].map((month) => {
-    const rows = filtered.filter((item) => item.month === month);
-    return { label: month, web: total(rows, "web"), phone: total(rows, "phone") };
+  const hasComparison = previousRows.length > 0;
+  const current = sumRows(currentRows);
+  const previous = sumRows(previousRows);
+  const currentTotal = current.web + current.phone;
+  const previousTotal = previous.web + previous.phone;
+  const conversion = current.leads ? (current.won / current.leads) * 100 : 0;
+  const previousConversion = previous.leads ? (previous.won / previous.leads) * 100 : null;
+
+  const webDelta = hasComparison ? variation(current.web, previous.web) : null;
+  const phoneDelta = hasComparison ? variation(current.phone, previous.phone) : null;
+  const totalDelta = hasComparison ? variation(currentTotal, previousTotal) : null;
+  const leadsDelta = hasComparison ? variation(current.leads, previous.leads) : null;
+  const wonDelta = hasComparison ? current.won - previous.won : null;
+  const conversionDelta = hasComparison && previousConversion !== null ? conversion - previousConversion : null;
+  const saleValueDelta = hasComparison ? variation(current.saleValue, previous.saleValue) : null;
+
+  const comparisonHelper = viewMode === "year"
+    ? `frente a ${selectedYear - 1}`
+    : compareMode === "previous" ? "frente al mes anterior" : compareMode === "previous_year" ? "frente al mismo mes del año anterior" : "sin periodo de comparación";
+
+  const trendYear = viewMode === "year" ? selectedYear : yearOfMonth(selectedMonth);
+  const trendMonths = useMemo(
+    () => Array.from(new Set(monthlyStats.filter((row) => yearOfMonth(row.month) === trendYear).map((row) => row.month))).sort(),
+    [trendYear],
+  );
+  const trendData = trendMonths.map((month) => {
+    const summed = sumRows(filtered.filter((row) => row.month === month));
+    return { label: monthShortLabel(month), web: summed.web, phone: summed.phone };
   });
 
   const unitRows = businessUnits.map((unit) => {
-    const row = monthlyStats.find((item) => item.month === "Ago" && item.businessUnitId === unit.id);
-    const inquiries = (row?.web ?? 0) + (row?.phone ?? 0);
-    return { unit, row, inquiries, conversion: row?.leads ? ((row.won / row.leads) * 100) : 0 };
+    const rows = viewMode === "month"
+      ? monthlyStats.filter((item) => item.month === selectedMonth && item.businessUnitId === unit.id)
+      : monthlyStats.filter((item) => yearOfMonth(item.month) === selectedYear && item.businessUnitId === unit.id);
+    const summed = sumRows(rows);
+    return { unit, summed, inquiries: summed.web + summed.phone, conversion: summed.leads ? (summed.won / summed.leads) * 100 : 0 };
   });
 
   return (
@@ -53,42 +108,54 @@ export function DashboardClient() {
           </select>
         </label>
         <label>
-          <span>Periodo</span>
-          <select value={period} onChange={(event: ChangeEvent<HTMLSelectElement>) => setPeriod(event.target.value)}>
-            <option value="aug-2026">Agosto 2026</option>
-            <option value="jul-2026">Julio 2026</option>
-            <option value="year-2026">Año 2026</option>
+          <span>Vista</span>
+          <select value={viewMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setViewMode(event.target.value as ViewMode)}>
+            <option value="month">Mensual</option>
+            <option value="year">Anual</option>
           </select>
         </label>
-        <label>
-          <span>Comparar con</span>
-          <select defaultValue="previous">
-            <option value="previous">Mes anterior</option>
-            <option value="year">Mismo mes del año anterior</option>
-            <option value="none">Sin comparación</option>
-          </select>
-        </label>
-        <div className="filter-summary">
-          <span>Vista actual</span>
-          <strong>{period === "aug-2026" ? "Agosto 2026" : "Periodo seleccionado"}</strong>
-        </div>
+        {viewMode === "month" ? (
+          <label>
+            <span>Mes</span>
+            <input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event: ChangeEvent<HTMLInputElement>) => setSelectedMonth(event.target.value)} />
+          </label>
+        ) : (
+          <label>
+            <span>Año</span>
+            <select value={selectedYear} onChange={(event: ChangeEvent<HTMLSelectElement>) => setSelectedYear(Number(event.target.value))}>
+              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </label>
+        )}
+        {viewMode === "month" ? (
+          <label>
+            <span>Comparar con</span>
+            <select value={compareMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setCompareMode(event.target.value as CompareMode)}>
+              <option value="previous">Mes anterior</option>
+              <option value="previous_year">Mismo mes del año anterior</option>
+              <option value="none">Sin comparación</option>
+            </select>
+          </label>
+        ) : (
+          <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
+        )}
       </section>
 
       <section className="kpi-grid">
-        <KpiCard label="Consultas web" value={numberFormatter.format(web)} delta="12,4 %" />
-        <KpiCard label="Consultas telefónicas" value={numberFormatter.format(phone)} delta="4,8 %" />
-        <KpiCard label="Consultas totales" value={numberFormatter.format(currentTotal)} delta={formatPercent(Math.abs(totalDelta))} positive={totalDelta >= 0} />
-        <KpiCard label="Leads" value={numberFormatter.format(leads)} delta="9,1 %" />
-        <KpiCard label="Ganados" value={numberFormatter.format(won)} delta="2 más" helper="que el mes anterior" />
-        <KpiCard label="Conversión" value={formatPercent(conversion)} delta="1,6 puntos" />
-        <KpiCard label="Valor ganado" value={currencyFormatter.format(saleValue)} delta="18,2 %" />
+        <KpiCard label="Consultas web" value={numberFormatter.format(current.web)} helper={comparisonHelper} {...deltaProps(webDelta)} />
+        <KpiCard label="Consultas telefónicas" value={numberFormatter.format(current.phone)} helper={comparisonHelper} {...deltaProps(phoneDelta)} />
+        <KpiCard label="Consultas totales" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} {...deltaProps(totalDelta)} />
+        <KpiCard label="Leads" value={numberFormatter.format(current.leads)} helper={comparisonHelper} {...deltaProps(leadsDelta)} />
+        <KpiCard label="Ganados" value={numberFormatter.format(current.won)} delta={wonDelta === null ? "Sin comparación" : `${wonDelta >= 0 ? "+" : ""}${wonDelta}`} positive={wonDelta === null || wonDelta >= 0} helper={comparisonHelper} />
+        <KpiCard label="Conversión" value={formatPercent(conversion)} delta={conversionDelta === null ? "Sin comparación" : `${conversionDelta >= 0 ? "+" : ""}${conversionDelta.toFixed(1).replace(".", ",")} pts`} positive={conversionDelta === null || conversionDelta >= 0} helper={comparisonHelper} />
+        <KpiCard label="Valor ganado" value={currencyFormatter.format(current.saleValue)} helper={comparisonHelper} {...deltaProps(saleValueDelta)} />
       </section>
 
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
           <div className="panel-heading">
             <div><span className="eyebrow">Consultas</span><h2>Evolución mensual</h2></div>
-            <span className="muted">Marzo — agosto 2026</span>
+            <span className="muted">Año {trendYear}</span>
           </div>
           <TrendChart data={trendData} />
         </article>
@@ -109,12 +176,12 @@ export function DashboardClient() {
           <table>
             <thead><tr><th>Unidad</th><th>Web</th><th>Teléfono</th><th>Total</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th></tr></thead>
             <tbody>
-              {unitRows.map(({ unit, row, inquiries, conversion: unitConversion }) => (
+              {unitRows.map(({ unit, summed, inquiries, conversion: unitConversion }) => (
                 <tr key={unit.id}>
                   <td><span className="unit-name"><i style={{ background: unit.accent }} />{unit.name}</span></td>
-                  <td>{row?.web ?? 0}</td><td>{row?.phone ?? 0}</td><td><strong>{inquiries}</strong></td>
-                  <td>{row?.leads ?? 0}</td><td>{row?.won ?? 0}</td><td>{formatPercent(unitConversion)}</td>
-                  <td>{currencyFormatter.format(row?.saleValue ?? 0)}</td>
+                  <td>{summed.web}</td><td>{summed.phone}</td><td><strong>{inquiries}</strong></td>
+                  <td>{summed.leads}</td><td>{summed.won}</td><td>{formatPercent(unitConversion)}</td>
+                  <td>{currencyFormatter.format(summed.saleValue)}</td>
                 </tr>
               ))}
             </tbody>

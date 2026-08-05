@@ -9,15 +9,7 @@ export const businessUnits: BusinessUnit[] = [
   { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: true },
 ];
 
-const months = ["Mar", "Abr", "May", "Jun", "Jul", "Ago"];
-const monthKeys: Record<string, string> = {
-  Mar: "2026-03",
-  Abr: "2026-04",
-  May: "2026-05",
-  Jun: "2026-06",
-  Jul: "2026-07",
-  Ago: "2026-08",
-};
+const monthKeys = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"];
 const baseByUnit: Record<string, { web: number; phone: number; leads: number; won: number }> = {
   intec: { web: 102, phone: 76, leads: 16, won: 4 },
   blizzcool: { web: 74, phone: 28, leads: 34, won: 6 },
@@ -28,7 +20,7 @@ const baseByUnit: Record<string, { web: number; phone: number; leads: number; wo
 };
 
 export const monthlyStats: MonthlyStat[] = businessUnits.flatMap((unit, unitIndex) =>
-  months.map((month, monthIndex) => {
+  monthKeys.map((month, monthIndex) => {
     const base = baseByUnit[unit.id];
     const progression = 0.72 + monthIndex * 0.06 + unitIndex * 0.012;
     const leads = Math.max(1, Math.round(base.leads * progression));
@@ -83,8 +75,7 @@ const webChannelWeights: { type: InquiryType; weight: number }[] = [
 export const demoInquiries: InquiryRecord[] = (() => {
   const records: InquiryRecord[] = [];
   for (const row of monthlyStats) {
-    const key = monthKeys[row.month];
-    if (!key) continue;
+    const key = row.month;
     const factor = key === "2026-08" ? 0.2 : 1;
     const webTotal = Math.max(1, Math.round(row.web * factor));
     let assigned = 0;
