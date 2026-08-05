@@ -41,3 +41,7 @@ Si el valor anterior es cero, la interfaz debe mostrar `Nuevo` o `Sin comparaci�
 ## Zona horaria
 
 Las fechas se almacenan en UTC y se muestran y agrupan para el usuario en `Europe/Madrid`.
+
+## Dashboard mensual de consultas
+
+El periodo se define por el mes seleccionado en zona horaria `Europe/Madrid`. La vista compara el total del mes con el mes natural inmediatamente anterior. La media diaria usa los días transcurridos cuando se analiza el mes actual y todos los días naturales cuando se analiza un mes cerrado.

@@ -1,4 +1,5 @@
 export type InquiryType = "web" | "phone";
+export type AppRole = "admin" | "commercial" | "viewer";
 export type LeadStatus =
   | "new"
   | "contact_attempt"
@@ -17,10 +18,20 @@ export type BusinessUnit = {
   active: boolean;
 };
 
+export type LeadStatusEvent = {
+  id: string;
+  previousStatus: LeadStatus | null;
+  newStatus: LeadStatus;
+  changedAt: string;
+  changedByName?: string | null;
+};
+
 export type Lead = {
   id: string;
   createdAt: string;
+  updatedAt?: string;
   businessUnitId: string;
+  campaignId?: string | null;
   campaign: string;
   contactName: string;
   clientCompanyName: string;
@@ -31,7 +42,26 @@ export type Lead = {
   status: LeadStatus;
   type: string;
   source: string;
+  notes?: string;
   saleValue: number | null;
+  statusHistory?: LeadStatusEvent[];
+};
+
+export type InquiryRecord = {
+  id: string;
+  businessUnitId: string;
+  inquiryType: InquiryType;
+  createdAt: string;
+  createdBy?: string | null;
+};
+
+export type Profile = {
+  id: string;
+  fullName: string;
+  email?: string | null;
+  role: AppRole;
+  isActive: boolean;
+  createdAt?: string;
 };
 
 export type MonthlyStat = {

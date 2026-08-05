@@ -86,3 +86,17 @@ Las columnas no son idénticas entre hojas. El modelo normalizado utiliza una so
 - Los datos ficticios no contienen información real de clientes.
 - No se incluye `service_role` en el frontend.
 - Los cálculos de cierre deben migrar a `lead_status_history` antes de considerarse métricas definitivas.
+
+## Fase 2 implementada — Operativa inicial
+
+- Login real mediante Supabase Auth con fallback de demostración.
+- Gestión de usuarios existentes, roles y activación.
+- Invitación de usuarios mediante endpoint seguro de servidor.
+- Creación y edición de leads.
+- Cambio de estado con confirmación e historial.
+- Registro de consultas con confirmación previa.
+- Dashboard mensual específico de consultas.
+- Filtros por mes, unidad y canal.
+- Ordenación de la comparativa de consultas.
+
+Para activar persistencia real deben ejecutarse las dos migraciones y configurarse las variables de entorno de Supabase en Vercel.

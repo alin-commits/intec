@@ -41,3 +41,7 @@ Auditoría de cada cambio de estado y base para medir tiempos de contacto, ofert
 - Campañas: estado `archived`.
 - Leads: borrado físico solo para administradores; se recomienda añadir `deleted_at` antes del uso en producción si se necesita auditoría completa.
 - Consultas: un comercial solo puede deshacer registros propios recientes.
+
+## Usuarios operativos
+
+La segunda migración añade `profiles.email` para facilitar la administración interna. Las invitaciones utilizan `SUPABASE_SERVICE_ROLE_KEY` únicamente desde una ruta de servidor. Los cambios de rol y activación siguen protegidos por RLS y requieren rol `admin`.
