@@ -8,7 +8,7 @@ Amplía `auth.users` con nombre, rol y estado activo.
 
 ### business_units
 
-Representa marcas internas: Intec, BlizzCool, Sumifluid, Jender, CST Ibérica y Blizztherm.
+Representa marcas internas: Intec, BlizzCool, Sumifluid, Jender, CST Ibérica y Blizztherm. `logo_url` guarda la ruta del logotipo (servido desde `public/`). CST Ibérica y Blizztherm están sembradas con `is_active = false`: no tienen actividad comercial actual, así que no aparecen en el registro de consultas ni en las comparativas activas, pero se conservan para no perder su histórico de leads y campañas.
 
 ### inquiries
 
@@ -45,3 +45,10 @@ Auditoría de cada cambio de estado y base para medir tiempos de contacto, ofert
 ## Usuarios operativos
 
 La segunda migración añade `profiles.email` para facilitar la administración interna. Las invitaciones utilizan `SUPABASE_SERVICE_ROLE_KEY` únicamente desde una ruta de servidor. Los cambios de rol y activación siguen protegidos por RLS y requieren rol `admin`.
+
+## Seguridad reforzada (cuarta migración)
+
+Revisando las políticas RLS existentes se detectaron dos huecos, cerrados de forma aditiva:
+
+- **Fechas falsificables**: `created_at` solo tenía `default now()`, que Postgres ignora si el cliente lo incluye explícitamente en el insert (a diferencia de `updated_at`, que ya iba protegido por trigger). Ahora `inquiries`, `leads`, `campaigns` y `business_units` fuerzan `created_at = now()` mediante un trigger `before insert`, sin depender del valor que llegue del cliente.
+- **Auto-promoción de rol**: la política `profiles_update_admin` permitía a un administrador actualizar cualquier fila de `profiles`, incluida la suya propia. Un trigger (`prevent_self_role_change`) bloquea que un usuario cambie su propio `role` o `is_active`, incluso siendo admin; los cambios sobre el resto de usuarios no se ven afectados.

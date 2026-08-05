@@ -8,6 +8,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { inquiryChannelLabels, inquiryChannelOrder } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, demoInquiries } from "@/lib/demo-data";
+import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -96,7 +97,7 @@ export function InquiryRegister() {
         supabase.auth.getUser(),
       ]);
       if (unitError || inquiryError) {
-        setMessage(unitError?.message || inquiryError?.message || "No se pudieron cargar las consultas.");
+        setMessage(reportSafeError(unitError ?? inquiryError, "No se pudieron cargar las consultas."));
         return;
       }
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
@@ -247,7 +248,7 @@ export function InquiryRegister() {
       setMessage(`Consulta ${channelLabel} registrada correctamente para ${pending.unit.name}.`);
       setPending(null);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "No se pudo registrar la consulta.");
+      setMessage(reportSafeError(cause, "No se pudo registrar la consulta."));
     } finally {
       setBusy(false);
     }

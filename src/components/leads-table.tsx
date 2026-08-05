@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
+import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
@@ -125,7 +126,7 @@ export function LeadsTable() {
       supabase.auth.getUser(),
     ]);
     if (unitError || campaignError || leadError) {
-      setMessage(unitError?.message || campaignError?.message || leadError?.message || "No se pudieron cargar los datos.");
+      setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar los datos."));
       return;
     }
     const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url }));
@@ -230,7 +231,7 @@ export function LeadsTable() {
       }
       setEditorOpen(false);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "No se pudo guardar el lead.");
+      setMessage(reportSafeError(cause, "No se pudo guardar el lead."));
     } finally {
       setBusy(false);
     }
@@ -256,7 +257,7 @@ export function LeadsTable() {
       setMessage(`Estado actualizado a ${leadStatusLabels[pendingStatus.status]}.`);
       setPendingStatus(null);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "No se pudo actualizar el estado.");
+      setMessage(reportSafeError(cause, "No se pudo actualizar el estado."));
     } finally {
       setBusy(false);
     }

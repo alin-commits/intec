@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 export function LoginForm() {
@@ -28,7 +29,7 @@ export function LoginForm() {
       router.replace("/dashboard");
       router.refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se ha podido iniciar sesión.");
+      setError(reportSafeError(cause, "No se ha podido iniciar sesión. Comprueba el email y la contraseña."));
     } finally {
       setBusy(false);
     }

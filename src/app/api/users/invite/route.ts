@@ -35,7 +35,10 @@ export async function POST(request: Request) {
     data: { full_name: fullName },
     redirectTo: `${origin}/login`,
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    console.error("Error al invitar usuario:", error);
+    return NextResponse.json({ error: "No se pudo invitar al usuario. Comprueba que el email no esté ya registrado." }, { status: 400 });
+  }
   if (data.user) {
     await admin.from("profiles").update({ full_name: fullName, email, role, is_active: true }).eq("id", data.user.id);
   }

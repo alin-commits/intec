@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
+import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { AppRole, Profile } from "@/lib/types";
 
@@ -33,6 +34,7 @@ export function UsersManager() {
   const [role, setRole] = useState<AppRole>("commercial");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -42,12 +44,17 @@ export function UsersManager() {
   const activeCount = useMemo(() => profiles.filter((profile) => profile.isActive).length, [profiles]);
 
   async function loadProfiles() {
-    const { data, error } = await createClient().from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name");
+    const supabase = createClient();
+    const [{ data, error }, { data: authData }] = await Promise.all([
+      supabase.from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name"),
+      supabase.auth.getUser(),
+    ]);
     if (error) {
-      setMessage(error.message);
+      setMessage(reportSafeError(error, "No se pudieron cargar los usuarios."));
       return;
     }
     setProfiles((data ?? []).map((row) => mapProfile(row as Record<string, unknown>)));
+    setCurrentUserId(authData.user?.id ?? null);
   }
 
   function persistDemo(next: Profile[]) {
@@ -57,6 +64,10 @@ export function UsersManager() {
 
   async function updateProfile(id: string, patch: Partial<Pick<Profile, "role" | "isActive">>) {
     setMessage(null);
+    if (id === currentUserId) {
+      setMessage("No puedes cambiar tu propio rol o estado de activación.");
+      return;
+    }
     if (!configured) {
       persistDemo(profiles.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
       setMessage("Usuario actualizado en el modo demostración.");
@@ -66,7 +77,7 @@ export function UsersManager() {
     if (patch.role) dbPatch.role = patch.role;
     if (typeof patch.isActive === "boolean") dbPatch.is_active = patch.isActive;
     const { error } = await createClient().from("profiles").update(dbPatch).eq("id", id);
-    if (error) setMessage(error.message);
+    if (error) setMessage(reportSafeError(error, "No se pudo actualizar el usuario."));
     else {
       setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
       setMessage("Usuario actualizado correctamente.");
@@ -104,6 +115,8 @@ export function UsersManager() {
       setEmail("");
       setRole("commercial");
     } catch (cause) {
+      // La ruta /api/users/invite ya devuelve mensajes seguros y en español;
+      // aquí solo cubrimos errores de red inesperados.
       setMessage(cause instanceof Error ? cause.message : "No se pudo crear el usuario.");
     } finally {
       setBusy(false);
