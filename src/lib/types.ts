@@ -1,4 +1,4 @@
-export type InquiryType = "web" | "phone";
+export type InquiryType = "phone" | "chat" | "email_form" | "whatsapp" | "portal_rrss";
 export type AppRole = "admin" | "commercial" | "viewer";
 export type LeadStatus =
   | "new"

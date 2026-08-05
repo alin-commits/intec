@@ -12,7 +12,7 @@ Representa marcas internas: Intec, BlizzCool, Sumifluid, Jender, CST Ibérica y 
 
 ### inquiries
 
-Cada fila es una consulta individual. El canal se limita a `web` o `phone`. `created_at` y `created_by` se asignan automáticamente.
+Cada fila es una consulta individual. El canal (`inquiry_type`) es uno de `phone`, `chat`, `email_form`, `whatsapp` o `portal_rrss`. El valor histórico `web` sigue existiendo en el enum por compatibilidad pero ya no se escribe: el desglose "web" del dashboard general se calcula como chat + email_form + whatsapp + portal_rrss. `created_at` y `created_by` se asignan automáticamente.
 
 ### campaigns
 

@@ -1,16 +1,25 @@
 # Definiciones estadísticas
 
-## Consultas web
+## Consultas por canal
 
-Número de filas de `inquiries` cuyo `inquiry_type` es `web` dentro del periodo y filtro de unidad seleccionado.
+Número de filas de `inquiries` cuyo `inquiry_type` coincide con el canal, dentro del periodo y filtro de unidad seleccionado. Los 5 canales activos son `phone` (Teléfono), `chat` (Chat), `email_form` (Email/Formulario), `whatsapp` (Whatsapp) y `portal_rrss` (Portales/RRSS).
 
-## Consultas telefónicas
+## Consultas web (resumen)
 
-Número de filas cuyo `inquiry_type` es `phone`.
+En las vistas que solo distinguen web/teléfono (p. ej. el dashboard general), "web" es la suma de `chat` + `email_form` + `whatsapp` + `portal_rrss`, y "telefónicas" es `phone`.
 
 ## Consultas totales
 
-Consultas web + consultas telefónicas.
+Suma de las consultas de los 5 canales.
+
+## Semana comercial
+
+Agrupación semanal usada en `/consultas`, alineada con el criterio manual del control histórico en Excel: ninguna semana cruza el límite de un mes.
+
+- Los días anteriores al primer lunes del mes se unen siempre a la primera semana completa (lunes-domingo) de ese mes.
+- Los días posteriores al último domingo completo del mes forman su propia semana solo si son 5 o más; si son entre 1 y 4, se suman a la última semana completa anterior.
+
+Implementado en `monthWeekBuckets` (`src/lib/dates.ts`).
 
 ## Lead creado
 

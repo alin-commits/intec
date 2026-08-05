@@ -105,8 +105,12 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .channel-counters { margin: 20px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .channel-counters div { padding: 12px; border-radius: 10px; background: var(--surface-muted); display: flex; align-items: center; justify-content: space-between; }
 .channel-counters span { color: var(--muted); font-size: 12px; }.channel-counters strong { font-size: 20px; }
-.inquiry-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.button-web { background: #dbeafe; color: #1d4ed8; }.button-phone { background: #cffafe; color: #0e7490; }
+.inquiry-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.button-channel-phone, .badge-channel-phone { background: #cffafe; color: #0e7490; }
+.button-channel-chat, .badge-channel-chat { background: #ede9fe; color: #6d28d9; }
+.button-channel-email_form, .badge-channel-email_form { background: #dbeafe; color: #1d4ed8; }
+.button-channel-whatsapp, .badge-channel-whatsapp { background: #dcfce7; color: #15803d; }
+.button-channel-portal_rrss, .badge-channel-portal_rrss { background: #ffedd5; color: #c2410c; }
 .lead-filters { grid-template-columns: 2fr 1fr 1fr .7fr; }
 .units-grid { display: grid; grid-template-columns: repeat(3, minmax(230px, 1fr)); gap: 18px; }
 .unit-summary { padding: 20px; }
@@ -193,6 +197,11 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .sort-button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
 .sort-button:hover { color: var(--primary); }
 .recent-inquiries table { min-width: 600px; }
+.channel-table-footer-row td { border-top: 2px solid var(--border); border-bottom: 0; background: var(--surface-muted); }
+.annual-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.annual-summary div { padding: 16px; border-radius: 12px; background: var(--surface-muted); text-align: center; }
+.annual-summary span { color: var(--muted); font-size: 12px; }
+.annual-summary strong { display: block; margin-top: 8px; font-size: 22px; }
 
 @media (max-width: 980px) {
   .inline-form { grid-template-columns: 1fr 1fr; }

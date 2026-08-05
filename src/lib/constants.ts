@@ -1,4 +1,4 @@
-import type { AppRole, LeadStatus } from "@/lib/types";
+import type { AppRole, InquiryType, LeadStatus } from "@/lib/types";
 
 export const leadStatusLabels: Record<LeadStatus, string> = {
   new: "Nuevo",
@@ -26,3 +26,13 @@ export const leadTypeLabels = {
 } as const;
 
 export type LeadTypeValue = keyof typeof leadTypeLabels;
+
+export const inquiryChannelOrder: InquiryType[] = ["phone", "chat", "email_form", "whatsapp", "portal_rrss"];
+
+export const inquiryChannelLabels: Record<InquiryType, string> = {
+  phone: "Teléfono",
+  chat: "Chat",
+  email_form: "Email/Formulario",
+  whatsapp: "Whatsapp",
+  portal_rrss: "Portales/RRSS",
+};

@@ -1,4 +1,4 @@
-import type { BusinessUnit, InquiryRecord, Lead, MonthlyStat, Profile } from "@/lib/types";
+import type { BusinessUnit, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile } from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
   { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true },
@@ -49,7 +49,7 @@ export const monthlyStats: MonthlyStat[] = businessUnits.flatMap((unit, unitInde
 function distributeRecords(
   records: InquiryRecord[],
   unitId: string,
-  type: "web" | "phone",
+  type: InquiryType,
   month: string,
   total: number,
 ) {
@@ -70,13 +70,30 @@ function distributeRecords(
   }
 }
 
+// Proportions of the legacy "web" total across the 5 real channels, roughly
+// matching the historical spreadsheet (email/whatsapp dominate; chat and
+// portals are kept residual so those columns aren't empty in demo mode).
+const webChannelWeights: { type: InquiryType; weight: number }[] = [
+  { type: "email_form", weight: 0.55 },
+  { type: "whatsapp", weight: 0.35 },
+  { type: "chat", weight: 0.06 },
+  { type: "portal_rrss", weight: 0.04 },
+];
+
 export const demoInquiries: InquiryRecord[] = (() => {
   const records: InquiryRecord[] = [];
   for (const row of monthlyStats) {
     const key = monthKeys[row.month];
     if (!key) continue;
     const factor = key === "2026-08" ? 0.2 : 1;
-    distributeRecords(records, row.businessUnitId, "web", key, Math.max(1, Math.round(row.web * factor)));
+    const webTotal = Math.max(1, Math.round(row.web * factor));
+    let assigned = 0;
+    webChannelWeights.forEach(({ type, weight }, index) => {
+      const isLast = index === webChannelWeights.length - 1;
+      const count = isLast ? webTotal - assigned : Math.round(webTotal * weight);
+      assigned += count;
+      if (count > 0) distributeRecords(records, row.businessUnitId, type, key, count);
+    });
     distributeRecords(records, row.businessUnitId, "phone", key, Math.max(1, Math.round(row.phone * factor)));
   }
   return records;
