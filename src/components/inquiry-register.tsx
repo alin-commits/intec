@@ -227,8 +227,9 @@ export function InquiryRegister() {
             </div>
             <div className="inquiry-actions inquiry-actions-spaced">
               {inquiryChannelOrder.map((channel) => (
-                <button key={channel} type="button" onClick={() => setPending({ unit, type: channel })} className={`button button-channel-${channel}`}>
-                  + {inquiryChannelLabels[channel]}
+                <button key={channel} type="button" onClick={() => setPending({ unit, type: channel })} className="channel-action">
+                  <span className="channel-action-label"><i className={`channel-dot channel-dot-${channel}`} /><span>{inquiryChannelLabels[channel]}</span></span>
+                  <span className="channel-action-plus">+</span>
                 </button>
               ))}
             </div>
