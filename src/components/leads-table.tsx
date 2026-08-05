@@ -41,6 +41,10 @@ function nestedName(value: unknown): string {
   return "";
 }
 
+function isLeadTypeValue(value: unknown): value is LeadTypeValue {
+  return typeof value === "string" && value in leadTypeLabels;
+}
+
 function mapLeadRow(row: Record<string, unknown>): Lead {
   const historyValue = Array.isArray(row.lead_status_history) ? row.lead_status_history : [];
   return {
@@ -57,7 +61,7 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
     location: String(row.location ?? ""),
     productInterest: String(row.product_interest ?? ""),
     status: row.status as LeadStatus,
-    type: row.lead_type && row.lead_type in leadTypeLabels ? leadTypeLabels[row.lead_type as LeadTypeValue] : "Otro",
+    type: isLeadTypeValue(row.lead_type) ? leadTypeLabels[row.lead_type] : "Otro",
     source: String(row.source ?? ""),
     notes: String(row.notes ?? ""),
     saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
@@ -78,9 +82,15 @@ function typeValueFromLabel(label: string): LeadTypeValue {
   return (entry?.[0] as LeadTypeValue | undefined) ?? "other";
 }
 
+function initialDemoLeads(configured: boolean): Lead[] {
+  if (configured || typeof window === "undefined") return demoLeads;
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  return saved ? (JSON.parse(saved) as Lead[]) : demoLeads;
+}
+
 export function LeadsTable() {
   const configured = isSupabaseConfigured();
-  const [rows, setRows] = useState<Lead[]>(demoLeads);
+  const [rows, setRows] = useState<Lead[]>(() => initialDemoLeads(configured));
   const [units, setUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
   const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>(demoCampaigns.map((campaign) => ({ id: campaign.id, name: campaign.name, businessUnitId: campaign.businessUnitId })));
   const [query, setQuery] = useState("");
@@ -95,11 +105,7 @@ export function LeadsTable() {
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
 
   useEffect(() => {
-    if (!configured) {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setRows(JSON.parse(saved) as Lead[]);
-      return;
-    }
+    if (!configured) return;
     void loadRealData();
   }, [configured]);
 

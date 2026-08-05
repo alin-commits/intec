@@ -19,9 +19,15 @@ function mapProfile(row: Record<string, unknown>): Profile {
   };
 }
 
+function initialDemoProfiles(configured: boolean): Profile[] {
+  if (configured || typeof window === "undefined") return demoProfiles;
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  return saved ? (JSON.parse(saved) as Profile[]) : demoProfiles;
+}
+
 export function UsersManager() {
   const configured = isSupabaseConfigured();
-  const [profiles, setProfiles] = useState<Profile[]>(demoProfiles);
+  const [profiles, setProfiles] = useState<Profile[]>(() => initialDemoProfiles(configured));
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AppRole>("commercial");
@@ -29,11 +35,7 @@ export function UsersManager() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!configured) {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setProfiles(JSON.parse(saved) as Profile[]);
-      return;
-    }
+    if (!configured) return;
     void loadProfiles();
   }, [configured]);
 

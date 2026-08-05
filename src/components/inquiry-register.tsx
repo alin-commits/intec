@@ -44,27 +44,27 @@ export function InquiryRegister() {
 
   useEffect(() => {
     if (!configured) return;
-    void loadRealData();
-  }, [configured, selectedMonth]);
-
-  async function loadRealData() {
-    const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: authData }] = await Promise.all([
-      supabase.from("business_units").select("id, name, slug, brand_color, is_active").eq("is_active", true).order("name"),
-      supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at").gte("created_at", range.previousStart).lt("created_at", range.end).order("created_at", { ascending: false }),
-      supabase.auth.getUser(),
-    ]);
-    if (unitError || inquiryError) {
-      setMessage(unitError?.message || inquiryError?.message || "No se pudieron cargar las consultas.");
-      return;
-    }
-    setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active })));
-    setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
-    if (authData.user) {
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      setCanRegister(profile?.role !== "viewer");
-    }
-  }
+    const previousStart = range.previousStart;
+    const end = range.end;
+    void (async () => {
+      const supabase = createClient();
+      const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: authData }] = await Promise.all([
+        supabase.from("business_units").select("id, name, slug, brand_color, is_active").eq("is_active", true).order("name"),
+        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at").gte("created_at", previousStart).lt("created_at", end).order("created_at", { ascending: false }),
+        supabase.auth.getUser(),
+      ]);
+      if (unitError || inquiryError) {
+        setMessage(unitError?.message || inquiryError?.message || "No se pudieron cargar las consultas.");
+        return;
+      }
+      setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active })));
+      setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
+      if (authData.user) {
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
+        setCanRegister(profile?.role !== "viewer");
+      }
+    })();
+  }, [configured, range.end, range.previousStart]);
 
   const currentRecords = useMemo(() => records.filter((record) => inRange(record, range.start, range.end)), [range.end, range.start, records]);
   const previousRecords = useMemo(() => records.filter((record) => inRange(record, range.previousStart, range.start)), [range.previousStart, range.start, records]);
