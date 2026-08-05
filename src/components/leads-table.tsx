@@ -131,6 +131,7 @@ export function LeadsTable() {
     }
     const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url }));
     setUnits(mappedUnits);
+    setUnitId((current) => (current === "all" || mappedUnits.some((unit) => unit.id === current)) ? current : (mappedUnits[0]?.id ?? "all"));
     setCampaignOptions((campaignData ?? []).map((row) => ({ id: row.id, name: row.name, businessUnitId: row.business_unit_id })));
     setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>)));
     const user = authData.user;
