@@ -35,26 +35,37 @@ export function UsersManager() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   useEffect(() => {
     if (!configured) return;
-    void loadProfiles();
+    const supabase = createClient();
+    supabase.auth.getUser().then(async ({ data: authData }) => {
+      if (!authData.user) {
+        setAccess("denied");
+        return;
+      }
+      setCurrentUserId(authData.user.id);
+      const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
+      if (ownProfile?.role !== "admin") {
+        setAccess("denied");
+        return;
+      }
+      setAccess("allowed");
+      await loadProfiles();
+    });
   }, [configured]);
 
   const activeCount = useMemo(() => profiles.filter((profile) => profile.isActive).length, [profiles]);
 
   async function loadProfiles() {
     const supabase = createClient();
-    const [{ data, error }, { data: authData }] = await Promise.all([
-      supabase.from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name"),
-      supabase.auth.getUser(),
-    ]);
+    const { data, error } = await supabase.from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name");
     if (error) {
       setMessage(reportSafeError(error, "No se pudieron cargar los usuarios."));
       return;
     }
     setProfiles((data ?? []).map((row) => mapProfile(row as Record<string, unknown>)));
-    setCurrentUserId(authData.user?.id ?? null);
   }
 
   function persistDemo(next: Profile[]) {
@@ -121,6 +132,21 @@ export function UsersManager() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (access === "checking") {
+    return <div className="page-stack" />;
+  }
+
+  if (access === "denied") {
+    return (
+      <div className="page-stack">
+        <section className="panel">
+          <h2>No tienes permiso para ver esta página</h2>
+          <p>La gestión de usuarios está reservada a administradores.</p>
+        </section>
+      </div>
+    );
   }
 
   return (
