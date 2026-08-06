@@ -207,6 +207,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div><span className="eyebrow">Panel interno</span><h1>{title}</h1></div>
           <div className="topbar-actions">
             {!configured ? <span className="demo-badge">Modo demostración</span> : <span className="live-badge">Datos conectados</span>}
+            {navRole === "admin" || navRole === "commercial" ? <Link href="/consultas?openSale=1" className="button button-secondary">Registrar venta</Link> : null}
             <Link href="/consultas" className="button button-primary">Registrar consulta</Link>
           </div>
         </header>

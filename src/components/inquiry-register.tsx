@@ -107,6 +107,11 @@ export function InquiryRegister() {
   const [weeklyUnitId, setWeeklyUnitId] = useState("");
   const [weeklyDate, setWeeklyDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [weeklyDraft, setWeeklyDraft] = useState(() => blankWeeklyDraft());
+  const [editingSale, setEditingSale] = useState<SalesEntry | null>(null);
+  const [saleEditDraft, setSaleEditDraft] = useState<{ businessUnitId: string; saleType: SaleType; value: string; count: string }>({ businessUnitId: "", saleType: "pedido", value: "", count: "1" });
+  const [inquiriesExpanded, setInquiriesExpanded] = useState(false);
+  const [salesExpanded, setSalesExpanded] = useState(false);
+  const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
@@ -157,6 +162,27 @@ export function InquiryRegister() {
       }
     })();
   }, [configured, selectedMonthYear, selectedYear]);
+
+  if (!saleUrlChecked && access === "allowed" && typeof window !== "undefined") {
+    setSaleUrlChecked(true);
+    if (new URLSearchParams(window.location.search).get("openSale") === "1") {
+      const defaultUnitId = registrationUnitId ?? units[0]?.id ?? "";
+      setSaleChooserMode("menu");
+      setQuickSaleUnitId(defaultUnitId);
+      setQuickSaleInquiryId("");
+      setQuickSaleType("pedido");
+      setQuickSaleValue("");
+      setWeeklyUnitId(defaultUnitId);
+      setWeeklyDate(new Date().toISOString().slice(0, 10));
+      setWeeklyDraft(blankWeeklyDraft());
+      setSaleChooserOpen(true);
+    }
+  }
+
+  useEffect(() => {
+    if (!saleUrlChecked || typeof window === "undefined") return;
+    if (window.location.search.includes("openSale")) window.history.replaceState(null, "", "/consultas");
+  }, [saleUrlChecked]);
 
   const currentRecords = useMemo(() => records.filter((record) => inRange(record, currentPeriod.start, currentPeriod.end)), [currentPeriod.end, currentPeriod.start, records]);
   const previousRecords = useMemo(() => previousPeriod ? records.filter((record) => inRange(record, previousPeriod.start, previousPeriod.end)) : [], [previousPeriod, records]);
@@ -286,7 +312,9 @@ export function InquiryRegister() {
     return base;
   }, [filteredSales]);
 
-  const recentSales = useMemo(() => filteredSales.slice().sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt)).slice(0, 12), [filteredSales]);
+  const recentSales = useMemo(() => filteredSales.slice().sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt)).slice(0, 30), [filteredSales]);
+
+  const recentInquiries = useMemo(() => filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30), [filtered]);
 
   const salesByInquiry = useMemo(() => {
     const map = new Map<string, SalesEntry[]>();
@@ -482,6 +510,52 @@ export function InquiryRegister() {
       setMessage("Venta añadida a la consulta.");
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo añadir la venta."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openEditSale(entry: SalesEntry) {
+    setEditingSale(entry);
+    setSaleEditDraft({ businessUnitId: entry.businessUnitId, saleType: entry.saleType, value: String(entry.value), count: String(entry.count) });
+    setMessage(null);
+  }
+
+  async function saveEditSale() {
+    if (!editingSale) return;
+    const trimmedValue = saleEditDraft.value.trim();
+    const value = Number(trimmedValue);
+    if (trimmedValue === "" || Number.isNaN(value) || value < 0) {
+      setMessage("El valor de la venta no es válido.");
+      return;
+    }
+    let count = 1;
+    if (editingSale.entryMode === "weekly") {
+      const trimmedCount = saleEditDraft.count.trim();
+      count = Number(trimmedCount);
+      if (trimmedCount === "" || Number.isNaN(count) || count < 1 || !Number.isInteger(count)) {
+        setMessage("La cantidad debe ser un número entero mayor que 0.");
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      if (configured) {
+        const { error } = await createClient().from("sales_entries").update({
+          business_unit_id: saleEditDraft.businessUnitId,
+          sale_type: saleEditDraft.saleType,
+          value,
+          count,
+        }).eq("id", editingSale.id);
+        if (error) throw error;
+      }
+      setSalesEntries((current) => current.map((entry) => entry.id === editingSale.id
+        ? { ...entry, businessUnitId: saleEditDraft.businessUnitId, saleType: saleEditDraft.saleType, value, count }
+        : entry));
+      setMessage("Venta actualizada.");
+      setEditingSale(null);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo actualizar la venta."));
     } finally {
       setBusy(false);
     }
@@ -830,7 +904,7 @@ export function InquiryRegister() {
 
       <section className="panel table-panel recent-inquiries">
         <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Corrige un error editando el registro (unidad, canal o ventas asociadas), o elimínalo si no debía existir</span></div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Ventas</th><th></th></tr></thead><tbody>{filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12).map((record) => {
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Ventas</th><th></th></tr></thead><tbody>{recentInquiries.slice(0, inquiriesExpanded ? recentInquiries.length : 5).map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
           const recordSales = salesByInquiry.get(record.id) ?? [];
           const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
@@ -847,11 +921,18 @@ export function InquiryRegister() {
             </tr>
           );
         })}</tbody></table></div>
+        {recentInquiries.length > 5 ? (
+          <div className="table-panel-footer">
+            <button type="button" className="button button-secondary button-compact" onClick={() => setInquiriesExpanded((current) => !current)}>
+              {inquiriesExpanded ? "Mostrar menos" : `Mostrar más (${recentInquiries.length - 5} más)`}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div><span className="muted">Incluye ventas por consulta y bloques semanales</span></div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.map((entry) => {
+        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div><span className="muted">Incluye ventas por consulta y bloques semanales. Corrige un error editando la venta, o elimínala si no debía existir</span></div>
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.slice(0, salesExpanded ? recentSales.length : 5).map((entry) => {
           const unit = units.find((item) => item.id === entry.businessUnitId);
           return (
             <tr key={entry.id}>
@@ -862,6 +943,7 @@ export function InquiryRegister() {
               <td>{numberFormatter.format(entry.count)}</td>
               <td>{currencyFormatter.format(entry.value)}</td>
               <td className="recent-inquiries-actions">
+                {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditSale(entry)}>Editar</button> : null}
                 {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
               </td>
             </tr>
@@ -869,6 +951,13 @@ export function InquiryRegister() {
         })}
         {recentSales.length === 0 ? <tr><td colSpan={7} className="muted">Sin ventas registradas en este periodo.</td></tr> : null}
         </tbody></table></div>
+        {recentSales.length > 5 ? (
+          <div className="table-panel-footer">
+            <button type="button" className="button button-secondary button-compact" onClick={() => setSalesExpanded((current) => !current)}>
+              {salesExpanded ? "Mostrar menos" : `Mostrar más (${recentSales.length - 5} más)`}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <ConfirmationDialog
@@ -968,6 +1057,34 @@ export function InquiryRegister() {
       >
         {pendingDeleteSale ? <div className="confirmation-summary"><span>Tipo</span><strong>{saleTypeLabels[pendingDeleteSale.saleType]}</strong><span>Valor</span><strong>{currencyFormatter.format(pendingDeleteSale.value)}</strong></div> : null}
       </ConfirmationDialog>
+
+      <Modal open={Boolean(editingSale)} title="Editar venta" eyebrow="Corregir registro" onClose={() => setEditingSale(null)}>
+        <div className="form-grid">
+          <label><span>Unidad de negocio</span>
+            <select value={saleEditDraft.businessUnitId} onChange={(event) => setSaleEditDraft((current) => ({ ...current, businessUnitId: event.target.value }))}>
+              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </label>
+          <label><span>Tipo de venta</span>
+            <select value={saleEditDraft.saleType} onChange={(event) => setSaleEditDraft((current) => ({ ...current, saleType: event.target.value as SaleType }))}>
+              {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
+            </select>
+          </label>
+          <label><span>Valor (€)</span>
+            <input type="number" min="0" step="0.01" value={saleEditDraft.value} onChange={(event) => setSaleEditDraft((current) => ({ ...current, value: event.target.value }))} />
+          </label>
+          {editingSale?.entryMode === "weekly" ? (
+            <label><span>Cantidad</span>
+              <input type="number" min="1" step="1" value={saleEditDraft.count} onChange={(event) => setSaleEditDraft((current) => ({ ...current, count: event.target.value }))} />
+            </label>
+          ) : null}
+        </div>
+        {editingSale?.entryMode === "inquiry" ? <p className="muted">Esta venta está vinculada a una consulta concreta, por eso la cantidad es siempre 1.</p> : null}
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={() => setEditingSale(null)}>Cerrar</button>
+          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveEditSale()}>{busy ? "Guardando…" : "Guardar cambios"}</button>
+        </div>
+      </Modal>
 
       <Modal
         open={saleChooserOpen}
