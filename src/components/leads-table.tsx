@@ -7,6 +7,7 @@ import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
@@ -302,11 +303,17 @@ export function LeadsTable() {
       </section>
 
       {message ? <div className="form-message" role="status">{message}</div> : null}
-      <section className="panel filter-bar lead-filters">
-        <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
-        <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <div className="filter-summary"><span>Resultados</span><strong>{visibleRows.length} leads</strong></div>
-      </section>
+      <CollapsibleFilters
+        hasActiveFilters={query !== "" || status !== "all"}
+        onClear={() => { setQuery(""); setStatus("all"); }}
+        resultCount={visibleRows.length}
+        resultLabel="Leads"
+      >
+        <div className="filter-bar lead-filters">
+          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
+          <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        </div>
+      </CollapsibleFilters>
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>

@@ -8,6 +8,7 @@ import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format"
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { KpiCard } from "@/components/kpi-card";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { StatusBars } from "@/components/charts/status-bars";
 import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus, MonthlyStat } from "@/lib/types";
@@ -215,48 +216,53 @@ export function DashboardClient() {
   return (
     <div className="page-stack">
       {message ? <div className="form-message" role="status">{message}</div> : null}
-      <section className="filter-bar panel">
-        <label>
-          <span>Unidad de negocio</span>
-          <select value={businessUnitId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setBusinessUnitId(event.target.value)}>
-            <option value="all">Todas las unidades</option>
-            {businessUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>Vista</span>
-          <select value={viewMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setViewMode(event.target.value as ViewMode)}>
-            <option value="month">Mensual</option>
-            <option value="year">Anual</option>
-          </select>
-        </label>
-        {viewMode === "month" ? (
+      <CollapsibleFilters
+        hasActiveFilters={businessUnitId !== "all" || viewMode !== "month" || compareMode !== "previous"}
+        onClear={() => { setBusinessUnitId("all"); setViewMode("month"); setSelectedMonth(currentMonthKey); setCompareMode("previous"); }}
+      >
+        <div className="filter-bar">
           <label>
-            <span>Mes</span>
-            <input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event: ChangeEvent<HTMLInputElement>) => setSelectedMonth(event.target.value)} />
-          </label>
-        ) : (
-          <label>
-            <span>Año</span>
-            <select value={selectedYear} onChange={(event: ChangeEvent<HTMLSelectElement>) => setSelectedYear(Number(event.target.value))}>
-              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            <span>Unidad de negocio</span>
+            <select value={businessUnitId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setBusinessUnitId(event.target.value)}>
+              <option value="all">Todas las unidades</option>
+              {businessUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select>
           </label>
-        )}
-        {viewMode === "month" ? (
           <label>
-            <span>Comparar con</span>
-            <select value={compareMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setCompareMode(event.target.value as CompareMode)}>
-              <option value="previous">Mes anterior</option>
-              <option value="current">Mes actual</option>
-              <option value="previous_year">Mismo mes del año anterior</option>
-              <option value="none">Sin comparación</option>
+            <span>Vista</span>
+            <select value={viewMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setViewMode(event.target.value as ViewMode)}>
+              <option value="month">Mensual</option>
+              <option value="year">Anual</option>
             </select>
           </label>
-        ) : (
-          <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
-        )}
-      </section>
+          {viewMode === "month" ? (
+            <label>
+              <span>Mes</span>
+              <input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event: ChangeEvent<HTMLInputElement>) => setSelectedMonth(event.target.value)} />
+            </label>
+          ) : (
+            <label>
+              <span>Año</span>
+              <select value={selectedYear} onChange={(event: ChangeEvent<HTMLSelectElement>) => setSelectedYear(Number(event.target.value))}>
+                {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </label>
+          )}
+          {viewMode === "month" ? (
+            <label>
+              <span>Comparar con</span>
+              <select value={compareMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setCompareMode(event.target.value as CompareMode)}>
+                <option value="previous">Mes anterior</option>
+                <option value="current">Mes actual</option>
+                <option value="previous_year">Mismo mes del año anterior</option>
+                <option value="none">Sin comparación</option>
+              </select>
+            </label>
+          ) : (
+            <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
+          )}
+        </div>
+      </CollapsibleFilters>
 
       <section className="kpi-grid">
         <KpiCard label="Consultas web" value={numberFormatter.format(current.web)} helper={comparisonHelper} {...deltaProps(webDelta)} />

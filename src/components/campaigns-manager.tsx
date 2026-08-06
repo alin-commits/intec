@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { CAMPAIGNS_ROLES, campaignStatusLabels } from "@/lib/constants";
@@ -257,18 +258,24 @@ export function CampaignsManager() {
 
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
-      <section className="panel filter-bar lead-filters">
-        <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre de campaña" /></label>
-        <label><span>Unidad</span><select value={unitId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setUnitId(event.target.value)}>
-          <option value="all">Todas</option>
-          {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}{unit.active ? "" : " (inactiva)"}</option>)}
-        </select></label>
-        <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}>
-          <option value="all">Todos</option>
-          {Object.entries(campaignStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select></label>
-        <div className="filter-summary"><span>Resultados</span><strong>{visibleCampaigns.length} campañas</strong></div>
-      </section>
+      <CollapsibleFilters
+        hasActiveFilters={query !== "" || unitId !== "all" || status !== "all"}
+        onClear={() => { setQuery(""); setUnitId("all"); setStatus("all"); }}
+        resultCount={visibleCampaigns.length}
+        resultLabel="Campañas"
+      >
+        <div className="filter-bar lead-filters">
+          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre de campaña" /></label>
+          <label><span>Unidad</span><select value={unitId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setUnitId(event.target.value)}>
+            <option value="all">Todas</option>
+            {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}{unit.active ? "" : " (inactiva)"}</option>)}
+          </select></label>
+          <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}>
+            <option value="all">Todos</option>
+            {Object.entries(campaignStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select></label>
+        </div>
+      </CollapsibleFilters>
 
       <section className="campaigns-grid">
         {visibleCampaigns.map((campaign) => {

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { KpiCard } from "@/components/kpi-card";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
@@ -394,55 +395,67 @@ export function InquiryRegister() {
         <div><span className="eyebrow">Estadísticas de consultas</span><h2>Dashboard de consultas</h2><p>Elige vista mensual o anual, filtra por unidad y canal. Las tablas se pueden ordenar pulsando sus encabezados.</p></div>
       </section>
 
-      <section className="panel filter-bar">
-        <label>
-          <span>Unidad de negocio</span>
-          <select value={selectedUnit} onChange={(event) => setSelectedUnit(event.target.value)}>
-            <option value="all">Todas las unidades</option>
-            {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>Vista</span>
-          <select value={viewMode} onChange={(event) => setViewMode(event.target.value as ViewMode)}>
-            <option value="month">Mensual</option>
-            <option value="year">Anual</option>
-          </select>
-        </label>
-        {viewMode === "month" ? (
-          <label><span>Mes</span><input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event) => setSelectedMonth(event.target.value)} /></label>
-        ) : (
+      <CollapsibleFilters
+        hasActiveFilters={selectedUnit !== "all" || viewMode !== "month" || compareMode !== "previous" || selectedType !== "all" || sortColumn !== "total" || sortDirection !== "desc"}
+        onClear={() => {
+          setSelectedUnit("all");
+          setViewMode("month");
+          setSelectedMonth(currentMonthKey);
+          setCompareMode("previous");
+          setSelectedType("all");
+          setSortColumn("total");
+          setSortDirection("desc");
+        }}
+      >
+        <div className="filter-bar">
           <label>
-            <span>Año</span>
-            <input type="number" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value) || selectedYear)} />
-          </label>
-        )}
-        {viewMode === "month" ? (
-          <label>
-            <span>Comparar con</span>
-            <select value={compareMode} onChange={(event) => setCompareMode(event.target.value as CompareMode)}>
-              <option value="previous">Mes anterior</option>
-              <option value="current">Mes actual</option>
-              <option value="previous_year">Mismo mes del año anterior</option>
-              <option value="none">Sin comparación</option>
+            <span>Unidad de negocio</span>
+            <select value={selectedUnit} onChange={(event) => setSelectedUnit(event.target.value)}>
+              <option value="all">Todas las unidades</option>
+              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select>
           </label>
-        ) : (
-          <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
-        )}
-      </section>
-
-      <section className="panel filter-bar inquiry-filters">
-        <label><span>Canal</span><select value={selectedType} onChange={(event) => setSelectedType(event.target.value as "all" | InquiryType)}>
-          <option value="all">Todos los canales</option>
-          {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
-        </select></label>
-        <label><span>Orden inicial</span><select value={`${sortColumn}-${sortDirection}`} onChange={(event) => { const [column, direction] = event.target.value.split("-") as [ChannelTableColumn, "asc" | "desc"]; setSortColumn(column); setSortDirection(direction); }}>
-          <option value="total-desc">Mayor total</option>
-          <option value="trailing-desc">Mayor crecimiento</option>
-          <option value="label-asc">Nombre A–Z</option>
-        </select></label>
-      </section>
+          <label>
+            <span>Vista</span>
+            <select value={viewMode} onChange={(event) => setViewMode(event.target.value as ViewMode)}>
+              <option value="month">Mensual</option>
+              <option value="year">Anual</option>
+            </select>
+          </label>
+          {viewMode === "month" ? (
+            <label><span>Mes</span><input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event) => setSelectedMonth(event.target.value)} /></label>
+          ) : (
+            <label>
+              <span>Año</span>
+              <input type="number" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value) || selectedYear)} />
+            </label>
+          )}
+          {viewMode === "month" ? (
+            <label>
+              <span>Comparar con</span>
+              <select value={compareMode} onChange={(event) => setCompareMode(event.target.value as CompareMode)}>
+                <option value="previous">Mes anterior</option>
+                <option value="current">Mes actual</option>
+                <option value="previous_year">Mismo mes del año anterior</option>
+                <option value="none">Sin comparación</option>
+              </select>
+            </label>
+          ) : (
+            <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
+          )}
+        </div>
+        <div className="filter-bar inquiry-filters">
+          <label><span>Canal</span><select value={selectedType} onChange={(event) => setSelectedType(event.target.value as "all" | InquiryType)}>
+            <option value="all">Todos los canales</option>
+            {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
+          </select></label>
+          <label><span>Orden inicial</span><select value={`${sortColumn}-${sortDirection}`} onChange={(event) => { const [column, direction] = event.target.value.split("-") as [ChannelTableColumn, "asc" | "desc"]; setSortColumn(column); setSortDirection(direction); }}>
+            <option value="total-desc">Mayor total</option>
+            <option value="trailing-desc">Mayor crecimiento</option>
+            <option value="label-asc">Nombre A–Z</option>
+          </select></label>
+        </div>
+      </CollapsibleFilters>
 
       <section className="kpi-grid inquiry-kpi-grid">
         <KpiCard label="Consultas totales" value={numberFormatter.format(total)} delta={variation === null ? "Sin comparación" : formatPercent(Math.abs(variation))} positive={variation === null || variation >= 0} helper={comparisonHelper} />
