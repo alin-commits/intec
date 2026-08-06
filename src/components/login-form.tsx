@@ -44,6 +44,7 @@ export function LoginForm() {
         <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Accediendo…" : "Iniciar sesión"}</button>
         {!configured ? <Link href="/dashboard" className="button button-secondary">Entrar en la demo</Link> : null}
       </div>
+      {configured ? <Link href="/forgot-password" className="login-forgot">¿Olvidaste tu contraseña?</Link> : null}
     </form>
   );
 }

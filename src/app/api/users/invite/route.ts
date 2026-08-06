@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { isEmailConfigured, sendEmail } from "@/lib/email";
+import { buildInviteEmail } from "@/lib/email-templates";
 import type { AppRole } from "@/lib/types";
 
 const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer"]);
@@ -31,6 +33,28 @@ export async function POST(request: Request) {
   }
 
   const origin = new URL(request.url).origin;
+
+  if (isEmailConfigured()) {
+    const { data, error } = await admin.auth.admin.generateLink({
+      type: "invite",
+      email,
+      options: { data: { full_name: fullName }, redirectTo: `${origin}/login` },
+    });
+    if (error) {
+      console.error("Error al invitar usuario:", error);
+      return NextResponse.json({ error: "No se pudo invitar al usuario. Comprueba que el email no esté ya registrado." }, { status: 400 });
+    }
+    if (data.user) {
+      await admin.from("profiles").update({ full_name: fullName, email, role, is_active: true }).eq("id", data.user.id);
+    }
+    const actionLink = data.properties?.action_link;
+    if (actionLink) {
+      const sent = await sendEmail({ to: email, ...buildInviteEmail(fullName, actionLink) });
+      if (!sent) console.error("No se pudo enviar el email de invitación vía Resend a", email);
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
     data: { full_name: fullName },
     redirectTo: `${origin}/login`,
