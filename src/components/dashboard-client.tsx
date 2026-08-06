@@ -1,17 +1,22 @@
 "use client";
 
-import { useMemo, useState, type ChangeEvent } from "react";
-import { businessUnits as allBusinessUnits, campaigns, demoLeads, monthlyStats } from "@/lib/demo-data";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
 import { campaignStatusLabels } from "@/lib/constants";
-import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth } from "@/lib/dates";
+import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
+import { reportSafeError } from "@/lib/errors";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { StatusBars } from "@/components/charts/status-bars";
-import type { MonthlyStat } from "@/lib/types";
+import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus, MonthlyStat } from "@/lib/types";
 
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
+type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus };
+type CampaignLeadStub = { campaignId: string | null; status: LeadStatus; saleValue: number | null };
+type StatusCounts = Partial<Record<LeadStatus, number>>;
 
 type Totals = { web: number; phone: number; leads: number; won: number; saleValue: number };
 
@@ -33,8 +38,6 @@ function deltaProps(value: number | null) {
   return value === null ? { delta: "Sin comparación", positive: true } : { delta: formatPercent(Math.abs(value)), positive: value >= 0 };
 }
 
-const businessUnits = allBusinessUnits.filter((unit) => unit.active);
-
 const compareModeHelpers: Record<CompareMode, string> = {
   previous: "frente al mes anterior",
   current: "frente al mes actual",
@@ -42,19 +45,122 @@ const compareModeHelpers: Record<CompareMode, string> = {
   none: "sin periodo de comparación",
 };
 
+const demoCampaignLeads: CampaignLeadStub[] = demoLeads.map((lead) => ({ campaignId: lead.campaignId ?? null, status: lead.status, saleValue: lead.saleValue }));
+const demoStatusCounts: StatusCounts = demoLeads.reduce((acc, lead) => ({ ...acc, [lead.status]: (acc[lead.status] ?? 0) + 1 }), {} as StatusCounts);
+
+function monthKeyOf(value: string): string {
+  return value.slice(0, 7);
+}
+
+function campaignStatsFor(campaignId: string, leads: CampaignLeadStub[]) {
+  const rows = leads.filter((lead) => lead.campaignId === campaignId);
+  const won = rows.filter((lead) => lead.status === "won").length;
+  const value = rows.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
+  return { total: rows.length, won, value };
+}
+
 export function DashboardClient() {
+  const configured = isSupabaseConfigured();
   const currentMonthKey = monthKey();
   const [businessUnitId, setBusinessUnitId] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
   const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
   const [compareMode, setCompareMode] = useState<CompareMode>("previous");
+  const [message, setMessage] = useState<string | null>(null);
 
-  const availableYears = useMemo(() => Array.from(new Set(monthlyStats.map((row) => yearOfMonth(row.month)))).sort(), []);
+  const [allBusinessUnits, setAllBusinessUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
+  const [monthlyStats, setMonthlyStats] = useState<MonthlyStat[]>(demoMonthlyStats);
+  const [campaignRows, setCampaignRows] = useState<CampaignRow[]>(demoCampaigns.map((campaign: Campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name, status: campaign.status })));
+  const [campaignLeads, setCampaignLeads] = useState<CampaignLeadStub[]>(demoCampaignLeads);
+  const [statusCounts, setStatusCounts] = useState<StatusCounts>(demoStatusCounts);
+
+  const businessUnits = useMemo(() => allBusinessUnits.filter((unit) => unit.active), [allBusinessUnits]);
+  const selectedMonthYear = yearOfMonth(selectedMonth);
+
+  useEffect(() => {
+    if (!configured) return;
+    const fetchFromYear = Math.min(selectedYear, selectedMonthYear) - 1;
+    const fetchToYear = Math.max(selectedYear, selectedMonthYear) + 1;
+    const fetchStart = yearRange(fetchFromYear).start;
+    const fetchEnd = yearRange(fetchToYear).end;
+    void (async () => {
+      const supabase = createClient();
+      const [
+        { data: unitData, error: unitError },
+        { data: inquiryData, error: inquiryError },
+        { data: leadData, error: leadError },
+        { data: historyData, error: historyError },
+        { data: campaignData, error: campaignError },
+      ] = await Promise.all([
+        supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
+        supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd),
+        supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
+        supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
+        supabase.from("campaigns").select("id, business_unit_id, name, status").neq("status", "archived").order("name"),
+      ]);
+      if (unitError || inquiryError || leadError || historyError || campaignError) {
+        setMessage(reportSafeError(unitError ?? inquiryError ?? leadError ?? historyError ?? campaignError, "No se pudieron cargar los datos del dashboard."));
+        return;
+      }
+
+      const units: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url }));
+      setAllBusinessUnits(units);
+
+      const buckets = new Map<string, MonthlyStat>();
+      function bucket(unitId: string, month: string): MonthlyStat {
+        const key = `${unitId}|${month}`;
+        let row = buckets.get(key);
+        if (!row) {
+          row = { month, businessUnitId: unitId, web: 0, phone: 0, leads: 0, won: 0, lost: 0, saleValue: 0 };
+          buckets.set(key, row);
+        }
+        return row;
+      }
+      for (const row of inquiryData ?? []) {
+        const b = bucket(row.business_unit_id, monthKeyOf(row.created_at));
+        if (row.inquiry_type === "phone") b.phone += 1; else b.web += 1;
+      }
+      for (const row of leadData ?? []) {
+        bucket(row.business_unit_id, monthKeyOf(row.created_at)).leads += 1;
+      }
+      for (const row of historyData ?? []) {
+        const leadInfo = row.leads as unknown as { business_unit_id: string; sale_value: number | null } | null;
+        if (!leadInfo) continue;
+        const b = bucket(leadInfo.business_unit_id, monthKeyOf(row.changed_at));
+        if (row.new_status === "won") {
+          b.won += 1;
+          b.saleValue += leadInfo.sale_value ?? 0;
+        } else if (row.new_status === "lost") {
+          b.lost += 1;
+        }
+      }
+      setMonthlyStats(Array.from(buckets.values()));
+
+      setCampaignRows((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus })));
+
+      const leadStubs: CampaignLeadStub[] = (leadData ?? []).map((row) => ({ campaignId: row.campaign_id, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) }));
+      setCampaignLeads(leadStubs);
+
+      const counts: StatusCounts = {};
+      for (const row of leadData ?? []) {
+        const status = row.status as LeadStatus;
+        counts[status] = (counts[status] ?? 0) + 1;
+      }
+      setStatusCounts(counts);
+    })();
+  }, [configured, selectedMonthYear, selectedYear]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set(monthlyStats.map((row) => yearOfMonth(row.month)));
+    years.add(yearOfMonth(currentMonthKey));
+    years.add(yearOfMonth(currentMonthKey) - 1);
+    return Array.from(years).sort();
+  }, [currentMonthKey, monthlyStats]);
 
   const filtered = useMemo(
     () => monthlyStats.filter((item) => businessUnitId === "all" || item.businessUnitId === businessUnitId),
-    [businessUnitId],
+    [businessUnitId, monthlyStats],
   );
 
   const currentRows = useMemo(
@@ -89,7 +195,7 @@ export function DashboardClient() {
 
   const trendYear = viewMode === "year" ? selectedYear : yearOfMonth(selectedMonth);
   const trendMonths = useMemo(
-    () => Array.from(new Set(monthlyStats.filter((row) => yearOfMonth(row.month) === trendYear).map((row) => row.month))).sort(),
+    () => Array.from({ length: 12 }, (_, index) => `${trendYear}-${String(index + 1).padStart(2, "0")}`),
     [trendYear],
   );
   const trendData = trendMonths.map((month) => {
@@ -107,6 +213,7 @@ export function DashboardClient() {
 
   return (
     <div className="page-stack">
+      {message ? <div className="form-message" role="status">{message}</div> : null}
       <section className="filter-bar panel">
         <label>
           <span>Unidad de negocio</span>
@@ -172,7 +279,7 @@ export function DashboardClient() {
           <div className="panel-heading">
             <div><span className="eyebrow">Leads</span><h2>Distribución por estado</h2></div>
           </div>
-          <StatusBars />
+          <StatusBars counts={statusCounts} />
         </article>
       </section>
 
@@ -200,27 +307,26 @@ export function DashboardClient() {
 
       <section className="panel table-panel">
         <div className="panel-heading">
-          <div><span className="eyebrow">Campañas</span><h2>Resultados del periodo</h2></div>
+          <div><span className="eyebrow">Campañas</span><h2>Resumen general</h2></div>
           <a href="/campanas" className="text-link">Ver todas →</a>
         </div>
         <div className="table-scroll">
           <table>
             <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th></tr></thead>
             <tbody>
-              {campaigns.map((campaign) => {
+              {campaignRows.map((campaign) => {
                 const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);
-                const campaignLeads = demoLeads.filter((lead) => lead.campaignId === campaign.id);
-                const won = campaignLeads.filter((lead) => lead.status === "won").length;
-                const value = campaignLeads.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
+                const stats = campaignStatsFor(campaign.id, campaignLeads);
                 return (
                   <tr key={campaign.id}>
                     <td><strong>{campaign.name}</strong></td><td>{unit?.name ?? "—"}</td>
                     <td><span className={campaign.status === "active" ? "badge badge-active" : "badge"}>{campaignStatusLabels[campaign.status]}</span></td>
-                    <td>{campaignLeads.length}</td><td>{won}</td><td>{formatPercent(campaignLeads.length ? (won / campaignLeads.length) * 100 : 0)}</td>
-                    <td>{currencyFormatter.format(value)}</td>
+                    <td>{stats.total}</td><td>{stats.won}</td><td>{formatPercent(stats.total ? (stats.won / stats.total) * 100 : 0)}</td>
+                    <td>{currencyFormatter.format(stats.value)}</td>
                   </tr>
                 );
               })}
+              {campaignRows.length === 0 ? <tr><td colSpan={7} className="muted">Sin campañas activas.</td></tr> : null}
             </tbody>
           </table>
         </div>
