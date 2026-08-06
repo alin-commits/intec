@@ -5,6 +5,7 @@ import { reportSafeError } from "@/lib/errors";
 import { monthKey, monthRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
+import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
 import type { Ticket } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
 import { TicketDashboardCards, type TicketDashboardCounts } from "./ticket-dashboard-cards";
@@ -45,7 +46,7 @@ export function TicketsManager() {
         return;
       }
       const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (ownProfile?.role !== "admin") {
+      if (!ownProfile || !TICKET_MANAGER_ROLES.includes(ownProfile.role)) {
         setAccess("denied");
         return;
       }

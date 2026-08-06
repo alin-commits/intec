@@ -7,6 +7,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow } from "@/lib/tickets/map";
+import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
 import type { Ticket, TicketCategory, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 import { AddTicketNoteForm } from "./add-ticket-note-form";
 import { TicketDetails } from "./ticket-details";
@@ -81,7 +82,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       }
       setCurrentUserId(authData.user.id);
       const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (ownProfile?.role !== "admin") {
+      if (!ownProfile || !TICKET_MANAGER_ROLES.includes(ownProfile.role)) {
         setAccess("denied");
         return;
       }

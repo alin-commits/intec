@@ -94,7 +94,7 @@ export function DashboardClient() {
         { data: campaignData, error: campaignError },
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
-        supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd),
+        supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, sale_value").gte("created_at", fetchStart).lt("created_at", fetchEnd),
         supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status").neq("status", "archived").order("name"),
@@ -120,6 +120,7 @@ export function DashboardClient() {
       for (const row of inquiryData ?? []) {
         const b = bucket(row.business_unit_id, monthKeyOf(row.created_at));
         if (row.inquiry_type === "phone") b.phone += 1; else b.web += 1;
+        b.saleValue += row.sale_value ?? 0;
       }
       for (const row of leadData ?? []) {
         bucket(row.business_unit_id, monthKeyOf(row.created_at)).leads += 1;

@@ -10,7 +10,7 @@ import { inquiryChannelLabels, inquiryChannelOrder } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, demoInquiries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
-import { formatDate, formatPercent, numberFormatter } from "@/lib/format";
+import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, InquiryRecord, InquiryType } from "@/lib/types";
 
@@ -31,6 +31,7 @@ function mapInquiry(row: Record<string, unknown>): InquiryRecord {
     inquiryType: row.inquiry_type as InquiryType,
     createdAt: String(row.created_at),
     createdBy: row.created_by ? String(row.created_by) : null,
+    saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
   };
 }
 
@@ -66,6 +67,10 @@ export function InquiryRegister() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [canRegister, setCanRegister] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
+  const [savingSaleValue, setSavingSaleValue] = useState<string | null>(null);
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
 
@@ -93,7 +98,7 @@ export function InquiryRegister() {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
-        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
+        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at, sale_value").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
         supabase.auth.getUser(),
       ]);
       if (unitError || inquiryError) {
@@ -103,8 +108,10 @@ export function InquiryRegister() {
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
       setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
       if (authData.user) {
+        setCurrentUserId(authData.user.id);
         const { data: profile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-        setCanRegister(profile?.role !== "viewer");
+        setCanRegister(profile?.role === "admin" || profile?.role === "commercial");
+        setIsAdmin(profile?.role === "admin");
       }
     })();
   }, [configured, selectedMonthYear, selectedYear]);
@@ -234,12 +241,13 @@ export function InquiryRegister() {
           inquiryType: pending.type,
           createdAt: new Date().toISOString(),
           createdBy: "demo-admin",
+          saleValue: null,
         };
       } else {
         const { data, error } = await createClient().from("inquiries").insert({
           business_unit_id: pending.unit.id,
           inquiry_type: pending.type,
-        }).select("id, business_unit_id, inquiry_type, created_by, created_at").single();
+        }).select("id, business_unit_id, inquiry_type, created_by, created_at, sale_value").single();
         if (error) throw error;
         newRecord = mapInquiry(data as Record<string, unknown>);
       }
@@ -251,6 +259,46 @@ export function InquiryRegister() {
       setMessage(reportSafeError(cause, "No se pudo registrar la consulta."));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function canDeleteRecord(record: InquiryRecord): boolean {
+    return isAdmin || (currentUserId !== null && record.createdBy === currentUserId);
+  }
+
+  async function confirmDeleteRecord() {
+    if (!pendingDelete) return;
+    setBusy(true);
+    try {
+      if (configured) {
+        const { error } = await createClient().from("inquiries").delete().eq("id", pendingDelete.id);
+        if (error) throw error;
+      }
+      setRecords((current) => current.filter((record) => record.id !== pendingDelete.id));
+      setMessage("Consulta eliminada.");
+      setPendingDelete(null);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo eliminar la consulta. Solo puedes borrar tus propios registros de los últimos 10 minutos, o pide a un administrador."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateSaleValue(record: InquiryRecord, rawValue: string) {
+    const value = rawValue.trim() === "" ? null : Number(rawValue);
+    if (value !== null && (Number.isNaN(value) || value < 0)) return;
+    if (value === record.saleValue) return;
+    setSavingSaleValue(record.id);
+    try {
+      if (configured) {
+        const { error } = await createClient().from("inquiries").update({ sale_value: value }).eq("id", record.id);
+        if (error) throw error;
+      }
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, saleValue: value } : item));
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo guardar el valor de venta."));
+    } finally {
+      setSavingSaleValue(null);
     }
   }
 
@@ -285,17 +333,18 @@ export function InquiryRegister() {
           </section>
           {registrationUnit ? (
             <article className="panel inquiry-card">
-              <div className="unit-card-heading">
-                <UnitBrandMark unit={registrationUnit} size={42} />
-                <div><h3>{registrationUnit.name}</h3><span>El registro requiere confirmación</span></div>
-              </div>
-              <div className="inquiry-actions inquiry-actions-spaced">
-                {inquiryChannelOrder.map((channel) => (
-                  <button key={channel} type="button" onClick={() => setPending({ unit: registrationUnit, type: channel })} className="channel-action">
-                    <span className="channel-action-label"><i className={`channel-dot channel-dot-${channel}`} /><span>{inquiryChannelLabels[channel]}</span></span>
-                    <span className="channel-action-plus">+</span>
-                  </button>
-                ))}
+              <div className="inquiry-card-row">
+                <div className="unit-card-heading">
+                  <UnitBrandMark unit={registrationUnit} size={42} />
+                  <div><h3>{registrationUnit.name}</h3></div>
+                </div>
+                <div className="inquiry-actions-inline">
+                  {inquiryChannelOrder.map((channel) => (
+                    <button key={channel} type="button" onClick={() => setPending({ unit: registrationUnit, type: channel })} className="channel-chip">
+                      <i className={`channel-dot channel-dot-${channel}`} />{inquiryChannelLabels[channel]}
+                    </button>
+                  ))}
+                </div>
               </div>
             </article>
           ) : (
@@ -410,10 +459,31 @@ export function InquiryRegister() {
       </section>
 
       <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div></div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th></tr></thead><tbody>{filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12).map((record) => {
+        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Puedes corregir un error borrando el registro, o indicar el valor si la consulta acabó en venta directa</span></div>
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Valor de venta</th><th></th></tr></thead><tbody>{filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12).map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
-          return <tr key={record.id}><td>{formatDate(record.createdAt)}</td><td>{unit?.name ?? "—"}</td><td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td></tr>;
+          return (
+            <tr key={record.id}>
+              <td>{formatDate(record.createdAt)}</td>
+              <td>{unit?.name ?? "—"}</td>
+              <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
+              <td>
+                {canRegister ? (
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="table-sale-value-input"
+                    placeholder="—"
+                    defaultValue={record.saleValue ?? ""}
+                    disabled={savingSaleValue === record.id}
+                    onBlur={(event) => void updateSaleValue(record, event.target.value)}
+                  />
+                ) : record.saleValue ? currencyFormatter.format(record.saleValue) : "—"}
+              </td>
+              <td>{canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}</td>
+            </tr>
+          );
         })}</tbody></table></div>
       </section>
 
@@ -426,6 +496,18 @@ export function InquiryRegister() {
         onConfirm={() => void confirmRegistration()}
       >
         {pending ? <div className="confirmation-summary"><span>Unidad de negocio</span><strong>{pending.unit.name}</strong><span>Canal</span><strong>{inquiryChannelLabels[pending.type]}</strong><p>La fecha, la hora y tu usuario se guardarán automáticamente.</p></div> : null}
+      </ConfirmationDialog>
+
+      <ConfirmationDialog
+        open={Boolean(pendingDelete)}
+        title="¿Eliminar este registro?"
+        confirmLabel="Eliminar"
+        destructive
+        busy={busy}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDeleteRecord()}
+      >
+        <p>Se eliminará esta consulta de las estadísticas. Esta acción no se puede deshacer.</p>
       </ConfirmationDialog>
     </div>
   );

@@ -78,14 +78,14 @@ function TicketsIcon() {
   );
 }
 
-const navigation = [
+const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon },
   { href: "/leads", label: "Leads", icon: LeadsIcon },
   { href: "/campanas", label: "Campañas", icon: CampanasIcon },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon },
-  { href: "/tickets", label: "Tickets", icon: TicketsIcon, adminOnly: true },
-  { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, adminOnly: true },
+  { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: ["admin", "it"] },
+  { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
 
 const pageTitles: Record<string, string> = {
@@ -141,7 +141,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <small>Commercial Hub</small>
         </Link>
         <nav>
-          {navigation.filter((item) => !item.adminOnly || profile.role === "admin").map((item) => {
+          {navigation.filter((item) => !item.roles || item.roles.includes(profile.role)).map((item) => {
             const active = pathname.startsWith(item.href);
             const Icon = item.icon;
             return (

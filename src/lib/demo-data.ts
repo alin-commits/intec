@@ -60,6 +60,7 @@ function distributeRecords(
       inquiryType: type,
       createdAt: new Date(Date.UTC(year, monthNumber - 1, day, hour, minute)).toISOString(),
       createdBy: "demo-admin",
+      saleValue: null,
     });
   }
 }

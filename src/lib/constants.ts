@@ -15,6 +15,7 @@ export const roleLabels: Record<AppRole, string> = {
   admin: "Administrador",
   commercial: "Comercial",
   viewer: "Solo lectura",
+  it: "Informática",
 };
 
 export const leadTypeLabels = {
