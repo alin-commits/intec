@@ -24,7 +24,7 @@ export async function proxy(request: NextRequest) {
   });
 
   const { data: { user } } = await supabase.auth.getUser();
-  const publicPrefixes = ["/login", "/forgot-password", "/reset-password", "/soporte", "/api/tickets"];
+  const publicPrefixes = ["/login", "/forgot-password", "/reset-password", "/soporte", "/api/tickets", "/api/auth"];
   const isLogin = request.nextUrl.pathname.startsWith("/login");
   const isPublicPath = request.nextUrl.pathname === "/" || publicPrefixes.some((path) => request.nextUrl.pathname.startsWith(path));
 

@@ -6,7 +6,7 @@ import { monthKey, monthRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
-import type { Ticket } from "@/lib/tickets/types";
+import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
 import { TicketDashboardCards, type TicketDashboardCounts } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
@@ -36,6 +36,8 @@ export function TicketsManager() {
   const [message, setMessage] = useState<string | null>(null);
   const [filters, setFilters] = useState<TicketFilterState>(blankTicketFilters());
   const [sort, setSort] = useState<TicketSortState>({ column: "createdAt", direction: "desc" });
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [quickEditingId, setQuickEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -45,6 +47,7 @@ export function TicketsManager() {
         setAccess("denied");
         return;
       }
+      setCurrentUserId(authData.user.id);
       const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
       if (!ownProfile || !TICKET_MANAGER_ROLES.includes(ownProfile.role)) {
         setAccess("denied");
@@ -53,7 +56,7 @@ export function TicketsManager() {
       setAccess("allowed");
       const { data, error } = await supabase
         .from("tickets")
-        .select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, attachment_path, created_at, updated_at, resolved_at, closed_at, archived_at")
+        .select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, closed_at, archived_at")
         .is("archived_at", null)
         .order("created_at", { ascending: false })
         .limit(1000);
@@ -92,6 +95,27 @@ export function TicketsManager() {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
   }
 
+  async function handleQuickStatusChange(ticket: Ticket, status: TicketStatus) {
+    if (status === ticket.status) return;
+    setQuickEditingId(ticket.id);
+    try {
+      const patch: Record<string, unknown> = { status };
+      if (status === "resolved") patch.resolved_at = new Date().toISOString();
+      if (status === "closed") patch.closed_at = new Date().toISOString();
+      const supabase = createClient();
+      const { error } = await supabase.from("tickets").update(patch).eq("id", ticket.id);
+      if (error) throw error;
+      if (currentUserId) {
+        await supabase.from("ticket_events").insert({ ticket_id: ticket.id, actor_id: currentUserId, event_type: "status_change", previous_value: ticket.status, new_value: status });
+      }
+      setTickets((current) => current.map((item) => item.id === ticket.id ? { ...item, status, updatedAt: new Date().toISOString() } : item));
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo actualizar el estado."));
+    } finally {
+      setQuickEditingId(null);
+    }
+  }
+
   if (access === "checking") return <div className="page-stack" />;
 
   if (access === "denied") {
@@ -120,7 +144,7 @@ export function TicketsManager() {
         {visibleTickets.length === 0 ? (
           <EmptyState title="Sin tickets" description="No hay incidencias que coincidan con los filtros seleccionados." />
         ) : (
-          <TicketTable tickets={visibleTickets} sort={sort} onSort={handleSort} />
+          <TicketTable tickets={visibleTickets} sort={sort} onSort={handleSort} onQuickStatusChange={(ticket, status) => void handleQuickStatusChange(ticket, status)} quickEditingId={quickEditingId} />
         )}
       </section>
     </div>

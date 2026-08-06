@@ -25,6 +25,8 @@ function blankDraft(units: BusinessUnit[]): CampaignDraft {
     status: "draft",
     budget: null,
     notes: "",
+    directSalesCount: 0,
+    directSaleValue: 0,
   };
 }
 
@@ -39,6 +41,8 @@ function mapCampaignRow(row: Record<string, unknown>): Campaign {
     status: row.status as CampaignStatus,
     budget: row.budget === null || row.budget === undefined ? null : Number(row.budget),
     notes: row.notes ? String(row.notes) : null,
+    directSalesCount: Number(row.direct_sales_count ?? 0),
+    directSaleValue: Number(row.direct_sale_value ?? 0),
     createdAt: String(row.created_at),
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
   };
@@ -59,15 +63,17 @@ function dateRangeLabel(start: string | null, end: string | null): string {
   return `Hasta ${formatDate(end as string)}`;
 }
 
-function statsFor(campaignId: string, leads: LeadStub[]) {
-  const campaignLeads = leads.filter((lead) => lead.campaignId === campaignId);
+function statsFor(campaign: Campaign, leads: LeadStub[]) {
+  const campaignLeads = leads.filter((lead) => lead.campaignId === campaign.id);
   const total = campaignLeads.length;
   const contacted = campaignLeads.filter((lead) => lead.status !== "new").length;
   const offers = campaignLeads.filter((lead) => lead.status === "offer_sent").length;
-  const won = campaignLeads.filter((lead) => lead.status === "won").length;
+  const leadsWon = campaignLeads.filter((lead) => lead.status === "won").length;
   const lost = campaignLeads.filter((lead) => lead.status === "lost").length;
-  const value = campaignLeads.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
-  return { total, contacted, offers, won, lost, conversion: total ? (won / total) * 100 : 0, value };
+  const leadsValue = campaignLeads.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
+  const won = leadsWon + campaign.directSalesCount;
+  const value = leadsValue + campaign.directSaleValue;
+  return { total, contacted, offers, won, lost, conversion: total ? (leadsWon / total) * 100 : 0, value };
 }
 
 function initialDemoCampaigns(configured: boolean): Campaign[] {
@@ -101,7 +107,7 @@ export function CampaignsManager() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
-      supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, created_at, updated_at").order("created_at", { ascending: false }),
+      supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, created_at, updated_at").order("created_at", { ascending: false }),
       supabase.from("leads").select("campaign_id, status, sale_value").limit(2000),
       supabase.auth.getUser(),
     ]);
@@ -149,6 +155,8 @@ export function CampaignsManager() {
       status: campaign.status,
       budget: campaign.budget,
       notes: campaign.notes,
+      directSalesCount: campaign.directSalesCount,
+      directSaleValue: campaign.directSaleValue,
     });
     setEditorOpen(true);
     setMessage(null);
@@ -187,6 +195,8 @@ export function CampaignsManager() {
           status: draft.status,
           budget: draft.budget,
           notes: draft.notes?.trim() || null,
+          direct_sales_count: draft.directSalesCount,
+          direct_sale_value: draft.directSaleValue,
         };
         const supabase = createClient();
         const result = editingId ? await supabase.from("campaigns").update(payload).eq("id", editingId) : await supabase.from("campaigns").insert(payload);
@@ -247,7 +257,7 @@ export function CampaignsManager() {
       <section className="campaigns-grid">
         {visibleCampaigns.map((campaign) => {
           const unit = units.find((item) => item.id === campaign.businessUnitId);
-          const stats = statsFor(campaign.id, leads);
+          const stats = statsFor(campaign, leads);
           return (
             <article className="panel campaign-card" key={campaign.id}>
               <div className="campaign-card-heading">
@@ -268,8 +278,11 @@ export function CampaignsManager() {
               </div>
               <div className="campaign-card-footer">
                 <span>Presupuesto <strong>{campaign.budget ? currencyFormatter.format(campaign.budget) : "—"}</strong></span>
-                <span>Valor ganado <strong>{currencyFormatter.format(stats.value)}</strong></span>
+                <span>Valor total <strong>{currencyFormatter.format(stats.value)}</strong></span>
               </div>
+              {campaign.directSalesCount > 0 || campaign.directSaleValue > 0 ? (
+                <p className="muted campaign-direct-sales-note">Incluye {campaign.directSalesCount} venta{campaign.directSalesCount === 1 ? "" : "s"} directa{campaign.directSalesCount === 1 ? "" : "s"} ({currencyFormatter.format(campaign.directSaleValue)}) sin pasar por leads.</p>
+              ) : null}
               {canEdit ? (
                 <div className="modal-actions campaign-card-actions">
                   <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(campaign)}>Editar</button>
@@ -303,6 +316,8 @@ export function CampaignsManager() {
             <label><span>Fecha inicio</span><input type="date" value={draft.startDate ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("startDate", event.target.value || null)} /></label>
             <label><span>Fecha fin</span><input type="date" value={draft.endDate ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("endDate", event.target.value || null)} /></label>
             <label><span>Presupuesto</span><input type="number" min="0" step="0.01" value={draft.budget ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("budget", event.target.value ? Number(event.target.value) : null)} /></label>
+            <label><span>Ventas directas (sin lead)</span><input type="number" min="0" step="1" value={draft.directSalesCount} readOnly={!canEdit} onChange={(event) => updateDraft("directSalesCount", Number(event.target.value) || 0)} /></label>
+            <label><span>Valor de ventas directas</span><input type="number" min="0" step="0.01" value={draft.directSaleValue} readOnly={!canEdit} onChange={(event) => updateDraft("directSaleValue", Number(event.target.value) || 0)} /></label>
             <label className="form-field-wide"><span>Notas</span><textarea rows={4} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setEditorOpen(false)}>Cerrar</button>{canEdit ? <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Guardando…" : "Guardar campaña"}</button> : null}</div>

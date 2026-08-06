@@ -59,6 +59,8 @@ export type Campaign = {
   status: CampaignStatus;
   budget: number | null;
   notes: string | null;
+  directSalesCount: number;
+  directSaleValue: number;
   createdAt: string;
   updatedAt?: string;
 };

@@ -7,6 +7,7 @@ import { reportSafeError } from "@/lib/errors";
 import type { TicketBlockingLevel, TicketCategory } from "@/lib/tickets/types";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_ATTACHMENTS = 5;
 const ALLOWED_FILE_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
 
 export function TicketForm() {
@@ -23,28 +24,36 @@ export function TicketForm() {
   const [restarted, setRestarted] = useState(false);
   const [hasErrorMessage, setHasErrorMessage] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  function handleFileChange(file: File | null) {
+  function handleFileChange(fileList: FileList | null) {
     setFileError(null);
-    if (!file) {
-      setAttachment(null);
+    if (!fileList || fileList.length === 0) {
+      setAttachments([]);
       return;
     }
-    if (!ALLOWED_FILE_TYPES.has(file.type)) {
-      setFileError("El archivo debe ser JPG, PNG o PDF.");
-      setAttachment(null);
+    const files = Array.from(fileList);
+    if (files.length > MAX_ATTACHMENTS) {
+      setFileError(`Puedes adjuntar como máximo ${MAX_ATTACHMENTS} archivos.`);
+      setAttachments([]);
       return;
     }
-    if (file.size > MAX_FILE_BYTES) {
-      setFileError("El archivo no puede superar los 5 MB.");
-      setAttachment(null);
-      return;
+    for (const file of files) {
+      if (!ALLOWED_FILE_TYPES.has(file.type)) {
+        setFileError("Los archivos deben ser JPG, PNG o PDF.");
+        setAttachments([]);
+        return;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        setFileError("Cada archivo debe pesar como máximo 5 MB.");
+        setAttachments([]);
+        return;
+      }
     }
-    setAttachment(file);
+    setAttachments(files);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -66,7 +75,7 @@ export function TicketForm() {
       formData.set("hasErrorMessage", String(hasErrorMessage));
       formData.set("errorMessage", hasErrorMessage ? errorMessage : "");
       formData.set("honeypot", "");
-      if (attachment) formData.set("attachment", attachment);
+      for (const file of attachments) formData.append("attachments", file);
 
       const response = await fetch("/api/tickets/create", { method: "POST", body: formData });
       const result = await response.json() as { ok?: boolean; ticketNumber?: string; error?: string };
@@ -126,8 +135,8 @@ export function TicketForm() {
         <label><span>Texto del mensaje de error</span><input value={errorMessage} onChange={(event) => setErrorMessage(event.target.value)} maxLength={2000} /></label>
       ) : null}
 
-      <label className="form-field-wide"><span>Archivo o captura (opcional, JPG/PNG/PDF, máx. 5 MB)</span>
-        <input type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" onChange={(event) => handleFileChange(event.target.files?.[0] ?? null)} />
+      <label className="form-field-wide"><span>Archivos o capturas (opcional, hasta 5, JPG/PNG/PDF, máx. 5 MB cada uno)</span>
+        <input type="file" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" onChange={(event) => handleFileChange(event.target.files)} />
       </label>
       {fileError ? <div className="form-error form-field-wide" role="alert">{fileError}</div> : null}
 

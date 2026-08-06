@@ -18,7 +18,6 @@ export function mapTicketRow(row: Record<string, unknown>): Ticket {
     errorMessage: row.error_message ? String(row.error_message) : null,
     priority: row.priority as TicketPriority,
     status: row.status as TicketStatus,
-    attachmentPath: row.attachment_path ? String(row.attachment_path) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     resolvedAt: row.resolved_at ? String(row.resolved_at) : null,

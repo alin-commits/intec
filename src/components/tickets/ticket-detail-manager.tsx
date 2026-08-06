@@ -8,7 +8,7 @@ import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
-import type { Ticket, TicketCategory, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
+import type { Ticket, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 import { AddTicketNoteForm } from "./add-ticket-note-form";
 import { TicketDetails } from "./ticket-details";
 import { TicketNotes, type TicketEventItem } from "./ticket-notes";
@@ -130,22 +130,6 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     }
   }
 
-  async function updateCategory(category: TicketCategory) {
-    if (!ticket || category === ticket.category) return;
-    setBusy(true);
-    try {
-      const { error } = await createClient().from("tickets").update({ category }).eq("id", ticketId);
-      if (error) throw error;
-      await logEvent("category_change", ticket.category, category);
-      await loadTicket();
-      setMessage("Categoría actualizada.");
-    } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo actualizar la categoría."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function addNote({ noteType, content }: { noteType: TicketNoteType; content: string }) {
     if (!currentUserId) return;
     setBusy(true);
@@ -231,7 +215,12 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
 
       <div className="ticket-detail-layout">
         <section className="panel">
-          <TicketDetails ticket={ticket} busy={busy} onStatusChange={(status) => void updateStatus(status)} onPriorityChange={(priority) => void updatePriority(priority)} onCategoryChange={(category) => void updateCategory(category)} />
+          <TicketDetails
+            ticket={ticket}
+            busy={busy}
+            onStatusChange={(status) => void updateStatus(status)}
+            onPriorityChange={(priority) => void updatePriority(priority)}
+          />
         </section>
 
         <section className="panel">

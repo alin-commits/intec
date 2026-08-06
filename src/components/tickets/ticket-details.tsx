@@ -1,15 +1,14 @@
 import {
   ticketBlockingLevelLabels,
   ticketCategoryLabels,
-  ticketCategoryOrder,
   ticketPriorityLabels,
   ticketPriorityOrder,
   ticketStatusLabels,
   ticketStatusOrder,
 } from "@/lib/tickets/constants";
 import { formatDate } from "@/lib/format";
-import type { Ticket, TicketCategory, TicketPriority, TicketStatus } from "@/lib/tickets/types";
-import { AttachmentViewer } from "./attachment-viewer";
+import type { Ticket, TicketPriority, TicketStatus } from "@/lib/tickets/types";
+import { AttachmentGallery } from "./attachment-gallery";
 
 function whatsappHref(phone: string): string {
   return `https://wa.me/${phone.replace(/\D/g, "")}`;
@@ -20,10 +19,9 @@ type TicketDetailsProps = {
   busy: boolean;
   onStatusChange: (status: TicketStatus) => void;
   onPriorityChange: (priority: TicketPriority) => void;
-  onCategoryChange: (category: TicketCategory) => void;
 };
 
-export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange, onCategoryChange }: TicketDetailsProps) {
+export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange }: TicketDetailsProps) {
   return (
     <div className="ticket-details">
       <div className="ticket-details-grid">
@@ -31,6 +29,7 @@ export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange, 
         <div><span>Teléfono</span><strong>{ticket.reporterPhone}</strong></div>
         <div><span>Correo</span><strong>{ticket.reporterEmail || "—"}</strong></div>
         <div><span>Departamento</span><strong>{ticket.department}</strong></div>
+        <div><span>Categoría</span><strong>{ticketCategoryLabels[ticket.category]}</strong></div>
         <div><span>Creado</span><strong>{formatDate(ticket.createdAt)}</strong></div>
         <div><span>Última actualización</span><strong>{formatDate(ticket.updatedAt)}</strong></div>
         <div><span>¿Desde cuándo?</span><strong>{ticket.startedAt || "—"}</strong></div>
@@ -56,12 +55,10 @@ export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange, 
         </div>
       ) : null}
 
-      {ticket.attachmentPath ? (
-        <div className="ticket-details-section">
-          <h3>Archivo adjunto</h3>
-          <AttachmentViewer attachmentPath={ticket.attachmentPath} />
-        </div>
-      ) : null}
+      <div className="ticket-details-section">
+        <h3>Archivos adjuntos</h3>
+        <AttachmentGallery ticketId={ticket.id} />
+      </div>
 
       <div className="ticket-editable-grid">
         <label><span>Estado</span>
@@ -72,11 +69,6 @@ export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange, 
         <label><span>Prioridad</span>
           <select value={ticket.priority} disabled={busy} onChange={(event) => onPriorityChange(event.target.value as TicketPriority)}>
             {ticketPriorityOrder.map((value) => <option key={value} value={value}>{ticketPriorityLabels[value]}</option>)}
-          </select>
-        </label>
-        <label><span>Categoría</span>
-          <select value={ticket.category} disabled={busy} onChange={(event) => onCategoryChange(event.target.value as TicketCategory)}>
-            {ticketCategoryOrder.map((value) => <option key={value} value={value}>{ticketCategoryLabels[value]}</option>)}
           </select>
         </label>
       </div>

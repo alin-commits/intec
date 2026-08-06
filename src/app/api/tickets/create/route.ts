@@ -11,6 +11,7 @@ const ALLOWED_MIME_TYPES: Record<string, string> = {
   "application/pdf": "pdf",
 };
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_ATTACHMENTS = 5;
 const RATE_LIMIT_WINDOW_MINUTES = 10;
 const RATE_LIMIT_MAX_SUBMISSIONS = 5;
 
@@ -65,23 +66,29 @@ export async function POST(request: Request) {
   }
   const data = parsed.data;
 
-  const file = formData.get("attachment");
-  let attachmentPath: string | null = null;
-  if (file instanceof File && file.size > 0) {
-    const extension = ALLOWED_MIME_TYPES[file.type];
-    if (!extension) {
-      return NextResponse.json({ error: "El archivo debe ser JPG, PNG o PDF." }, { status: 400 });
+  const files = formData.getAll("attachments").filter((entry): entry is File => entry instanceof File && entry.size > 0);
+  if (files.length > MAX_ATTACHMENTS) {
+    return NextResponse.json({ error: `Puedes adjuntar como máximo ${MAX_ATTACHMENTS} archivos.` }, { status: 400 });
+  }
+  for (const file of files) {
+    if (!ALLOWED_MIME_TYPES[file.type]) {
+      return NextResponse.json({ error: "Los archivos deben ser JPG, PNG o PDF." }, { status: 400 });
     }
     if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json({ error: "El archivo no puede superar los 5 MB." }, { status: 400 });
+      return NextResponse.json({ error: "Cada archivo debe pesar como máximo 5 MB." }, { status: 400 });
     }
+  }
+
+  const attachmentPaths: string[] = [];
+  for (const file of files) {
+    const extension = ALLOWED_MIME_TYPES[file.type];
     const path = `${crypto.randomUUID()}.${extension}`;
     const { error: uploadError } = await admin.storage.from("ticket-attachments").upload(path, file, { contentType: file.type });
     if (uploadError) {
       console.error("Error al subir adjunto de ticket:", uploadError);
-      return NextResponse.json({ error: "No se pudo subir el archivo adjunto." }, { status: 500 });
+      return NextResponse.json({ error: "No se pudo subir uno de los archivos adjuntos." }, { status: 500 });
     }
-    attachmentPath = path;
+    attachmentPaths.push(path);
   }
 
   const priority = priorityFromBlockingLevel(data.blockingLevel);
@@ -102,7 +109,6 @@ export async function POST(request: Request) {
       has_error_message: data.hasErrorMessage,
       error_message: data.errorMessage,
       priority,
-      attachment_path: attachmentPath,
     })
     .select("id, ticket_number")
     .single();
@@ -112,6 +118,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No se pudo registrar la incidencia. Inténtalo de nuevo." }, { status: 500 });
   }
 
+  if (attachmentPaths.length > 0) {
+    await admin.from("ticket_attachments").insert(attachmentPaths.map((path) => ({ ticket_id: ticket.id, path })));
+  }
   await admin.from("ticket_events").insert({ ticket_id: ticket.id, actor_id: null, event_type: "created", new_value: "new" });
   await admin.from("ticket_submission_log").insert({ ip });
 

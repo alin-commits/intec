@@ -21,7 +21,6 @@ export type Ticket = {
   errorMessage: string | null;
   priority: TicketPriority;
   status: TicketStatus;
-  attachmentPath: string | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
@@ -35,6 +34,13 @@ export type TicketNote = {
   authorId: string;
   noteType: TicketNoteType;
   content: string;
+  createdAt: string;
+};
+
+export type TicketAttachment = {
+  id: string;
+  ticketId: string;
+  path: string;
   createdAt: string;
 };
 

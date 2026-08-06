@@ -1,6 +1,6 @@
-import { ticketCategoryLabels, ticketNoteTypeLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
+import { ticketNoteTypeLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
 import { formatDate } from "@/lib/format";
-import type { TicketCategory, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
+import type { TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 
 export type TicketEventItem = {
   id: string;
@@ -15,18 +15,16 @@ type TimelineEntry =
   | { kind: "note"; id: string; createdAt: string; authorName: string; noteType: TicketNoteType; content: string }
   | { kind: "event"; id: string; createdAt: string; actorName: string; label: string };
 
-function labelForValue(field: "status" | "priority" | "category", value: string | null): string {
+function labelForValue(field: "status" | "priority", value: string | null): string {
   if (!value) return "—";
   if (field === "status") return ticketStatusLabels[value as TicketStatus] ?? value;
-  if (field === "priority") return ticketPriorityLabels[value as TicketPriority] ?? value;
-  return ticketCategoryLabels[value as TicketCategory] ?? value;
+  return ticketPriorityLabels[value as TicketPriority] ?? value;
 }
 
 function eventLabel(event: TicketEventItem): string {
   if (event.eventType === "created") return "Ticket creado desde el formulario público";
   if (event.eventType === "status_change") return `Estado: ${labelForValue("status", event.previousValue)} → ${labelForValue("status", event.newValue)}`;
   if (event.eventType === "priority_change") return `Prioridad: ${labelForValue("priority", event.previousValue)} → ${labelForValue("priority", event.newValue)}`;
-  if (event.eventType === "category_change") return `Categoría: ${labelForValue("category", event.previousValue)} → ${labelForValue("category", event.newValue)}`;
   return event.eventType;
 }
 

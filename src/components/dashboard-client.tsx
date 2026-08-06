@@ -14,7 +14,7 @@ import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus, MonthlyStat } 
 
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
-type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus };
+type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus; directSalesCount: number; directSaleValue: number };
 type CampaignLeadStub = { campaignId: string | null; status: LeadStatus; saleValue: number | null };
 type StatusCounts = Partial<Record<LeadStatus, number>>;
 
@@ -52,11 +52,11 @@ function monthKeyOf(value: string): string {
   return value.slice(0, 7);
 }
 
-function campaignStatsFor(campaignId: string, leads: CampaignLeadStub[]) {
-  const rows = leads.filter((lead) => lead.campaignId === campaignId);
-  const won = rows.filter((lead) => lead.status === "won").length;
-  const value = rows.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
-  return { total: rows.length, won, value };
+function campaignStatsFor(campaign: CampaignRow, leads: CampaignLeadStub[]) {
+  const rows = leads.filter((lead) => lead.campaignId === campaign.id);
+  const leadsWon = rows.filter((lead) => lead.status === "won").length;
+  const leadsValue = rows.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
+  return { total: rows.length, won: leadsWon + campaign.directSalesCount, value: leadsValue + campaign.directSaleValue };
 }
 
 export function DashboardClient() {
@@ -71,7 +71,7 @@ export function DashboardClient() {
 
   const [allBusinessUnits, setAllBusinessUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStat[]>(demoMonthlyStats);
-  const [campaignRows, setCampaignRows] = useState<CampaignRow[]>(demoCampaigns.map((campaign: Campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name, status: campaign.status })));
+  const [campaignRows, setCampaignRows] = useState<CampaignRow[]>(demoCampaigns.map((campaign: Campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name, status: campaign.status, directSalesCount: campaign.directSalesCount, directSaleValue: campaign.directSaleValue })));
   const [campaignLeads, setCampaignLeads] = useState<CampaignLeadStub[]>(demoCampaignLeads);
   const [statusCounts, setStatusCounts] = useState<StatusCounts>(demoStatusCounts);
 
@@ -97,7 +97,7 @@ export function DashboardClient() {
         supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, sale_value").gte("created_at", fetchStart).lt("created_at", fetchEnd),
         supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
-        supabase.from("campaigns").select("id, business_unit_id, name, status").neq("status", "archived").order("name"),
+        supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
       ]);
       if (unitError || inquiryError || leadError || historyError || campaignError) {
         setMessage(reportSafeError(unitError ?? inquiryError ?? leadError ?? historyError ?? campaignError, "No se pudieron cargar los datos del dashboard."));
@@ -138,7 +138,7 @@ export function DashboardClient() {
       }
       setMonthlyStats(Array.from(buckets.values()));
 
-      setCampaignRows((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus })));
+      setCampaignRows((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
 
       const leadStubs: CampaignLeadStub[] = (leadData ?? []).map((row) => ({ campaignId: row.campaign_id, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) }));
       setCampaignLeads(leadStubs);
@@ -317,7 +317,7 @@ export function DashboardClient() {
             <tbody>
               {campaignRows.map((campaign) => {
                 const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);
-                const stats = campaignStatsFor(campaign.id, campaignLeads);
+                const stats = campaignStatsFor(campaign, campaignLeads);
                 return (
                   <tr key={campaign.id}>
                     <td><strong>{campaign.name}</strong></td><td>{unit?.name ?? "—"}</td>

@@ -5,6 +5,7 @@ import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/c
 import { TrendChart } from "@/components/charts/trend-chart";
 import { KpiCard } from "@/components/kpi-card";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { inquiryChannelLabels, inquiryChannelOrder } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, demoInquiries } from "@/lib/demo-data";
@@ -70,7 +71,8 @@ export function InquiryRegister() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
-  const [savingSaleValue, setSavingSaleValue] = useState<string | null>(null);
+  const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
+  const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; saleValue: string }>({ businessUnitId: "", inquiryType: "phone", saleValue: "" });
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
 
@@ -284,21 +286,39 @@ export function InquiryRegister() {
     }
   }
 
-  async function updateSaleValue(record: InquiryRecord, rawValue: string) {
-    const value = rawValue.trim() === "" ? null : Number(rawValue);
-    if (value !== null && (Number.isNaN(value) || value < 0)) return;
-    if (value === record.saleValue) return;
-    setSavingSaleValue(record.id);
+  function openEditRecord(record: InquiryRecord) {
+    setEditingRecord(record);
+    setEditDraft({ businessUnitId: record.businessUnitId, inquiryType: record.inquiryType, saleValue: record.saleValue !== null ? String(record.saleValue) : "" });
+    setMessage(null);
+  }
+
+  async function saveEditRecord() {
+    if (!editingRecord) return;
+    const trimmed = editDraft.saleValue.trim();
+    const value = trimmed === "" ? null : Number(trimmed);
+    if (value !== null && (Number.isNaN(value) || value < 0)) {
+      setMessage("El valor de venta no es válido.");
+      return;
+    }
+    setBusy(true);
     try {
       if (configured) {
-        const { error } = await createClient().from("inquiries").update({ sale_value: value }).eq("id", record.id);
+        const { error } = await createClient().from("inquiries").update({
+          business_unit_id: editDraft.businessUnitId,
+          inquiry_type: editDraft.inquiryType,
+          sale_value: value,
+        }).eq("id", editingRecord.id);
         if (error) throw error;
       }
-      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, saleValue: value } : item));
+      setRecords((current) => current.map((item) => item.id === editingRecord.id
+        ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType, saleValue: value }
+        : item));
+      setMessage("Consulta actualizada.");
+      setEditingRecord(null);
     } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo guardar el valor de venta."));
+      setMessage(reportSafeError(cause, "No se pudo actualizar la consulta."));
     } finally {
-      setSavingSaleValue(null);
+      setBusy(false);
     }
   }
 
@@ -459,7 +479,7 @@ export function InquiryRegister() {
       </section>
 
       <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Puedes corregir un error borrando el registro, o indicar el valor si la consulta acabó en venta directa</span></div>
+        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Corrige un error editando el registro (unidad, canal o valor de venta), o elimínalo si no debía existir</span></div>
         <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Valor de venta</th><th></th></tr></thead><tbody>{filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12).map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
           return (
@@ -467,21 +487,11 @@ export function InquiryRegister() {
               <td>{formatDate(record.createdAt)}</td>
               <td>{unit?.name ?? "—"}</td>
               <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
-              <td>
-                {canRegister ? (
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className="table-sale-value-input"
-                    placeholder="—"
-                    defaultValue={record.saleValue ?? ""}
-                    disabled={savingSaleValue === record.id}
-                    onBlur={(event) => void updateSaleValue(record, event.target.value)}
-                  />
-                ) : record.saleValue ? currencyFormatter.format(record.saleValue) : "—"}
+              <td>{record.saleValue ? currencyFormatter.format(record.saleValue) : "—"}</td>
+              <td className="recent-inquiries-actions">
+                {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
+                {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
               </td>
-              <td>{canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}</td>
             </tr>
           );
         })}</tbody></table></div>
@@ -509,6 +519,28 @@ export function InquiryRegister() {
       >
         <p>Se eliminará esta consulta de las estadísticas. Esta acción no se puede deshacer.</p>
       </ConfirmationDialog>
+
+      <Modal open={Boolean(editingRecord)} title="Editar consulta" eyebrow="Corregir registro" onClose={() => setEditingRecord(null)}>
+        <div className="form-grid">
+          <label><span>Unidad de negocio</span>
+            <select value={editDraft.businessUnitId} onChange={(event) => setEditDraft((current) => ({ ...current, businessUnitId: event.target.value }))}>
+              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </label>
+          <label><span>Canal</span>
+            <select value={editDraft.inquiryType} onChange={(event) => setEditDraft((current) => ({ ...current, inquiryType: event.target.value as InquiryType }))}>
+              {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
+            </select>
+          </label>
+          <label><span>Valor de venta</span>
+            <input type="number" min="0" step="0.01" placeholder="—" value={editDraft.saleValue} onChange={(event) => setEditDraft((current) => ({ ...current, saleValue: event.target.value }))} />
+          </label>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cancelar</button>
+          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveEditRecord()}>{busy ? "Guardando…" : "Guardar cambios"}</button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -88,6 +88,11 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
 
+function nameFromEmail(email: string): string {
+  const local = email.split("@")[0] ?? email;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
 const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
   "/consultas": "Consultas",
@@ -103,6 +108,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const configured = isSupabaseConfigured();
   const [profile, setProfile] = useState<{ fullName: string; role: AppRole }>(() => ({ fullName: "Alín", role: "admin" }));
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setMobileNavOpen(false);
+  }
 
   useEffect(() => {
     if (!configured) return;
@@ -113,7 +124,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!user || !active) return;
       const { data } = await supabase.from("profiles").select("full_name, role").eq("id", user.id).maybeSingle();
       if (data && active) {
-        setProfile({ fullName: data.full_name || user.email || "Usuario", role: data.role as AppRole });
+        setProfile({ fullName: data.full_name || (user.email ? nameFromEmail(user.email) : "Usuario"), role: data.role as AppRole });
       }
     }
     void loadProfile();
@@ -135,11 +146,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <Link href="/dashboard" className="brand">
-          <span className="brand-logo-chip"><Logo className="brand-logo" priority /></span>
-          <small>Commercial Hub</small>
-        </Link>
+      <aside className={mobileNavOpen ? "sidebar mobile-open" : "sidebar"}>
+        <div className="sidebar-top">
+          <Link href="/dashboard" className="brand">
+            <span className="brand-logo-chip"><Logo className="brand-logo" priority /></span>
+            <small>Commercial Hub</small>
+          </Link>
+          <button type="button" className="sidebar-toggle" aria-label={mobileNavOpen ? "Cerrar menú" : "Abrir menú"} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((current) => !current)}>
+            <span /><span /><span />
+          </button>
+        </div>
         <nav>
           {navigation.filter((item) => !item.roles || item.roles.includes(profile.role)).map((item) => {
             const active = pathname.startsWith(item.href);
