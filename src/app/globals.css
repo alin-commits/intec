@@ -86,8 +86,6 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .filters-clear-button:hover { color: var(--primary); }
 .filters-collapsible-body { margin-top: 14px; }
 
-.inline-form-actions { display: flex; justify-content: flex-end; }
-
 .sales-summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 @media (max-width: 720px) {
   .sales-summary-grid { grid-template-columns: 1fr; }
@@ -99,8 +97,11 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .sale-entry-add-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .sale-entry-add-form label { flex: 1; min-width: 120px; }
 
+.confirmation-sale-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.confirmation-sale-form label { flex: 1; min-width: 140px; }
+
 .weekly-sales-grid { display: flex; flex-direction: column; gap: 12px; }
-.weekly-sales-row { display: grid; grid-template-columns: 110px 1fr 1fr; align-items: center; gap: 12px; }
+.weekly-sales-row { display: grid; grid-template-columns: 110px 1fr 1fr; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
 @media (max-width: 560px) {
   .weekly-sales-row { grid-template-columns: 1fr; }
 }
@@ -288,12 +289,12 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .confirmation-summary p { grid-column: 1 / -1; margin: 7px 0 0; color: var(--muted); font-size: 13px; }
 .lead-editor-form { display: grid; gap: 18px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.form-grid label, .inline-form label { display: grid; gap: 6px; }
-.form-grid label span, .inline-form label span { color: var(--muted); font-size: 12px; font-weight: 700; }
-.form-grid input, .form-grid select, .form-grid textarea, .inline-form input, .inline-form select { width: 100%; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); padding: 10px 11px; transition: border-color .15s ease, box-shadow .15s ease; }
-.form-grid input, .form-grid select, .inline-form input, .inline-form select { min-height: 42px; }
+.form-grid label, .inline-form label, .weekly-sales-row label, .sale-entry-add-form label, .confirmation-sale-form label { display: grid; gap: 6px; }
+.form-grid label span, .inline-form label span, .weekly-sales-row label span, .sale-entry-add-form label span, .confirmation-sale-form label span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.form-grid input, .form-grid select, .form-grid textarea, .inline-form input, .inline-form select, .weekly-sales-row input, .weekly-sales-row select, .sale-entry-add-form input, .sale-entry-add-form select, .confirmation-sale-form input, .confirmation-sale-form select { width: 100%; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); padding: 10px 11px; transition: border-color .15s ease, box-shadow .15s ease; }
+.form-grid input, .form-grid select, .inline-form input, .inline-form select, .weekly-sales-row input, .weekly-sales-row select, .sale-entry-add-form input, .sale-entry-add-form select, .confirmation-sale-form input, .confirmation-sale-form select { min-height: 42px; }
 .form-grid textarea { resize: vertical; }
-.form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus, .inline-form input:focus, .inline-form select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus, .inline-form input:focus, .inline-form select:focus, .weekly-sales-row input:focus, .weekly-sales-row select:focus, .sale-entry-add-form input:focus, .sale-entry-add-form select:focus, .confirmation-sale-form input:focus, .confirmation-sale-form select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 .form-field-wide { grid-column: 1 / -1; }
 .history-panel { padding: 16px; border-radius: 12px; background: var(--surface-muted); }
 .history-panel h3 { margin: 0 0 12px; font-size: 15px; }

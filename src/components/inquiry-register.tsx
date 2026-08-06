@@ -85,6 +85,8 @@ export function InquiryRegister() {
   const [sortColumn, setSortColumn] = useState<ChannelTableColumn>("total");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [pending, setPending] = useState<{ unit: BusinessUnit; type: InquiryType } | null>(null);
+  const [pendingSaleType, setPendingSaleType] = useState<SaleType | "none">("none");
+  const [pendingSaleValue, setPendingSaleValue] = useState("");
   const [registrationUnitId, setRegistrationUnitId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -96,7 +98,12 @@ export function InquiryRegister() {
   const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType }>({ businessUnitId: "", inquiryType: "phone" });
   const [newSaleDraft, setNewSaleDraft] = useState<{ saleType: SaleType; value: string }>({ saleType: "pedido", value: "" });
   const [pendingDeleteSale, setPendingDeleteSale] = useState<SalesEntry | null>(null);
-  const [weeklyModalOpen, setWeeklyModalOpen] = useState(false);
+  const [saleChooserOpen, setSaleChooserOpen] = useState(false);
+  const [saleChooserMode, setSaleChooserMode] = useState<"menu" | "inquiry" | "weekly">("menu");
+  const [quickSaleUnitId, setQuickSaleUnitId] = useState("");
+  const [quickSaleInquiryId, setQuickSaleInquiryId] = useState("");
+  const [quickSaleType, setQuickSaleType] = useState<SaleType>("pedido");
+  const [quickSaleValue, setQuickSaleValue] = useState("");
   const [weeklyUnitId, setWeeklyUnitId] = useState("");
   const [weeklyDate, setWeeklyDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [weeklyDraft, setWeeklyDraft] = useState(() => blankWeeklyDraft());
@@ -294,8 +301,23 @@ export function InquiryRegister() {
 
   const editingRecordSales = useMemo(() => editingRecord ? (salesByInquiry.get(editingRecord.id) ?? []) : [], [editingRecord, salesByInquiry]);
 
+  const quickSaleUnitRecords = useMemo(() => records
+    .filter((record) => record.businessUnitId === quickSaleUnitId)
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 30), [records, quickSaleUnitId]);
+
   async function confirmRegistration() {
     if (!pending || busy) return;
+    let saleValue: number | null = null;
+    if (pendingSaleType !== "none") {
+      const trimmed = pendingSaleValue.trim();
+      saleValue = Number(trimmed);
+      if (trimmed === "" || Number.isNaN(saleValue) || saleValue < 0) {
+        setMessage("El valor de la venta no es válido.");
+        return;
+      }
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -317,8 +339,42 @@ export function InquiryRegister() {
         newRecord = mapInquiry(data as Record<string, unknown>);
       }
       setRecords((current) => [newRecord, ...current]);
+
+      if (pendingSaleType !== "none" && saleValue !== null) {
+        const occurredOn = newRecord.createdAt.slice(0, 10);
+        if (!configured) {
+          const entry: SalesEntry = {
+            id: `SE-${Date.now()}`,
+            businessUnitId: newRecord.businessUnitId,
+            saleType: pendingSaleType,
+            entryMode: "inquiry",
+            inquiryId: newRecord.id,
+            weekStart: null,
+            occurredOn,
+            count: 1,
+            value: saleValue,
+            createdBy: "demo-admin",
+            createdAt: new Date().toISOString(),
+          };
+          setSalesEntries((current) => [entry, ...current]);
+        } else {
+          const { data, error } = await createClient().from("sales_entries").insert({
+            business_unit_id: newRecord.businessUnitId,
+            sale_type: pendingSaleType,
+            entry_mode: "inquiry",
+            inquiry_id: newRecord.id,
+            occurred_on: occurredOn,
+            count: 1,
+            value: saleValue,
+          }).select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").single();
+          if (error) throw error;
+          setSalesEntries((current) => [mapSalesEntry(data as Record<string, unknown>), ...current]);
+        }
+      }
+
       const channelLabel = pending.type === "phone" ? "telefónica" : `de ${inquiryChannelLabels[pending.type]}`;
-      setMessage(`Consulta ${channelLabel} registrada correctamente para ${pending.unit.name}.`);
+      const saleSuffix = pendingSaleType !== "none" ? ` con una venta de tipo ${saleTypeLabels[pendingSaleType]}` : "";
+      setMessage(`Consulta ${channelLabel} registrada correctamente para ${pending.unit.name}${saleSuffix}.`);
       setPending(null);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo registrar la consulta."));
@@ -449,16 +505,78 @@ export function InquiryRegister() {
     }
   }
 
-  function openWeeklyModal() {
-    setWeeklyUnitId(registrationUnitId ?? units[0]?.id ?? "");
+  function openSaleChooser() {
+    const defaultUnitId = registrationUnitId ?? units[0]?.id ?? "";
+    setSaleChooserMode("menu");
+    setQuickSaleUnitId(defaultUnitId);
+    setQuickSaleInquiryId("");
+    setQuickSaleType("pedido");
+    setQuickSaleValue("");
+    setWeeklyUnitId(defaultUnitId);
     setWeeklyDate(new Date().toISOString().slice(0, 10));
     setWeeklyDraft(blankWeeklyDraft());
-    setWeeklyModalOpen(true);
+    setSaleChooserOpen(true);
     setMessage(null);
   }
 
   function updateWeeklyDraft(type: SaleType, field: "count" | "value", value: string) {
     setWeeklyDraft((current) => ({ ...current, [type]: { ...current[type], [field]: value } }));
+  }
+
+  async function saveQuickInquirySale() {
+    if (!quickSaleInquiryId) {
+      setMessage("Selecciona una consulta.");
+      return;
+    }
+    const trimmed = quickSaleValue.trim();
+    const value = Number(trimmed);
+    if (trimmed === "" || Number.isNaN(value) || value < 0) {
+      setMessage("El valor de la venta no es válido.");
+      return;
+    }
+    const record = records.find((item) => item.id === quickSaleInquiryId);
+    if (!record) {
+      setMessage("La consulta seleccionada ya no existe.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const occurredOn = record.createdAt.slice(0, 10);
+      if (!configured) {
+        const entry: SalesEntry = {
+          id: `SE-${Date.now()}`,
+          businessUnitId: record.businessUnitId,
+          saleType: quickSaleType,
+          entryMode: "inquiry",
+          inquiryId: record.id,
+          weekStart: null,
+          occurredOn,
+          count: 1,
+          value,
+          createdBy: "demo-admin",
+          createdAt: new Date().toISOString(),
+        };
+        setSalesEntries((current) => [entry, ...current]);
+      } else {
+        const { data, error } = await createClient().from("sales_entries").insert({
+          business_unit_id: record.businessUnitId,
+          sale_type: quickSaleType,
+          entry_mode: "inquiry",
+          inquiry_id: record.id,
+          occurred_on: occurredOn,
+          count: 1,
+          value,
+        }).select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").single();
+        if (error) throw error;
+        setSalesEntries((current) => [mapSalesEntry(data as Record<string, unknown>), ...current]);
+      }
+      setMessage("Venta registrada correctamente.");
+      setSaleChooserOpen(false);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo registrar la venta."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveWeeklySales() {
@@ -511,7 +629,7 @@ export function InquiryRegister() {
         setSalesEntries((current) => [...(data ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)), ...current]);
       }
       setMessage("Ventas de la semana registradas correctamente.");
-      setWeeklyModalOpen(false);
+      setSaleChooserOpen(false);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudieron registrar las ventas de la semana."));
     } finally {
@@ -570,19 +688,17 @@ export function InquiryRegister() {
                 </div>
                 <div className="inquiry-actions-inline">
                   {inquiryChannelOrder.map((channel) => (
-                    <button key={channel} type="button" onClick={() => setPending({ unit: registrationUnit, type: channel })} className="channel-chip">
+                    <button key={channel} type="button" onClick={() => { setPending({ unit: registrationUnit, type: channel }); setPendingSaleType("none"); setPendingSaleValue(""); }} className="channel-chip">
                       <i className={`channel-dot channel-dot-${channel}`} />{inquiryChannelLabels[channel]}
                     </button>
                   ))}
+                  <button type="button" className="button button-secondary" onClick={openSaleChooser}>+ Registrar venta</button>
                 </div>
               </div>
             </article>
           ) : (
             <div className="notice"><strong>Elige una marca</strong><span>Selecciona una de las marcas de arriba para registrar una consulta.</span></div>
           )}
-          <div className="inline-form-actions">
-            <button type="button" className="button button-secondary" onClick={openWeeklyModal}>+ Registrar ventas de la semana</button>
-          </div>
         </>
       ) : <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes analizar las consultas, pero no registrar nuevas.</span></div>}
 
@@ -763,7 +879,22 @@ export function InquiryRegister() {
         onCancel={() => setPending(null)}
         onConfirm={() => void confirmRegistration()}
       >
-        {pending ? <div className="confirmation-summary"><span>Unidad de negocio</span><strong>{pending.unit.name}</strong><span>Canal</span><strong>{inquiryChannelLabels[pending.type]}</strong><p>La fecha, la hora y tu usuario se guardarán automáticamente.</p></div> : null}
+        {pending ? (
+          <>
+            <div className="confirmation-summary"><span>Unidad de negocio</span><strong>{pending.unit.name}</strong><span>Canal</span><strong>{inquiryChannelLabels[pending.type]}</strong><p>La fecha, la hora y tu usuario se guardarán automáticamente.</p></div>
+            <div className="confirmation-sale-form">
+              <label><span>Venta asociada (opcional)</span>
+                <select value={pendingSaleType} onChange={(event) => setPendingSaleType(event.target.value as SaleType | "none")}>
+                  <option value="none">Sin venta</option>
+                  {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
+                </select>
+              </label>
+              {pendingSaleType !== "none" ? (
+                <label><span>Valor (€)</span><input type="number" min="0" step="0.01" placeholder="0,00" value={pendingSaleValue} onChange={(event) => setPendingSaleValue(event.target.value)} /></label>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </ConfirmationDialog>
 
       <ConfirmationDialog
@@ -838,31 +969,86 @@ export function InquiryRegister() {
         {pendingDeleteSale ? <div className="confirmation-summary"><span>Tipo</span><strong>{saleTypeLabels[pendingDeleteSale.saleType]}</strong><span>Valor</span><strong>{currencyFormatter.format(pendingDeleteSale.value)}</strong></div> : null}
       </ConfirmationDialog>
 
-      <Modal open={weeklyModalOpen} title="Registrar ventas de la semana" eyebrow="Registro en bloque" onClose={() => setWeeklyModalOpen(false)}>
-        <div className="form-grid">
-          <label><span>Unidad de negocio</span>
-            <select value={weeklyUnitId} onChange={(event) => setWeeklyUnitId(event.target.value)}>
-              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-            </select>
-          </label>
-          <label><span>Semana (elige cualquier día)</span>
-            <input type="date" value={weeklyDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setWeeklyDate(event.target.value)} />
-          </label>
-        </div>
-        <p className="muted">Semana del {formatDate(isoWeekStart(weeklyDate))}. Indica cuántas ventas de cada tipo y su valor total en euros.</p>
-        <div className="weekly-sales-grid">
-          {saleTypeOrder.map((type) => (
-            <div className="weekly-sales-row" key={type}>
-              <strong>{saleTypeLabels[type]}</strong>
-              <label><span>Cantidad</span><input type="number" min="0" step="1" placeholder="0" value={weeklyDraft[type].count} onChange={(event) => updateWeeklyDraft(type, "count", event.target.value)} /></label>
-              <label><span>Valor total (€)</span><input type="number" min="0" step="0.01" placeholder="0,00" value={weeklyDraft[type].value} onChange={(event) => updateWeeklyDraft(type, "value", event.target.value)} /></label>
+      <Modal
+        open={saleChooserOpen}
+        title="Registrar venta"
+        eyebrow={saleChooserMode === "menu" ? "Elige un tipo de registro" : saleChooserMode === "inquiry" ? "Venta de una consulta" : "Venta por periodo"}
+        onClose={() => setSaleChooserOpen(false)}
+      >
+        {saleChooserMode === "menu" ? (
+          <section className="brand-picker">
+            <button type="button" className="brand-tile department-tile" onClick={() => setSaleChooserMode("inquiry")}>
+              <strong>Venta de una consulta</strong>
+              <span>Vincula el tipo y el valor de la venta a una consulta ya registrada.</span>
+            </button>
+            <button type="button" className="brand-tile department-tile" onClick={() => setSaleChooserMode("weekly")}>
+              <strong>Venta por periodo</strong>
+              <span>Registra de golpe el total de ventas de una semana, por tipo.</span>
+            </button>
+          </section>
+        ) : null}
+
+        {saleChooserMode === "inquiry" ? (
+          <>
+            <div className="form-grid">
+              <label><span>Unidad de negocio</span>
+                <select value={quickSaleUnitId} onChange={(event) => { setQuickSaleUnitId(event.target.value); setQuickSaleInquiryId(""); }}>
+                  {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                </select>
+              </label>
+              <label><span>Consulta</span>
+                <select value={quickSaleInquiryId} onChange={(event) => setQuickSaleInquiryId(event.target.value)}>
+                  <option value="">Selecciona una consulta</option>
+                  {quickSaleUnitRecords.map((record) => (
+                    <option key={record.id} value={record.id}>{formatDate(record.createdAt)} · {inquiryChannelLabels[record.inquiryType]}</option>
+                  ))}
+                </select>
+              </label>
+              <label><span>Tipo de venta</span>
+                <select value={quickSaleType} onChange={(event) => setQuickSaleType(event.target.value as SaleType)}>
+                  {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
+                </select>
+              </label>
+              <label><span>Valor (€)</span>
+                <input type="number" min="0" step="0.01" placeholder="0,00" value={quickSaleValue} onChange={(event) => setQuickSaleValue(event.target.value)} />
+              </label>
             </div>
-          ))}
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={() => setWeeklyModalOpen(false)}>Cancelar</button>
-          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveWeeklySales()}>{busy ? "Guardando…" : "Guardar ventas"}</button>
-        </div>
+            {quickSaleUnitRecords.length === 0 ? <p className="muted">No hay consultas recientes registradas para esta unidad.</p> : null}
+            <div className="modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setSaleChooserMode("menu")}>Atrás</button>
+              <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveQuickInquirySale()}>{busy ? "Guardando…" : "Guardar venta"}</button>
+            </div>
+          </>
+        ) : null}
+
+        {saleChooserMode === "weekly" ? (
+          <>
+            <div className="form-grid">
+              <label><span>Unidad de negocio</span>
+                <select value={weeklyUnitId} onChange={(event) => setWeeklyUnitId(event.target.value)}>
+                  {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                </select>
+              </label>
+              <label><span>Semana (elige cualquier día)</span>
+                <input type="date" value={weeklyDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setWeeklyDate(event.target.value)} />
+              </label>
+            </div>
+            <p className="muted">Semana del {formatDate(isoWeekStart(weeklyDate))}. Indica cuántas ventas de cada tipo y su valor total en euros.</p>
+            <div className="weekly-sales-grid">
+              {saleTypeOrder.map((type) => (
+                <div className="weekly-sales-row" key={type}>
+                  <strong>{saleTypeLabels[type]}</strong>
+                  <label><span>Cantidad</span><input type="number" min="0" step="1" placeholder="0" value={weeklyDraft[type].count} onChange={(event) => updateWeeklyDraft(type, "count", event.target.value)} /></label>
+                  <label><span>Valor total (€)</span><input type="number" min="0" step="0.01" placeholder="0,00" value={weeklyDraft[type].value} onChange={(event) => updateWeeklyDraft(type, "value", event.target.value)} /></label>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setSaleChooserMode("menu")}>Atrás</button>
+              <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveWeeklySales()}>{busy ? "Guardando…" : "Guardar ventas"}</button>
+            </div>
+          </>
+        ) : null}
       </Modal>
     </div>
   );
