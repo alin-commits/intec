@@ -1,4 +1,4 @@
-import type { AppRole, CampaignStatus, InquiryType, LeadStatus } from "@/lib/types";
+import type { AppRole, CampaignStatus, InquiryType, LeadStatus, SaleType } from "@/lib/types";
 
 export const leadStatusLabels: Record<LeadStatus, string> = {
   new: "Nuevo",
@@ -49,4 +49,12 @@ export const campaignStatusLabels: Record<CampaignStatus, string> = {
   active: "Activa",
   finished: "Finalizada",
   archived: "Archivada",
+};
+
+export const saleTypeOrder: SaleType[] = ["oferta", "seguimiento", "pedido"];
+
+export const saleTypeLabels: Record<SaleType, string> = {
+  oferta: "Oferta",
+  seguimiento: "Seguimiento",
+  pedido: "Pedido",
 };

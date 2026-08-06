@@ -71,7 +71,23 @@ export type InquiryRecord = {
   inquiryType: InquiryType;
   createdAt: string;
   createdBy?: string | null;
-  saleValue: number | null;
+};
+
+export type SaleType = "oferta" | "seguimiento" | "pedido";
+export type SaleEntryMode = "inquiry" | "weekly";
+
+export type SalesEntry = {
+  id: string;
+  businessUnitId: string;
+  saleType: SaleType;
+  entryMode: SaleEntryMode;
+  inquiryId: string | null;
+  weekStart: string | null;
+  occurredOn: string;
+  count: number;
+  value: number;
+  createdBy: string | null;
+  createdAt: string;
 };
 
 export type Profile = {

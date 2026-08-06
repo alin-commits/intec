@@ -8,13 +8,13 @@ import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { CONSULTAS_ROLES, inquiryChannelLabels, inquiryChannelOrder } from "@/lib/constants";
-import { businessUnits as demoBusinessUnits, demoInquiries } from "@/lib/demo-data";
+import { CONSULTAS_ROLES, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
-import { dayNumber, daysInMonth, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
+import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import type { BusinessUnit, InquiryRecord, InquiryType } from "@/lib/types";
+import type { BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
 
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
@@ -33,8 +33,27 @@ function mapInquiry(row: Record<string, unknown>): InquiryRecord {
     inquiryType: row.inquiry_type as InquiryType,
     createdAt: String(row.created_at),
     createdBy: row.created_by ? String(row.created_by) : null,
-    saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
   };
+}
+
+function mapSalesEntry(row: Record<string, unknown>): SalesEntry {
+  return {
+    id: String(row.id),
+    businessUnitId: String(row.business_unit_id),
+    saleType: row.sale_type as SaleType,
+    entryMode: row.entry_mode as SalesEntry["entryMode"],
+    inquiryId: row.inquiry_id ? String(row.inquiry_id) : null,
+    weekStart: row.week_start ? String(row.week_start) : null,
+    occurredOn: String(row.occurred_on),
+    count: Number(row.count ?? 1),
+    value: Number(row.value ?? 0),
+    createdBy: row.created_by ? String(row.created_by) : null,
+    createdAt: String(row.created_at),
+  };
+}
+
+function blankWeeklyDraft(): Record<SaleType, { count: string; value: string }> {
+  return { oferta: { count: "", value: "" }, seguimiento: { count: "", value: "" }, pedido: { count: "", value: "" } };
 }
 
 function inRange(record: InquiryRecord, start: string, end: string) {
@@ -56,6 +75,7 @@ export function InquiryRegister() {
   const currentMonthKey = monthKey();
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [records, setRecords] = useState<InquiryRecord[]>(demoInquiries);
+  const [salesEntries, setSalesEntries] = useState<SalesEntry[]>(demoSalesEntries);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
   const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
@@ -73,7 +93,13 @@ export function InquiryRegister() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
-  const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; saleValue: string }>({ businessUnitId: "", inquiryType: "phone", saleValue: "" });
+  const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType }>({ businessUnitId: "", inquiryType: "phone" });
+  const [newSaleDraft, setNewSaleDraft] = useState<{ saleType: SaleType; value: string }>({ saleType: "pedido", value: "" });
+  const [pendingDeleteSale, setPendingDeleteSale] = useState<SalesEntry | null>(null);
+  const [weeklyModalOpen, setWeeklyModalOpen] = useState(false);
+  const [weeklyUnitId, setWeeklyUnitId] = useState("");
+  const [weeklyDate, setWeeklyDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [weeklyDraft, setWeeklyDraft] = useState(() => blankWeeklyDraft());
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
@@ -100,17 +126,19 @@ export function InquiryRegister() {
     const fetchEnd = yearRange(fetchToYear).end;
     void (async () => {
       const supabase = createClient();
-      const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: authData }] = await Promise.all([
+      const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
-        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at, sale_value").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
+        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
+        supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)).order("occurred_on", { ascending: false }),
         supabase.auth.getUser(),
       ]);
-      if (unitError || inquiryError) {
-        setMessage(reportSafeError(unitError ?? inquiryError, "No se pudieron cargar las consultas."));
+      if (unitError || inquiryError || salesError) {
+        setMessage(reportSafeError(unitError ?? inquiryError ?? salesError, "No se pudieron cargar las consultas."));
         return;
       }
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
       setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
+      setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
         setCurrentUserId(authData.user.id);
         const { data: profile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
@@ -235,6 +263,37 @@ export function InquiryRegister() {
     });
   }, [currentRecords, previousRecords, selectedUnit, sortColumn, sortDirection, units]);
 
+  const periodStartDate = currentPeriod.start.slice(0, 10);
+  const periodEndDate = currentPeriod.end.slice(0, 10);
+  const filteredSales = useMemo(() => salesEntries.filter((entry) =>
+    entry.occurredOn >= periodStartDate && entry.occurredOn < periodEndDate
+    && (selectedUnit === "all" || entry.businessUnitId === selectedUnit)
+  ), [salesEntries, periodStartDate, periodEndDate, selectedUnit]);
+
+  const salesSummary = useMemo(() => {
+    const base: Record<SaleType, { count: number; value: number }> = { oferta: { count: 0, value: 0 }, seguimiento: { count: 0, value: 0 }, pedido: { count: 0, value: 0 } };
+    for (const entry of filteredSales) {
+      base[entry.saleType].count += entry.count;
+      base[entry.saleType].value += entry.value;
+    }
+    return base;
+  }, [filteredSales]);
+
+  const recentSales = useMemo(() => filteredSales.slice().sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt)).slice(0, 12), [filteredSales]);
+
+  const salesByInquiry = useMemo(() => {
+    const map = new Map<string, SalesEntry[]>();
+    for (const entry of salesEntries) {
+      if (!entry.inquiryId) continue;
+      const list = map.get(entry.inquiryId) ?? [];
+      list.push(entry);
+      map.set(entry.inquiryId, list);
+    }
+    return map;
+  }, [salesEntries]);
+
+  const editingRecordSales = useMemo(() => editingRecord ? (salesByInquiry.get(editingRecord.id) ?? []) : [], [editingRecord, salesByInquiry]);
+
   async function confirmRegistration() {
     if (!pending || busy) return;
     setBusy(true);
@@ -248,13 +307,12 @@ export function InquiryRegister() {
           inquiryType: pending.type,
           createdAt: new Date().toISOString(),
           createdBy: "demo-admin",
-          saleValue: null,
         };
       } else {
         const { data, error } = await createClient().from("inquiries").insert({
           business_unit_id: pending.unit.id,
           inquiry_type: pending.type,
-        }).select("id, business_unit_id, inquiry_type, created_by, created_at, sale_value").single();
+        }).select("id, business_unit_id, inquiry_type, created_by, created_at").single();
         if (error) throw error;
         newRecord = mapInquiry(data as Record<string, unknown>);
       }
@@ -293,35 +351,169 @@ export function InquiryRegister() {
 
   function openEditRecord(record: InquiryRecord) {
     setEditingRecord(record);
-    setEditDraft({ businessUnitId: record.businessUnitId, inquiryType: record.inquiryType, saleValue: record.saleValue !== null ? String(record.saleValue) : "" });
+    setEditDraft({ businessUnitId: record.businessUnitId, inquiryType: record.inquiryType });
+    setNewSaleDraft({ saleType: "pedido", value: "" });
     setMessage(null);
   }
 
   async function saveEditRecord() {
     if (!editingRecord) return;
-    const trimmed = editDraft.saleValue.trim();
-    const value = trimmed === "" ? null : Number(trimmed);
-    if (value !== null && (Number.isNaN(value) || value < 0)) {
-      setMessage("El valor de venta no es válido.");
-      return;
-    }
     setBusy(true);
     try {
       if (configured) {
         const { error } = await createClient().from("inquiries").update({
           business_unit_id: editDraft.businessUnitId,
           inquiry_type: editDraft.inquiryType,
-          sale_value: value,
         }).eq("id", editingRecord.id);
         if (error) throw error;
       }
       setRecords((current) => current.map((item) => item.id === editingRecord.id
-        ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType, saleValue: value }
+        ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType }
         : item));
       setMessage("Consulta actualizada.");
       setEditingRecord(null);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo actualizar la consulta."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function canDeleteSale(entry: SalesEntry): boolean {
+    return isAdmin || (currentUserId !== null && entry.createdBy === currentUserId);
+  }
+
+  async function addSaleToInquiry() {
+    if (!editingRecord) return;
+    const trimmed = newSaleDraft.value.trim();
+    const value = Number(trimmed);
+    if (trimmed === "" || Number.isNaN(value) || value < 0) {
+      setMessage("El valor de la venta no es válido.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const occurredOn = editingRecord.createdAt.slice(0, 10);
+      if (!configured) {
+        const entry: SalesEntry = {
+          id: `SE-${Date.now()}`,
+          businessUnitId: editDraft.businessUnitId,
+          saleType: newSaleDraft.saleType,
+          entryMode: "inquiry",
+          inquiryId: editingRecord.id,
+          weekStart: null,
+          occurredOn,
+          count: 1,
+          value,
+          createdBy: "demo-admin",
+          createdAt: new Date().toISOString(),
+        };
+        setSalesEntries((current) => [entry, ...current]);
+      } else {
+        const { data, error } = await createClient().from("sales_entries").insert({
+          business_unit_id: editDraft.businessUnitId,
+          sale_type: newSaleDraft.saleType,
+          entry_mode: "inquiry",
+          inquiry_id: editingRecord.id,
+          occurred_on: occurredOn,
+          count: 1,
+          value,
+        }).select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").single();
+        if (error) throw error;
+        setSalesEntries((current) => [mapSalesEntry(data as Record<string, unknown>), ...current]);
+      }
+      setNewSaleDraft({ saleType: "pedido", value: "" });
+      setMessage("Venta añadida a la consulta.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo añadir la venta."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDeleteSale() {
+    if (!pendingDeleteSale) return;
+    setBusy(true);
+    try {
+      if (configured) {
+        const { error } = await createClient().from("sales_entries").delete().eq("id", pendingDeleteSale.id);
+        if (error) throw error;
+      }
+      setSalesEntries((current) => current.filter((entry) => entry.id !== pendingDeleteSale.id));
+      setMessage("Venta eliminada.");
+      setPendingDeleteSale(null);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo eliminar la venta. Solo puedes borrar tus propios registros de los últimos 10 minutos, o pide a un administrador."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openWeeklyModal() {
+    setWeeklyUnitId(registrationUnitId ?? units[0]?.id ?? "");
+    setWeeklyDate(new Date().toISOString().slice(0, 10));
+    setWeeklyDraft(blankWeeklyDraft());
+    setWeeklyModalOpen(true);
+    setMessage(null);
+  }
+
+  function updateWeeklyDraft(type: SaleType, field: "count" | "value", value: string) {
+    setWeeklyDraft((current) => ({ ...current, [type]: { ...current[type], [field]: value } }));
+  }
+
+  async function saveWeeklySales() {
+    if (!weeklyUnitId) {
+      setMessage("Selecciona una unidad de negocio.");
+      return;
+    }
+    const weekStart = isoWeekStart(weeklyDate);
+    const rows = saleTypeOrder
+      .map((type) => ({ type, count: Number(weeklyDraft[type].count) || 0, value: Number(weeklyDraft[type].value) || 0 }))
+      .filter((row) => row.count > 0 || row.value > 0);
+    if (rows.length === 0) {
+      setMessage("Añade al menos una cantidad o un valor.");
+      return;
+    }
+    if (rows.some((row) => row.count <= 0)) {
+      setMessage("Indica la cantidad de ventas para cada tipo con valor registrado.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (!configured) {
+        const newEntries: SalesEntry[] = rows.map((row) => ({
+          id: `SE-${Date.now()}-${row.type}`,
+          businessUnitId: weeklyUnitId,
+          saleType: row.type,
+          entryMode: "weekly",
+          inquiryId: null,
+          weekStart,
+          occurredOn: weekStart,
+          count: row.count,
+          value: row.value,
+          createdBy: "demo-admin",
+          createdAt: new Date().toISOString(),
+        }));
+        setSalesEntries((current) => [...newEntries, ...current]);
+      } else {
+        const payload = rows.map((row) => ({
+          business_unit_id: weeklyUnitId,
+          sale_type: row.type,
+          entry_mode: "weekly" as const,
+          week_start: weekStart,
+          occurred_on: weekStart,
+          count: row.count,
+          value: row.value,
+        }));
+        const { data, error } = await createClient().from("sales_entries").insert(payload)
+          .select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at");
+        if (error) throw error;
+        setSalesEntries((current) => [...(data ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)), ...current]);
+      }
+      setMessage("Ventas de la semana registradas correctamente.");
+      setWeeklyModalOpen(false);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudieron registrar las ventas de la semana."));
     } finally {
       setBusy(false);
     }
@@ -388,6 +580,9 @@ export function InquiryRegister() {
           ) : (
             <div className="notice"><strong>Elige una marca</strong><span>Selecciona una de las marcas de arriba para registrar una consulta.</span></div>
           )}
+          <div className="inline-form-actions">
+            <button type="button" className="button button-secondary" onClick={openWeeklyModal}>+ Registrar ventas de la semana</button>
+          </div>
         </>
       ) : <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes analizar las consultas, pero no registrar nuevas.</span></div>}
 
@@ -464,6 +659,15 @@ export function InquiryRegister() {
         <KpiCard label="Unidad líder" value={topUnit ? topUnit.unit.name : "—"} delta={topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "Sin datos"} helper="" />
       </section>
 
+      <section className="section-heading">
+        <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta se registra por consulta (al editarla) o de golpe por semana. La cantidad indica cuántas ventas componen el valor total.</p></div>
+      </section>
+      <section className="sales-summary-grid">
+        {saleTypeOrder.map((type) => (
+          <KpiCard key={type} label={saleTypeLabels[type]} value={currencyFormatter.format(salesSummary[type].value)} delta={`${numberFormatter.format(salesSummary[type].count)} ventas`} helper="del periodo seleccionado" />
+        ))}
+      </section>
+
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
           <div className="panel-heading"><div><span className="eyebrow">Evolución</span><h2>{viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}`}</h2></div><span className="muted">Web y telefónicas</span></div>
@@ -509,15 +713,17 @@ export function InquiryRegister() {
       </section>
 
       <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Corrige un error editando el registro (unidad, canal o valor de venta), o elimínalo si no debía existir</span></div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Valor de venta</th><th></th></tr></thead><tbody>{filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12).map((record) => {
+        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Corrige un error editando el registro (unidad, canal o ventas asociadas), o elimínalo si no debía existir</span></div>
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Ventas</th><th></th></tr></thead><tbody>{filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12).map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
+          const recordSales = salesByInquiry.get(record.id) ?? [];
+          const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
           return (
             <tr key={record.id}>
               <td>{formatDate(record.createdAt)}</td>
               <td>{unit?.name ?? "—"}</td>
               <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
-              <td>{record.saleValue ? currencyFormatter.format(record.saleValue) : "—"}</td>
+              <td>{recordSalesTotal ? currencyFormatter.format(recordSalesTotal) : "—"}</td>
               <td className="recent-inquiries-actions">
                 {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
                 {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
@@ -525,6 +731,28 @@ export function InquiryRegister() {
             </tr>
           );
         })}</tbody></table></div>
+      </section>
+
+      <section className="panel table-panel recent-inquiries">
+        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div><span className="muted">Incluye ventas por consulta y bloques semanales</span></div>
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.map((entry) => {
+          const unit = units.find((item) => item.id === entry.businessUnitId);
+          return (
+            <tr key={entry.id}>
+              <td>{formatDate(entry.occurredOn)}</td>
+              <td>{unit?.name ?? "—"}</td>
+              <td><span className="badge">{saleTypeLabels[entry.saleType]}</span></td>
+              <td>{entry.entryMode === "inquiry" ? "Consulta" : "Semanal"}</td>
+              <td>{numberFormatter.format(entry.count)}</td>
+              <td>{currencyFormatter.format(entry.value)}</td>
+              <td className="recent-inquiries-actions">
+                {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
+              </td>
+            </tr>
+          );
+        })}
+        {recentSales.length === 0 ? <tr><td colSpan={7} className="muted">Sin ventas registradas en este periodo.</td></tr> : null}
+        </tbody></table></div>
       </section>
 
       <ConfirmationDialog
@@ -562,13 +790,78 @@ export function InquiryRegister() {
               {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
             </select>
           </label>
-          <label><span>Valor de venta</span>
-            <input type="number" min="0" step="0.01" placeholder="—" value={editDraft.saleValue} onChange={(event) => setEditDraft((current) => ({ ...current, saleValue: event.target.value }))} />
+        </div>
+
+        <h3>Ventas de esta consulta</h3>
+        {editingRecordSales.length > 0 ? (
+          <div className="sale-entry-list">
+            {editingRecordSales.map((entry) => (
+              <div className="sale-entry-row" key={entry.id}>
+                <div className="sale-entry-row-info">
+                  <span className="badge">{saleTypeLabels[entry.saleType]}</span>
+                  <strong>{currencyFormatter.format(entry.value)}</strong>
+                </div>
+                {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
+              </div>
+            ))}
+          </div>
+        ) : <p className="muted">Todavía no hay ventas registradas en esta consulta.</p>}
+        {canRegister ? (
+          <div className="sale-entry-add-form">
+            <label><span>Tipo</span>
+              <select value={newSaleDraft.saleType} onChange={(event) => setNewSaleDraft((current) => ({ ...current, saleType: event.target.value as SaleType }))}>
+                {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
+              </select>
+            </label>
+            <label><span>Valor (€)</span>
+              <input type="number" min="0" step="0.01" placeholder="0,00" value={newSaleDraft.value} onChange={(event) => setNewSaleDraft((current) => ({ ...current, value: event.target.value }))} />
+            </label>
+            <button type="button" className="button button-secondary" disabled={busy} onClick={() => void addSaleToInquiry()}>Añadir venta</button>
+          </div>
+        ) : null}
+
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cerrar</button>
+          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveEditRecord()}>{busy ? "Guardando…" : "Guardar cambios"}</button>
+        </div>
+      </Modal>
+
+      <ConfirmationDialog
+        open={Boolean(pendingDeleteSale)}
+        title="¿Eliminar esta venta?"
+        confirmLabel="Eliminar"
+        destructive
+        busy={busy}
+        onCancel={() => setPendingDeleteSale(null)}
+        onConfirm={() => void confirmDeleteSale()}
+      >
+        {pendingDeleteSale ? <div className="confirmation-summary"><span>Tipo</span><strong>{saleTypeLabels[pendingDeleteSale.saleType]}</strong><span>Valor</span><strong>{currencyFormatter.format(pendingDeleteSale.value)}</strong></div> : null}
+      </ConfirmationDialog>
+
+      <Modal open={weeklyModalOpen} title="Registrar ventas de la semana" eyebrow="Registro en bloque" onClose={() => setWeeklyModalOpen(false)}>
+        <div className="form-grid">
+          <label><span>Unidad de negocio</span>
+            <select value={weeklyUnitId} onChange={(event) => setWeeklyUnitId(event.target.value)}>
+              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </label>
+          <label><span>Semana (elige cualquier día)</span>
+            <input type="date" value={weeklyDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setWeeklyDate(event.target.value)} />
           </label>
         </div>
+        <p className="muted">Semana del {formatDate(isoWeekStart(weeklyDate))}. Indica cuántas ventas de cada tipo y su valor total en euros.</p>
+        <div className="weekly-sales-grid">
+          {saleTypeOrder.map((type) => (
+            <div className="weekly-sales-row" key={type}>
+              <strong>{saleTypeLabels[type]}</strong>
+              <label><span>Cantidad</span><input type="number" min="0" step="1" placeholder="0" value={weeklyDraft[type].count} onChange={(event) => updateWeeklyDraft(type, "count", event.target.value)} /></label>
+              <label><span>Valor total (€)</span><input type="number" min="0" step="0.01" placeholder="0,00" value={weeklyDraft[type].value} onChange={(event) => updateWeeklyDraft(type, "value", event.target.value)} /></label>
+            </div>
+          ))}
+        </div>
         <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cancelar</button>
-          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveEditRecord()}>{busy ? "Guardando…" : "Guardar cambios"}</button>
+          <button type="button" className="button button-secondary" onClick={() => setWeeklyModalOpen(false)}>Cancelar</button>
+          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveWeeklySales()}>{busy ? "Guardando…" : "Guardar ventas"}</button>
         </div>
       </Modal>
     </div>

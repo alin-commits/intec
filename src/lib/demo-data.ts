@@ -1,4 +1,4 @@
-import type { BusinessUnit, Campaign, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile } from "@/lib/types";
+import type { BusinessUnit, Campaign, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile, SalesEntry } from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
   { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp" },
@@ -60,7 +60,6 @@ function distributeRecords(
       inquiryType: type,
       createdAt: new Date(Date.UTC(year, monthNumber - 1, day, hour, minute)).toISOString(),
       createdBy: "demo-admin",
-      saleValue: null,
     });
   }
 }
@@ -92,6 +91,10 @@ export const demoInquiries: InquiryRecord[] = (() => {
   }
   return records;
 })();
+
+// Empty in demo mode: the demo dashboard's "Valor ganado" figure comes from
+// the static monthlyStats above, not from recomputing sales entries.
+export const demoSalesEntries: SalesEntry[] = [];
 
 export const demoLeads: Lead[] = [
   {

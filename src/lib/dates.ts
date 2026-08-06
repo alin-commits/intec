@@ -103,6 +103,15 @@ export function monthShortLabel(value: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
+/** Monday (ISO week start) of the week containing the given YYYY-MM-DD date, as YYYY-MM-DD. */
+export function isoWeekStart(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  const day = date.getUTCDay();
+  const diff = day === 0 ? 6 : day - 1;
+  date.setUTCDate(date.getUTCDate() - diff);
+  return date.toISOString().slice(0, 10);
+}
+
 export function yearRange(year: number): { start: string; end: string } {
   return {
     start: new Date(Date.UTC(year, 0, 1)).toISOString(),
