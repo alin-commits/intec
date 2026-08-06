@@ -69,12 +69,22 @@ function UsuariosIcon() {
   );
 }
 
+function TicketsIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M3 6.4c0-1 .8-1.9 1.9-1.9h10.2c1 0 1.9.8 1.9 1.9v1.2a1.7 1.7 0 0 0 0 3.2v1.2c0 1-.8 1.9-1.9 1.9H4.9c-1 0-1.9-.8-1.9-1.9v-1.2a1.7 1.7 0 0 0 0-3.2V6.4Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M8.2 4.5v11" stroke="currentColor" strokeWidth="1.5" strokeDasharray="1.6 1.6" />
+    </svg>
+  );
+}
+
 const navigation = [
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon },
   { href: "/leads", label: "Leads", icon: LeadsIcon },
   { href: "/campanas", label: "Campañas", icon: CampanasIcon },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon },
+  { href: "/tickets", label: "Tickets", icon: TicketsIcon, adminOnly: true },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, adminOnly: true },
 ];
 
@@ -84,6 +94,7 @@ const pageTitles: Record<string, string> = {
   "/leads": "Leads",
   "/campanas": "Campañas",
   "/unidades": "Unidades de negocio",
+  "/tickets": "Tickets informáticos",
   "/usuarios": "Usuarios",
 };
 
