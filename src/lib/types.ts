@@ -1,5 +1,5 @@
 export type InquiryType = "phone" | "chat" | "email_form" | "whatsapp" | "portal_rrss";
-export type AppRole = "admin" | "commercial" | "viewer" | "it";
+export type AppRole = "admin" | "commercial" | "viewer" | "it" | "marketing" | "direction";
 export type CampaignStatus = "draft" | "active" | "finished" | "archived";
 export type LeadStatus =
   | "new"

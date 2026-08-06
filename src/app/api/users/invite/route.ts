@@ -5,7 +5,7 @@ import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildInviteEmail } from "@/lib/email-templates";
 import type { AppRole } from "@/lib/types";
 
-const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer", "it"]);
+const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer", "it", "marketing", "direction"]);
 
 export async function POST(request: Request) {
   const supabase = await createClient();

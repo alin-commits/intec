@@ -7,7 +7,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { inquiryChannelLabels, inquiryChannelOrder } from "@/lib/constants";
+import { CONSULTAS_ROLES, inquiryChannelLabels, inquiryChannelOrder } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, demoInquiries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
@@ -73,6 +73,7 @@ export function InquiryRegister() {
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
   const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; saleValue: string }>({ businessUnitId: "", inquiryType: "phone", saleValue: "" });
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
 
@@ -114,6 +115,9 @@ export function InquiryRegister() {
         const { data: profile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
         setCanRegister(profile?.role === "admin" || profile?.role === "commercial");
         setIsAdmin(profile?.role === "admin");
+        setAccess(profile && CONSULTAS_ROLES.includes(profile.role) ? "allowed" : "denied");
+      } else {
+        setAccess("denied");
       }
     })();
   }, [configured, selectedMonthYear, selectedYear]);
@@ -328,6 +332,19 @@ export function InquiryRegister() {
       setSortColumn(column);
       setSortDirection(column === "label" ? "asc" : "desc");
     }
+  }
+
+  if (access === "checking") return <div className="page-stack" />;
+
+  if (access === "denied") {
+    return (
+      <div className="page-stack">
+        <section className="panel">
+          <h2>No tienes permiso para ver esta página</h2>
+          <p>Consultas no está disponible para tu rol.</p>
+        </section>
+      </div>
+    );
   }
 
   return (

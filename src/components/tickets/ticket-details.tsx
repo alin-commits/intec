@@ -17,11 +17,12 @@ function whatsappHref(phone: string): string {
 type TicketDetailsProps = {
   ticket: Ticket;
   busy: boolean;
+  canManage: boolean;
   onStatusChange: (status: TicketStatus) => void;
   onPriorityChange: (priority: TicketPriority) => void;
 };
 
-export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange }: TicketDetailsProps) {
+export function TicketDetails({ ticket, busy, canManage, onStatusChange, onPriorityChange }: TicketDetailsProps) {
   return (
     <div className="ticket-details">
       <div className="ticket-details-grid">
@@ -60,18 +61,25 @@ export function TicketDetails({ ticket, busy, onStatusChange, onPriorityChange }
         <AttachmentGallery ticketId={ticket.id} />
       </div>
 
-      <div className="ticket-editable-grid">
-        <label><span>Estado</span>
-          <select value={ticket.status} disabled={busy} onChange={(event) => onStatusChange(event.target.value as TicketStatus)}>
-            {ticketStatusOrder.map((value) => <option key={value} value={value}>{ticketStatusLabels[value]}</option>)}
-          </select>
-        </label>
-        <label><span>Prioridad</span>
-          <select value={ticket.priority} disabled={busy} onChange={(event) => onPriorityChange(event.target.value as TicketPriority)}>
-            {ticketPriorityOrder.map((value) => <option key={value} value={value}>{ticketPriorityLabels[value]}</option>)}
-          </select>
-        </label>
-      </div>
+      {canManage ? (
+        <div className="ticket-editable-grid">
+          <label><span>Estado</span>
+            <select value={ticket.status} disabled={busy} onChange={(event) => onStatusChange(event.target.value as TicketStatus)}>
+              {ticketStatusOrder.map((value) => <option key={value} value={value}>{ticketStatusLabels[value]}</option>)}
+            </select>
+          </label>
+          <label><span>Prioridad</span>
+            <select value={ticket.priority} disabled={busy} onChange={(event) => onPriorityChange(event.target.value as TicketPriority)}>
+              {ticketPriorityOrder.map((value) => <option key={value} value={value}>{ticketPriorityLabels[value]}</option>)}
+            </select>
+          </label>
+        </div>
+      ) : (
+        <div className="ticket-details-grid">
+          <div><span>Estado</span><strong>{ticketStatusLabels[ticket.status]}</strong></div>
+          <div><span>Prioridad</span><strong>{ticketPriorityLabels[ticket.priority]}</strong></div>
+        </div>
+      )}
     </div>
   );
 }

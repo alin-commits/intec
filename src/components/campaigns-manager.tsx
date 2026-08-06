@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
-import { campaignStatusLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, campaignStatusLabels } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
@@ -97,6 +97,7 @@ export function CampaignsManager() {
   const [message, setMessage] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(true);
   const [pendingArchive, setPendingArchive] = useState<Campaign | null>(null);
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   useEffect(() => {
     if (!configured) return;
@@ -121,9 +122,11 @@ export function CampaignsManager() {
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-      setCanEdit(profile?.role === "admin");
+      setCanEdit(profile?.role === "admin" || profile?.role === "marketing");
+      setAccess(profile && CAMPAIGNS_ROLES.includes(profile.role) ? "allowed" : "denied");
     } else {
       setCanEdit(false);
+      setAccess("denied");
     }
   }
 
@@ -230,6 +233,19 @@ export function CampaignsManager() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (access === "checking") return <div className="page-stack" />;
+
+  if (access === "denied") {
+    return (
+      <div className="page-stack">
+        <section className="panel">
+          <h2>No tienes permiso para ver esta página</h2>
+          <p>Campañas no está disponible para tu rol.</p>
+        </section>
+      </div>
+    );
   }
 
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
+import { LEADS_ROLES, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate } from "@/lib/format";
@@ -105,6 +105,7 @@ export function LeadsTable() {
   const [message, setMessage] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(true);
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   useEffect(() => {
     if (!configured) return;
@@ -137,7 +138,10 @@ export function LeadsTable() {
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-      setCanEdit(profile?.role === "admin" || profile?.role === "commercial");
+      setCanEdit(profile?.role === "admin" || profile?.role === "commercial" || profile?.role === "marketing");
+      setAccess(profile && LEADS_ROLES.includes(profile.role) ? "allowed" : "denied");
+    } else {
+      setAccess("denied");
     }
   }
 
@@ -265,6 +269,19 @@ export function LeadsTable() {
   }
 
   const activeUnitLabel = unitId === "all" ? "Todas las unidades" : units.find((unit) => unit.id === unitId)?.name ?? "Leads";
+
+  if (access === "checking") return <div className="page-stack" />;
+
+  if (access === "denied") {
+    return (
+      <div className="page-stack">
+        <section className="panel">
+          <h2>No tienes permiso para ver esta página</h2>
+          <p>Leads no está disponible para tu rol.</p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="page-stack">

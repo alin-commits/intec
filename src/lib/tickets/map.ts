@@ -1,3 +1,4 @@
+import { monthKey, monthRange } from "@/lib/dates";
 import type { Ticket, TicketBlockingLevel, TicketCategory, TicketPriority, TicketStatus } from "./types";
 
 export function mapTicketRow(row: Record<string, unknown>): Ticket {
@@ -27,3 +28,28 @@ export function mapTicketRow(row: Record<string, unknown>): Ticket {
 }
 
 export const OPEN_TICKET_STATUSES: TicketStatus[] = ["new", "in_progress", "pending"];
+
+const STALE_DAYS = 3;
+
+export type TicketDashboardCounts = {
+  newCount: number;
+  openCount: number;
+  inProgressCount: number;
+  pendingCount: number;
+  resolvedThisMonthCount: number;
+  staleOpenCount: number;
+};
+
+export function computeTicketDashboardCounts(tickets: Ticket[]): TicketDashboardCounts {
+  const now = Date.now();
+  const staleThreshold = now - STALE_DAYS * 24 * 60 * 60 * 1000;
+  const { start: monthStart, end: monthEnd } = monthRange(monthKey());
+  return {
+    newCount: tickets.filter((t) => t.status === "new").length,
+    openCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status)).length,
+    inProgressCount: tickets.filter((t) => t.status === "in_progress").length,
+    pendingCount: tickets.filter((t) => t.status === "pending").length,
+    resolvedThisMonthCount: tickets.filter((t) => t.status === "resolved" && t.resolvedAt && t.resolvedAt >= monthStart && t.resolvedAt < monthEnd).length,
+    staleOpenCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status) && new Date(t.createdAt).getTime() < staleThreshold).length,
+  };
+}

@@ -7,7 +7,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow } from "@/lib/tickets/map";
-import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
+import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import type { Ticket, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 import { AddTicketNoteForm } from "./add-ticket-note-form";
 import { TicketDetails } from "./ticket-details";
@@ -52,6 +52,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [pendingArchive, setPendingArchive] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [canManage, setCanManage] = useState(false);
 
   const loadTicket = useCallback(async () => {
     const supabase = createClient();
@@ -82,10 +83,11 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       }
       setCurrentUserId(authData.user.id);
       const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (!ownProfile || !TICKET_MANAGER_ROLES.includes(ownProfile.role)) {
+      if (!ownProfile || !TICKET_VIEW_ROLES.includes(ownProfile.role)) {
         setAccess("denied");
         return;
       }
+      setCanManage(TICKET_MANAGER_ROLES.includes(ownProfile.role));
       await loadTicket();
     });
   }, [configured, loadTicket]);
@@ -175,7 +177,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       <div className="page-stack">
         <section className="panel">
           <h2>No tienes permiso para ver esta página</h2>
-          <p>La gestión de tickets está reservada a administradores.</p>
+          <p>Tickets no está disponible para tu rol.</p>
         </section>
       </div>
     );
@@ -206,8 +208,8 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
         </div>
         <div className="ticket-detail-actions">
           <Link href="/tickets" className="button button-secondary">← Volver</Link>
-          <button type="button" className="button button-secondary" onClick={() => setPendingArchive(true)}>Archivar</button>
-          <button type="button" className="button button-danger" onClick={() => setPendingDelete(true)}>Eliminar</button>
+          {canManage ? <button type="button" className="button button-secondary" onClick={() => setPendingArchive(true)}>Archivar</button> : null}
+          {canManage ? <button type="button" className="button button-danger" onClick={() => setPendingDelete(true)}>Eliminar</button> : null}
         </div>
       </section>
 
@@ -218,6 +220,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
           <TicketDetails
             ticket={ticket}
             busy={busy}
+            canManage={canManage}
             onStatusChange={(status) => void updateStatus(status)}
             onPriorityChange={(priority) => void updatePriority(priority)}
           />
@@ -225,7 +228,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
 
         <section className="ticket-detail-pane">
           <h3>Notas y actuaciones</h3>
-          <AddTicketNoteForm busy={busy} onSubmit={addNote} />
+          {canManage ? <AddTicketNoteForm busy={busy} onSubmit={addNote} /> : null}
           <TicketNotes notes={notes} events={events} authorNames={authorNames} />
         </section>
       </div>

@@ -3,6 +3,7 @@ import { ticketCategoryLabels, ticketStatusLabels, ticketStatusOrder } from "@/l
 import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { formatDate } from "@/lib/format";
 import { TicketPriorityBadge } from "./ticket-priority-badge";
+import { TicketStatusBadge } from "./ticket-status-badge";
 
 export type TicketSortColumn = "createdAt" | "priority" | "updatedAt";
 export type TicketSortState = { column: TicketSortColumn; direction: "asc" | "desc" };
@@ -13,6 +14,7 @@ type TicketTableProps = {
   onSort: (column: TicketSortColumn) => void;
   onQuickStatusChange: (ticket: Ticket, status: TicketStatus) => void;
   quickEditingId: string | null;
+  canManage: boolean;
 };
 
 const sortLabels: Record<TicketSortColumn, string> = {
@@ -21,7 +23,7 @@ const sortLabels: Record<TicketSortColumn, string> = {
   updatedAt: "Última actualización",
 };
 
-export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickEditingId }: TicketTableProps) {
+export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickEditingId, canManage }: TicketTableProps) {
   function headerCell(column: TicketSortColumn) {
     const arrow = sort.column === column ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
     return <th><button type="button" className="sort-button" onClick={() => onSort(column)}>{sortLabels[column]}{arrow}</button></th>;
@@ -55,14 +57,16 @@ export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickE
               <td>{ticketCategoryLabels[ticket.category]}</td>
               <td><TicketPriorityBadge priority={ticket.priority} /></td>
               <td>
-                <select
-                  className={`table-select badge-select badge-ticket-status-${ticket.status}`}
-                  value={ticket.status}
-                  disabled={quickEditingId === ticket.id}
-                  onChange={(event) => onQuickStatusChange(ticket, event.target.value as TicketStatus)}
-                >
-                  {ticketStatusOrder.map((value) => <option key={value} value={value}>{ticketStatusLabels[value]}</option>)}
-                </select>
+                {canManage ? (
+                  <select
+                    className={`table-select badge-select badge-ticket-status-${ticket.status}`}
+                    value={ticket.status}
+                    disabled={quickEditingId === ticket.id}
+                    onChange={(event) => onQuickStatusChange(ticket, event.target.value as TicketStatus)}
+                  >
+                    {ticketStatusOrder.map((value) => <option key={value} value={value}>{ticketStatusLabels[value]}</option>)}
+                  </select>
+                ) : <TicketStatusBadge status={ticket.status} />}
               </td>
               <td>{formatDate(ticket.updatedAt)}</td>
               <td><Link href={`/tickets/${ticket.id}`} className="button button-compact button-secondary">Ver</Link></td>

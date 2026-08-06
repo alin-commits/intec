@@ -2,6 +2,7 @@ import type { AppRole } from "@/lib/types";
 import type { TicketBlockingLevel, TicketCategory, TicketNoteType, TicketPriority, TicketStatus } from "./types";
 
 export const TICKET_MANAGER_ROLES: AppRole[] = ["admin", "it"];
+export const TICKET_VIEW_ROLES: AppRole[] = ["admin", "it", "direction"];
 
 export const ticketCategoryLabels: Record<TicketCategory, string> = {
   erp_apps: "ERP y aplicaciones",

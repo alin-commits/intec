@@ -16,7 +16,13 @@ export const roleLabels: Record<AppRole, string> = {
   commercial: "Comercial",
   viewer: "Solo lectura",
   it: "Informática",
+  marketing: "Marketing",
+  direction: "Dirección",
 };
+
+export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
+export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
+export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 
 export const leadTypeLabels = {
   sale: "Venta",

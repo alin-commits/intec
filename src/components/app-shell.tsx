@@ -6,7 +6,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
 import { roleLabels } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
+
+const departmentLabels: Record<DirectionDepartment, string> = {
+  commercial: "Comercial",
+  it: "Informática",
+  marketing: "Marketing",
+};
 
 function DashboardIcon() {
   return (
@@ -80,11 +87,11 @@ function TicketsIcon() {
 
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
-  { href: "/consultas", label: "Consultas", icon: ConsultasIcon },
-  { href: "/leads", label: "Leads", icon: LeadsIcon },
-  { href: "/campanas", label: "Campañas", icon: CampanasIcon },
-  { href: "/unidades", label: "Unidades", icon: UnidadesIcon },
-  { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: ["admin", "it"] },
+  { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: ["admin", "commercial", "viewer", "direction"] },
+  { href: "/leads", label: "Leads", icon: LeadsIcon, roles: ["admin", "commercial", "marketing", "viewer", "direction"] },
+  { href: "/campanas", label: "Campañas", icon: CampanasIcon, roles: ["admin", "marketing", "viewer", "direction"] },
+  { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: ["admin", "viewer"] },
+  { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: ["admin", "it", "direction"] },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
 
@@ -109,11 +116,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured();
   const [profile, setProfile] = useState<{ fullName: string; role: AppRole }>(() => ({ fullName: "Alín", role: "admin" }));
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [directionView, setDirectionView] = useState<DirectionDepartment | null>(() => getDirectionViewAs());
   const [lastPathname, setLastPathname] = useState(pathname);
   if (pathname !== lastPathname) {
     setLastPathname(pathname);
     setMobileNavOpen(false);
   }
+
+  useEffect(() => {
+    function refreshDirectionView() {
+      setDirectionView(getDirectionViewAs());
+    }
+    window.addEventListener("intec-direction-view-change", refreshDirectionView);
+    return () => window.removeEventListener("intec-direction-view-change", refreshDirectionView);
+  }, []);
 
   useEffect(() => {
     if (!configured) return;
@@ -133,6 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [configured]);
 
   const title = Object.entries(pageTitles).find(([path]) => pathname.startsWith(path))?.[1] ?? "Actividad comercial";
+  const navRole: AppRole | null = profile.role === "direction" ? directionView : profile.role;
 
   async function signOut() {
     if (configured) {
@@ -142,6 +159,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     } else {
       router.push("/login");
     }
+  }
+
+  function changeDepartment() {
+    setDirectionViewAs(null);
+    setDirectionView(null);
+    router.push("/dashboard");
   }
 
   return (
@@ -157,7 +180,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
-          {navigation.filter((item) => !item.roles || item.roles.includes(profile.role)).map((item) => {
+          {navigation.filter((item) => !item.roles || (navRole !== null && item.roles.includes(navRole))).map((item) => {
             const active = pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
@@ -167,9 +190,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <div className="sidebar-footer">
-          <div><strong>{profile.fullName}</strong><small>{roleLabels[profile.role]}</small></div>
-          <button type="button" className="sidebar-logout" onClick={signOut}>Salir</button>
+        <div className="sidebar-bottom">
+          {profile.role === "direction" ? (
+            <button type="button" className="sidebar-department-switch" onClick={changeDepartment}>
+              {directionView ? `Viendo: ${departmentLabels[directionView]} · Cambiar` : "Elegir departamento"}
+            </button>
+          ) : null}
+          <div className="sidebar-footer">
+            <div><strong>{profile.fullName}</strong><small>{roleLabels[profile.role]}</small></div>
+            <button type="button" className="sidebar-logout" onClick={signOut}>Salir</button>
+          </div>
         </div>
       </aside>
       <main className="main-content">

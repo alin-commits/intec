@@ -1,3 +1,5 @@
+import type { TicketDashboardCounts } from "@/lib/tickets/map";
+
 function DashboardCard({ label, value }: { label: string; value: number }) {
   return (
     <article className="panel kpi-card">
@@ -6,15 +8,6 @@ function DashboardCard({ label, value }: { label: string; value: number }) {
     </article>
   );
 }
-
-export type TicketDashboardCounts = {
-  newCount: number;
-  openCount: number;
-  inProgressCount: number;
-  pendingCount: number;
-  resolvedThisMonthCount: number;
-  staleOpenCount: number;
-};
 
 export function TicketDashboardCards({ counts }: { counts: TicketDashboardCounts }) {
   return (

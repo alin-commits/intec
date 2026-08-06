@@ -2,32 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { reportSafeError } from "@/lib/errors";
-import { monthKey, monthRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
-import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
+import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
+import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
-import { TicketDashboardCards, type TicketDashboardCounts } from "./ticket-dashboard-cards";
+import { TicketDashboardCards } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
 import { EmptyState } from "./empty-state";
 
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
-const STALE_DAYS = 3;
-
-function computeCounts(tickets: Ticket[]): TicketDashboardCounts {
-  const now = Date.now();
-  const staleThreshold = now - STALE_DAYS * 24 * 60 * 60 * 1000;
-  const { start: monthStart, end: monthEnd } = monthRange(monthKey());
-  return {
-    newCount: tickets.filter((t) => t.status === "new").length,
-    openCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status)).length,
-    inProgressCount: tickets.filter((t) => t.status === "in_progress").length,
-    pendingCount: tickets.filter((t) => t.status === "pending").length,
-    resolvedThisMonthCount: tickets.filter((t) => t.status === "resolved" && t.resolvedAt && t.resolvedAt >= monthStart && t.resolvedAt < monthEnd).length,
-    staleOpenCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status) && new Date(t.createdAt).getTime() < staleThreshold).length,
-  };
-}
 
 export function TicketsManager() {
   const configured = isSupabaseConfigured();
@@ -38,6 +22,7 @@ export function TicketsManager() {
   const [sort, setSort] = useState<TicketSortState>({ column: "createdAt", direction: "desc" });
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [quickEditingId, setQuickEditingId] = useState<string | null>(null);
+  const [canManage, setCanManage] = useState(false);
 
   useEffect(() => {
     if (!configured) return;
@@ -49,10 +34,11 @@ export function TicketsManager() {
       }
       setCurrentUserId(authData.user.id);
       const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (!ownProfile || !TICKET_MANAGER_ROLES.includes(ownProfile.role)) {
+      if (!ownProfile || !TICKET_VIEW_ROLES.includes(ownProfile.role)) {
         setAccess("denied");
         return;
       }
+      setCanManage(TICKET_MANAGER_ROLES.includes(ownProfile.role));
       setAccess("allowed");
       const { data, error } = await supabase
         .from("tickets")
@@ -69,7 +55,7 @@ export function TicketsManager() {
   }, [configured]);
 
   const departments = useMemo(() => Array.from(new Set(tickets.map((t) => t.department))).sort((a, b) => a.localeCompare(b)), [tickets]);
-  const counts = useMemo(() => computeCounts(tickets), [tickets]);
+  const counts = useMemo(() => computeTicketDashboardCounts(tickets), [tickets]);
 
   const visibleTickets = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -123,7 +109,7 @@ export function TicketsManager() {
       <div className="page-stack">
         <section className="panel">
           <h2>No tienes permiso para ver esta página</h2>
-          <p>La gestión de tickets está reservada a administradores.</p>
+          <p>Tickets no está disponible para tu rol.</p>
         </section>
       </div>
     );
@@ -144,7 +130,7 @@ export function TicketsManager() {
         {visibleTickets.length === 0 ? (
           <EmptyState title="Sin tickets" description="No hay incidencias que coincidan con los filtros seleccionados." />
         ) : (
-          <TicketTable tickets={visibleTickets} sort={sort} onSort={handleSort} onQuickStatusChange={(ticket, status) => void handleQuickStatusChange(ticket, status)} quickEditingId={quickEditingId} />
+          <TicketTable tickets={visibleTickets} sort={sort} onSort={handleSort} onQuickStatusChange={(ticket, status) => void handleQuickStatusChange(ticket, status)} quickEditingId={quickEditingId} canManage={canManage} />
         )}
       </section>
     </div>
