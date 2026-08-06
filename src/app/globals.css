@@ -301,15 +301,46 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .empty-state { padding: 40px 20px; text-align: center; color: var(--muted); }
 .empty-state strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 15px; }
 
+.ticket-detail-badges { display: flex; gap: 8px; margin-top: 10px; }
+.ticket-detail-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.ticket-detail-layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: start; }
+
+.ticket-details { display: grid; gap: 20px; }
+.ticket-details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+.ticket-details-grid div { display: grid; gap: 3px; }
+.ticket-details-grid span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.ticket-details-section h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.ticket-details-section p { margin: 0; line-height: 1.6; white-space: pre-wrap; }
+.ticket-editable-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.ticket-editable-grid label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.ticket-editable-grid select { min-height: 42px; border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; background: white; }
+
+.attachment-viewer { display: grid; gap: 10px; justify-items: start; }
+.attachment-viewer img { max-width: 100%; max-height: 320px; border-radius: 12px; border: 1px solid var(--border); }
+
+.add-note-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0 20px; }
+.add-note-form label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.add-note-form select, .add-note-form textarea { border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px; background: white; }
+
+.ticket-timeline { display: grid; gap: 12px; max-height: 480px; overflow-y: auto; }
+.ticket-timeline-item { padding: 12px 14px; border-radius: 12px; background: var(--surface-muted); }
+.ticket-timeline-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.ticket-timeline-item p { margin: 0; line-height: 1.55; }
+.ticket-timeline-item small { color: var(--muted); font-size: 11px; }
+.ticket-timeline-event { color: var(--muted); font-size: 13px; }
+.ticket-timeline-empty { color: var(--muted); font-size: 13px; }
+
 @media (max-width: 980px) {
   .inline-form { grid-template-columns: 1fr 1fr; }
   .inquiry-filters { grid-template-columns: 1fr 1fr; }
   .ticket-kpi-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
   .ticket-filters { grid-template-columns: 1fr 1fr; }
+  .ticket-detail-layout { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .form-grid, .inline-form, .inquiry-filters, .ticket-filters { grid-template-columns: 1fr; }
   .ticket-kpi-grid { grid-template-columns: 1fr 1fr; }
+  .ticket-details-grid, .ticket-editable-grid, .add-note-form { grid-template-columns: 1fr; }
   .form-field-wide { grid-column: auto; }
   .modal-backdrop { padding: 10px; align-items: end; }
   .modal-card { max-height: 92vh; border-radius: 18px 18px 0 0; }
