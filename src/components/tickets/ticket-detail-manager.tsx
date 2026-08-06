@@ -214,7 +214,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
       <div className="ticket-detail-layout">
-        <section className="panel">
+        <section className="ticket-detail-pane">
           <TicketDetails
             ticket={ticket}
             busy={busy}
@@ -223,7 +223,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
           />
         </section>
 
-        <section className="panel">
+        <section className="ticket-detail-pane">
           <h3>Notas y actuaciones</h3>
           <AddTicketNoteForm busy={busy} onSubmit={addNote} />
           <TicketNotes notes={notes} events={events} authorNames={authorNames} />

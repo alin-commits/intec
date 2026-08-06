@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
 import { roleLabels } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -124,14 +124,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!user || !active) return;
       const { data } = await supabase.from("profiles").select("full_name, role").eq("id", user.id).maybeSingle();
       if (data && active) {
-        setProfile({ fullName: data.full_name || (user.email ? nameFromEmail(user.email) : "Usuario"), role: data.role as AppRole });
+        const rawName = data.full_name || user.email || "Usuario";
+        setProfile({ fullName: rawName.includes("@") ? nameFromEmail(rawName) : rawName, role: data.role as AppRole });
       }
     }
     void loadProfile();
     return () => { active = false; };
   }, [configured]);
 
-  const initials = useMemo(() => profile.fullName.split(/\s+/).map((part) => part.charAt(0)).join("").slice(0, 2).toUpperCase(), [profile.fullName]);
   const title = Object.entries(pageTitles).find(([path]) => pathname.startsWith(path))?.[1] ?? "Actividad comercial";
 
   async function signOut() {
@@ -168,7 +168,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-footer">
-          <div className="avatar">{initials}</div>
           <div><strong>{profile.fullName}</strong><small>{roleLabels[profile.role]}</small></div>
           <button type="button" className="sidebar-logout" onClick={signOut}>Salir</button>
         </div>
