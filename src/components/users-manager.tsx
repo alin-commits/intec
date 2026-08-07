@@ -5,6 +5,7 @@ import { roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import type { AppRole, Profile } from "@/lib/types";
 
 const STORAGE_KEY = "intec-demo-users";
@@ -36,6 +37,8 @@ export function UsersManager() {
   const [message, setMessage] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     if (!configured) return;
@@ -92,6 +95,30 @@ export function UsersManager() {
     else {
       setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
       setMessage("Usuario actualizado correctamente.");
+    }
+  }
+
+  async function confirmDeleteUser() {
+    if (!pendingDelete) return;
+    setDeleteBusy(true);
+    setMessage(null);
+    try {
+      if (!configured) {
+        persistDemo(profiles.filter((profile) => profile.id !== pendingDelete.id));
+        setMessage("Usuario eliminado en el modo demostración.");
+        setPendingDelete(null);
+        return;
+      }
+      const response = await fetch(`/api/users/${pendingDelete.id}`, { method: "DELETE" });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "No se pudo eliminar el usuario.");
+      setProfiles((current) => current.filter((profile) => profile.id !== pendingDelete.id));
+      setMessage("Usuario eliminado correctamente.");
+      setPendingDelete(null);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "No se pudo eliminar el usuario.");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -171,18 +198,37 @@ export function UsersManager() {
         <div className="panel-heading"><div><span className="eyebrow">Equipo</span><h2>Usuarios registrados</h2></div></div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
             <tbody>{profiles.map((profile) => (
               <tr key={profile.id}>
                 <td><strong>{profile.fullName}</strong></td>
                 <td>{profile.email || "—"}</td>
                 <td><select className="table-select" value={profile.role} onChange={(event) => void updateProfile(profile.id, { role: event.target.value as AppRole })}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
                 <td><button type="button" className={profile.isActive ? "status-toggle active" : "status-toggle"} onClick={() => void updateProfile(profile.id, { isActive: !profile.isActive })}>{profile.isActive ? "Activo" : "Desactivado"}</button></td>
+                <td>{profile.id !== currentUserId ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}</td>
               </tr>
             ))}</tbody>
           </table>
         </div>
       </section>
+
+      <ConfirmationDialog
+        open={Boolean(pendingDelete)}
+        title="¿Eliminar este usuario?"
+        confirmLabel="Eliminar"
+        destructive
+        busy={deleteBusy}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDeleteUser()}
+      >
+        {pendingDelete ? (
+          <div className="confirmation-summary">
+            <span>Usuario</span><strong>{pendingDelete.fullName}</strong>
+            <span>Email</span><strong>{pendingDelete.email || "—"}</strong>
+            <p>Se eliminará su acceso por completo. Si tiene consultas, leads, campañas o ventas registradas, no se podrá eliminar: desactívalo en su lugar para conservar el historial.</p>
+          </div>
+        ) : null}
+      </ConfirmationDialog>
     </div>
   );
 }
