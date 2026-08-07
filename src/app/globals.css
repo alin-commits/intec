@@ -72,7 +72,7 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .filter-bar label span, .filter-summary span { color: var(--muted); font-size: 12px; font-weight: 700; }
 .filter-bar select, .filter-bar input { width: 100%; min-height: 42px; border: 1px solid var(--border); border-radius: 9px; padding: 0 11px; background: white; color: var(--text); transition: border-color .15s ease, box-shadow .15s ease; }
 .filter-bar select:focus, .filter-bar input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
-.filter-summary { min-height: 42px; padding: 7px 11px; border-radius: 9px; background: var(--surface-muted); display: grid; }
+.filter-summary { min-height: 42px; padding: 7px 11px; border-radius: 9px; background: var(--surface-muted); display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .filter-summary strong { font-size: 14px; }
 
 .filters-collapsible { padding: 12px 16px; }

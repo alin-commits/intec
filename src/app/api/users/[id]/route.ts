@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-const HISTORY_BLOCKED_MESSAGE = "No se puede eliminar: este usuario tiene consultas, leads, campañas o ventas registradas a su nombre. Desactívalo en su lugar para conservar el historial.";
-
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
@@ -25,20 +23,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const admin = createAdminClient();
     if (!admin) return NextResponse.json({ error: "Falta SUPABASE_SERVICE_ROLE_KEY en Vercel." }, { status: 503 });
 
-    // These tables restrict deleting a referenced profile, and Supabase's
-    // admin API surfaces that as an opaque 500 with no usable message — so
-    // check up front and fail with a clear reason instead of guessing.
-    const [inquiries, leads, campaigns, sales] = await Promise.all([
-      admin.from("inquiries").select("id", { count: "exact", head: true }).eq("created_by", id),
-      admin.from("leads").select("id", { count: "exact", head: true }).eq("created_by", id),
-      admin.from("campaigns").select("id", { count: "exact", head: true }).eq("created_by", id),
-      admin.from("sales_entries").select("id", { count: "exact", head: true }).eq("created_by", id),
-    ]);
-    const hasHistory = [inquiries, leads, campaigns, sales].some((result) => (result.count ?? 0) > 0);
-    if (hasHistory) {
-      return NextResponse.json({ error: HISTORY_BLOCKED_MESSAGE }, { status: 409 });
-    }
-
+    // Consultas, leads, campañas y ventas son datos compartidos por todo el
+    // equipo comercial, no propiedad exclusiva de quien los creó — created_by
+    // se limpia a NULL (ON DELETE SET NULL) en vez de bloquear el borrado.
     const { error } = await admin.auth.admin.deleteUser(id);
     if (error) {
       console.error("Error al eliminar usuario:", error);

@@ -6,7 +6,7 @@ export function isEmailConfigured(): boolean {
 }
 
 type SendEmailInput = {
-  to: string;
+  to: string | string[];
   subject: string;
   html: string;
 };

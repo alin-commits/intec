@@ -125,11 +125,20 @@ export async function POST(request: Request) {
   await admin.from("ticket_submission_log").insert({ ip });
 
   if (isEmailConfigured()) {
+    const { data: itStaff } = await admin
+      .from("profiles")
+      .select("email")
+      .in("role", ["admin", "it"])
+      .eq("is_active", true)
+      .not("email", "is", null);
+    const recipients = new Set((itStaff ?? []).map((row) => row.email as string));
     const adminEmail = process.env.ADMIN_EMAIL;
-    if (adminEmail) {
+    if (adminEmail) recipients.add(adminEmail);
+
+    if (recipients.size > 0) {
       const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
       const sent = await sendEmail({
-        to: adminEmail,
+        to: Array.from(recipients),
         ...buildTicketCreatedEmail({
           ticketNumber: ticket.ticket_number,
           ticketUrl: `${origin}/tickets/${ticket.id}`,
@@ -146,7 +155,7 @@ export async function POST(request: Request) {
       });
       if (!sent) console.error("No se pudo enviar el email de nuevo ticket vía Resend.");
     } else {
-      console.error("ADMIN_EMAIL no está configurado; no se envió notificación de nuevo ticket.");
+      console.error("No hay destinatarios de informática/admin ni ADMIN_EMAIL configurado; no se envió notificación de nuevo ticket.");
     }
   }
 
