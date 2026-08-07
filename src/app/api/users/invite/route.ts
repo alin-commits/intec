@@ -48,8 +48,12 @@ export async function POST(request: Request) {
       if (data.user) {
         await admin.from("profiles").update({ full_name: fullName, email, role, is_active: true }).eq("id", data.user.id);
       }
-      const actionLink = data.properties?.action_link;
-      if (actionLink) {
+      // Supabase's own action_link redirects with the session in a URL hash
+      // fragment, which the browser client (forced into PKCE flow by
+      // @supabase/ssr) never picks up. Send our own link with token_hash
+      // instead, verified explicitly via supabase.auth.verifyOtp() client-side.
+      if (data.properties?.hashed_token) {
+        const actionLink = `${origin}/invitacion?token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=invite`;
         const sent = await sendEmail({ to: email, ...buildInviteEmail(fullName, actionLink) });
         if (!sent) console.error("No se pudo enviar el email de invitación vía Resend a", email);
       }

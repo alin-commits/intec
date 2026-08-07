@@ -6,26 +6,27 @@ import { useEffect, useState, type FormEvent } from "react";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
+type Status = "checking" | "ready" | "invalid" | "done";
+
 export function InvitationForm() {
   const router = useRouter();
   const configured = isSupabaseConfigured();
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<Status>(() => {
+    if (!configured || typeof window === "undefined") return configured ? "checking" : "invalid";
+    return new URLSearchParams(window.location.search).get("token_hash") ? "checking" : "invalid";
+  });
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   useEffect(() => {
-    if (!configured) return;
-    const supabase = createClient();
-    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY") setReady(true);
+    if (!configured || typeof window === "undefined") return;
+    const tokenHash = new URLSearchParams(window.location.search).get("token_hash");
+    if (!tokenHash) return;
+    createClient().auth.verifyOtp({ token_hash: tokenHash, type: "invite" }).then(({ error: verifyError }) => {
+      setStatus(verifyError ? "invalid" : "ready");
     });
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setReady(true);
-    });
-    return () => subscription.subscription.unsubscribe();
   }, [configured]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -44,7 +45,7 @@ export function InvitationForm() {
       const supabase = createClient();
       const { error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) throw updateError;
-      setDone(true);
+      setStatus("done");
       setTimeout(() => {
         router.replace("/dashboard");
         router.refresh();
@@ -60,11 +61,15 @@ export function InvitationForm() {
     return <p>Supabase todavía no está configurado.</p>;
   }
 
-  if (done) {
+  if (status === "checking") {
+    return <p>Comprobando la invitación…</p>;
+  }
+
+  if (status === "done") {
     return <p>Cuenta activada. Redirigiendo…</p>;
   }
 
-  if (!ready) {
+  if (status === "invalid") {
     return (
       <div>
         <p>Este enlace de invitación no es válido o ha caducado.</p>

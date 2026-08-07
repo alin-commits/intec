@@ -35,11 +35,16 @@ export async function POST(request: Request) {
       options: { redirectTo: `${origin}/reset-password` },
     });
 
-    if (error || !data.properties?.action_link) {
+    if (error || !data.properties?.hashed_token) {
       return genericResponse();
     }
 
-    const sent = await sendEmail({ to: email, ...buildResetPasswordEmail(data.properties.action_link) });
+    // Supabase's own action_link redirects with the session in a URL hash
+    // fragment, which the browser client (forced into PKCE flow by
+    // @supabase/ssr) never picks up. Send our own link with token_hash
+    // instead, verified explicitly via supabase.auth.verifyOtp() client-side.
+    const actionLink = `${origin}/reset-password?token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=recovery`;
+    const sent = await sendEmail({ to: email, ...buildResetPasswordEmail(actionLink) });
     if (!sent) console.error("No se pudo enviar el email de restablecimiento vía Resend a", email);
 
     return genericResponse();
