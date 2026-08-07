@@ -1,4 +1,13 @@
-import type { AppRole, CampaignStatus, InquiryType, LeadStatus, SaleType } from "@/lib/types";
+import type {
+  AdCampaignStatus,
+  AppRole,
+  CampaignStatus,
+  InquiryType,
+  LeadStatus,
+  MailingCampaignType,
+  SaleType,
+  SocialNetwork,
+} from "@/lib/types";
 
 export const leadStatusLabels: Record<LeadStatus, string> = {
   new: "Nuevo",
@@ -23,6 +32,7 @@ export const roleLabels: Record<AppRole, string> = {
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
 export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "commercial", "viewer", "direction"];
+export const RRSS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 
 export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
 
@@ -64,4 +74,36 @@ export const saleTypeLabels: Record<SaleType, string> = {
   oferta: "Oferta",
   seguimiento: "Seguimiento",
   pedido: "Pedido",
+};
+
+export const socialNetworkOrder: SocialNetwork[] = ["facebook", "instagram", "linkedin"];
+
+export const socialNetworkLabels: Record<SocialNetwork, string> = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+  linkedin: "LinkedIn",
+};
+
+export const adStatusLabels: Record<AdCampaignStatus, string> = {
+  active: "Activa",
+  paused: "Detenida",
+  finished: "Completada",
+};
+
+export const mailingTypeOrder: MailingCampaignType[] = [
+  "promocion",
+  "captacion",
+  "aviso",
+  "fidelizacion",
+  "remarketing",
+  "newsletter",
+];
+
+export const mailingTypeLabels: Record<MailingCampaignType, string> = {
+  promocion: "Promoción",
+  captacion: "Captación",
+  aviso: "Aviso",
+  fidelizacion: "Fidelización",
+  remarketing: "Remarketing",
+  newsletter: "Newsletter",
 };

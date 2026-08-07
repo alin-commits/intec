@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { campaignStatusLabels } from "@/lib/constants";
-import { currencyFormatter, formatPercent } from "@/lib/format";
+import { monthKey } from "@/lib/dates";
+import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { KpiCard } from "@/components/kpi-card";
@@ -23,16 +24,28 @@ export function MarketingDashboardView() {
   const [units, setUnits] = useState<BusinessUnit[]>([]);
   const [leads, setLeads] = useState<LeadStub[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
+  const [rrssSummary, setRrssSummary] = useState({ newFollowers: 0, adsLeads: 0, adsSpend: 0, mailingSent: 0, mailingOpenRate: 0 });
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!configured) return;
     void (async () => {
       const supabase = createClient();
-      const [{ data: unitData, error: unitError }, { data: leadData, error: leadError }, { data: campaignData, error: campaignError }] = await Promise.all([
+      const currentMonth = `${monthKey()}-01`;
+      const [
+        { data: unitData, error: unitError },
+        { data: leadData, error: leadError },
+        { data: campaignData, error: campaignError },
+        { data: socialData },
+        { data: adsData },
+        { data: mailingData },
+      ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
         supabase.from("leads").select("business_unit_id, campaign_id, status, sale_value").limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
+        supabase.from("social_media_stats").select("new_followers").eq("period_month", currentMonth),
+        supabase.from("meta_ads_entries").select("amount_spent, leads"),
+        supabase.from("mailing_campaigns").select("sent_count, opens, delivered_count"),
       ]);
       if (unitError || leadError || campaignError) {
         setMessage(reportSafeError(unitError ?? leadError ?? campaignError, "No se pudieron cargar los datos de marketing."));
@@ -41,6 +54,15 @@ export function MarketingDashboardView() {
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
       setLeads((leadData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) })));
       setCampaigns((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
+      const totalDelivered = (mailingData ?? []).reduce((sum, row) => sum + Number(row.delivered_count ?? 0), 0);
+      const totalOpens = (mailingData ?? []).reduce((sum, row) => sum + Number(row.opens ?? 0), 0);
+      setRrssSummary({
+        newFollowers: (socialData ?? []).reduce((sum, row) => sum + Number(row.new_followers ?? 0), 0),
+        adsSpend: (adsData ?? []).reduce((sum, row) => sum + Number(row.amount_spent ?? 0), 0),
+        adsLeads: (adsData ?? []).reduce((sum, row) => sum + Number(row.leads ?? 0), 0),
+        mailingSent: (mailingData ?? []).reduce((sum, row) => sum + Number(row.sent_count ?? 0), 0),
+        mailingOpenRate: totalDelivered ? (totalOpens / totalDelivered) * 100 : 0,
+      });
     })();
   }, [configured]);
 
@@ -114,9 +136,25 @@ export function MarketingDashboardView() {
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-heading"><div><span className="eyebrow">Próximamente</span><h2>Métricas de redes sociales por marca</h2></div></div>
-        <p className="muted">Evolución por marca y red social — pendiente de desarrollar.</p>
+      <section className="panel table-panel">
+        <div className="panel-heading">
+          <div><span className="eyebrow">RRSS</span><h2>Redes sociales, Meta Ads y mailing</h2></div>
+          <a href="/rrss" className="text-link">Ver todas →</a>
+        </div>
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Nuevos seguidores (mes)</th><th>Gasto Meta Ads</th><th>Leads Meta Ads</th><th>Envíos de email</th><th>Open rate medio</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>{numberFormatter.format(rrssSummary.newFollowers)}</td>
+                <td>{currencyFormatter.format(rrssSummary.adsSpend)}</td>
+                <td>{numberFormatter.format(rrssSummary.adsLeads)}</td>
+                <td>{numberFormatter.format(rrssSummary.mailingSent)}</td>
+                <td>{formatPercent(rrssSummary.mailingOpenRate)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );

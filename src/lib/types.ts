@@ -109,3 +109,74 @@ export type MonthlyStat = {
   lost: number;
   saleValue: number;
 };
+
+export type SocialNetwork = "facebook" | "instagram" | "linkedin";
+
+export type SocialMediaStat = {
+  id: string;
+  businessUnitId: string;
+  network: SocialNetwork;
+  periodMonth: string;
+  followersEnd: number;
+  newFollowers: number;
+  posts: number;
+  interactions: number;
+  reach: number;
+  activeCampaigns: number;
+  linkClicks: number;
+  leads: number;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export type AdCampaignStatus = "active" | "paused" | "finished";
+
+export type MetaAdsEntry = {
+  id: string;
+  businessUnitId: string;
+  campaignName: string;
+  adSet: string | null;
+  adName: string | null;
+  objective: string | null;
+  status: AdCampaignStatus;
+  startDate: string | null;
+  endDate: string | null;
+  amountSpent: number;
+  impressions: number;
+  linkClicks: number;
+  leads: number;
+  qualifiedLeads: number;
+  purchases: number;
+  revenue: number;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export type MailingCampaignType =
+  | "promocion"
+  | "captacion"
+  | "aviso"
+  | "fidelizacion"
+  | "remarketing"
+  | "newsletter";
+
+export type MailingCampaign = {
+  id: string;
+  businessUnitId: string;
+  campaignName: string;
+  campaignType: MailingCampaignType;
+  sentDate: string;
+  sentCount: number;
+  deliveredCount: number;
+  opens: number;
+  clicks: number;
+  leads: number;
+  salesCount: number;
+  revenue: number;
+  unsubscribes: number;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};

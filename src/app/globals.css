@@ -188,6 +188,10 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .channel-dot-whatsapp { background: #15803d; }
 .channel-dot-portal_rrss { background: #c2410c; }
 .lead-filters { grid-template-columns: 2fr 1fr .7fr; }
+.view-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); }
+.view-tab { padding: 10px 16px; border: none; background: none; color: var(--muted); font-weight: 700; font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.view-tab:hover { color: var(--text); }
+.view-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
 .units-grid { display: grid; grid-template-columns: repeat(3, minmax(230px, 1fr)); gap: 18px; }
 .unit-summary { padding: 20px; }
 .unit-summary h3 { margin: 14px 0 6px; }.unit-summary p { color: var(--muted); margin: 0; font-size: 13px; }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
-import { hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, RRSS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
@@ -65,6 +65,17 @@ function UnidadesIcon() {
   );
 }
 
+function RrssIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="5" cy="10" r="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15" cy="4.8" r="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15" cy="15.2" r="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m6.9 8.9 6.2-3.1M6.9 11.1l6.2 3.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function UsuariosIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -89,7 +100,8 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: ["admin", "commercial", "viewer", "direction"] },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: ["admin", "commercial", "marketing", "viewer", "direction"] },
-  { href: "/campanas", label: "Campañas", icon: CampanasIcon, roles: ["admin", "marketing", "viewer", "direction"] },
+  { href: "/campanas", label: "Campañas", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
+  { href: "/rrss", label: "RRSS", icon: RrssIcon, roles: RRSS_ROLES },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: ["admin", "viewer"] },
   { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: ["admin", "it", "direction"] },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
@@ -105,6 +117,7 @@ const pageTitles: Record<string, string> = {
   "/consultas": "Consultas",
   "/leads": "Leads",
   "/campanas": "Campañas",
+  "/rrss": "Métricas de marketing",
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
   "/usuarios": "Usuarios",

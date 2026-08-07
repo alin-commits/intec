@@ -1,4 +1,17 @@
-import type { BusinessUnit, Campaign, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile, SalesEntry } from "@/lib/types";
+import type {
+  BusinessUnit,
+  Campaign,
+  InquiryRecord,
+  InquiryType,
+  Lead,
+  MailingCampaign,
+  MetaAdsEntry,
+  MonthlyStat,
+  Profile,
+  SalesEntry,
+  SocialMediaStat,
+  SocialNetwork,
+} from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
   { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp" },
@@ -209,6 +222,57 @@ export const campaigns: Campaign[] = [
   { id: "CP-003", businessUnitId: "sumifluid", name: "Soluciones de bombeo", channel: "Web", startDate: "2026-06-10", endDate: null, status: "active", budget: 2200, notes: null, directSalesCount: 0, directSaleValue: 0, createdAt: "2026-06-10T08:00:00Z" },
   { id: "CP-004", businessUnitId: "cst", name: "Mantenimiento industrial", channel: "Teléfono", startDate: "2026-03-01", endDate: "2026-05-31", status: "finished", budget: 1800, notes: "Contratos anuales de mantenimiento.", directSalesCount: 0, directSaleValue: 0, createdAt: "2026-03-01T08:00:00Z" },
   { id: "CP-005", businessUnitId: "jender", name: "Equipamiento verano", channel: "RRSS", startDate: "2026-05-01", endDate: "2026-07-31", status: "finished", budget: 1200, notes: null, directSalesCount: 0, directSaleValue: 0, createdAt: "2026-05-01T08:00:00Z" },
+];
+
+const socialMonthKeys = ["2026-06", "2026-07", "2026-08"];
+const socialNetworks: SocialNetwork[] = ["facebook", "instagram", "linkedin"];
+const socialBaseByUnit: Record<string, Record<SocialNetwork, number>> = {
+  intec: { facebook: 2400, instagram: 3100, linkedin: 1800 },
+  blizzcool: { facebook: 1500, instagram: 2600, linkedin: 900 },
+  sumifluid: { facebook: 1100, instagram: 1400, linkedin: 1200 },
+  jender: { facebook: 800, instagram: 1250, linkedin: 600 },
+};
+
+export const demoSocialMediaStats: SocialMediaStat[] = businessUnits.filter((unit) => unit.active).flatMap((unit) =>
+  socialNetworks.flatMap((network) =>
+    socialMonthKeys.map((month, monthIndex) => {
+      const base = socialBaseByUnit[unit.id][network];
+      const newFollowers = Math.round(base * 0.015 * (1 + monthIndex * 0.15));
+      const followersEnd = base + newFollowers * (monthIndex + 1);
+      const interactions = Math.round(followersEnd * 0.018 * (1 + monthIndex * 0.1));
+      return {
+        id: `SMS-${unit.id}-${network}-${month}`,
+        businessUnitId: unit.id,
+        network,
+        periodMonth: `${month}-01`,
+        followersEnd,
+        newFollowers,
+        posts: 4 + monthIndex + (network === "instagram" ? 3 : 0),
+        interactions,
+        reach: Math.round(followersEnd * 2.4),
+        activeCampaigns: monthIndex === socialMonthKeys.length - 1 ? 1 : 0,
+        linkClicks: Math.round(interactions * 0.12),
+        leads: Math.round(interactions * 0.02),
+        notes: null,
+        createdBy: "demo-admin",
+        createdAt: `${month}-20T09:00:00Z`,
+      };
+    }),
+  ),
+);
+
+export const demoMetaAdsEntries: MetaAdsEntry[] = [
+  { id: "ADS-001", businessUnitId: "blizzcool", campaignName: "Distribuidores verano", adSet: "Norte peninsular", adName: "Carrusel distribuidores", objective: "Leads", status: "active", startDate: "2026-06-01", endDate: null, amountSpent: 342.5, impressions: 48200, linkClicks: 980, leads: 64, qualifiedLeads: 41, purchases: 9, revenue: 5220, notes: null, createdBy: "demo-admin", createdAt: "2026-06-01T09:00:00Z" },
+  { id: "ADS-002", businessUnitId: "intec", campaignName: "Generadores profesionales", adSet: "Obra e industria", adName: "Vídeo generador 7kW", objective: "Conversiones", status: "active", startDate: "2026-05-15", endDate: null, amountSpent: 410.2, impressions: 61500, linkClicks: 1240, leads: 88, qualifiedLeads: 52, purchases: 14, revenue: 8460, notes: null, createdBy: "demo-admin", createdAt: "2026-05-15T09:00:00Z" },
+  { id: "ADS-003", businessUnitId: "sumifluid", campaignName: "Soluciones de bombeo", adSet: "Mantenimiento industrial", adName: "Imagen bomba trasvase", objective: "Tráfico", status: "paused", startDate: "2026-06-10", endDate: "2026-07-20", amountSpent: 128.9, impressions: 21300, linkClicks: 410, leads: 22, qualifiedLeads: 12, purchases: 2, revenue: 980, notes: "Pausada para revisar creatividades.", createdBy: "demo-admin", createdAt: "2026-06-10T09:00:00Z" },
+  { id: "ADS-004", businessUnitId: "jender", campaignName: "Equipamiento verano", adSet: "Centros deportivos", adName: "Carrusel ventilación", objective: "Leads", status: "finished", startDate: "2026-05-01", endDate: "2026-07-31", amountSpent: 74.87, impressions: 15600, linkClicks: 260, leads: 14, qualifiedLeads: 6, purchases: 1, revenue: 320, notes: null, createdBy: "demo-admin", createdAt: "2026-05-01T09:00:00Z" },
+];
+
+export const demoMailingCampaigns: MailingCampaign[] = [
+  { id: "MAIL-001", businessUnitId: "intec", campaignName: "Newsletter agosto", campaignType: "newsletter", sentDate: "2026-08-01", sentCount: 4200, deliveredCount: 4110, opens: 1150, clicks: 240, leads: 18, salesCount: 3, revenue: 2100, unsubscribes: 12, notes: null, createdBy: "demo-admin", createdAt: "2026-08-01T09:00:00Z" },
+  { id: "MAIL-002", businessUnitId: "blizzcool", campaignName: "Promoción verano climatización", campaignType: "promocion", sentDate: "2026-07-15", sentCount: 2800, deliveredCount: 2745, opens: 890, clicks: 210, leads: 26, salesCount: 5, revenue: 3400, unsubscribes: 9, notes: null, createdBy: "demo-admin", createdAt: "2026-07-15T09:00:00Z" },
+  { id: "MAIL-003", businessUnitId: "sumifluid", campaignName: "Aviso mantenimiento programado", campaignType: "aviso", sentDate: "2026-07-05", sentCount: 1600, deliveredCount: 1570, opens: 610, clicks: 95, leads: 4, salesCount: 0, revenue: 0, unsubscribes: 3, notes: null, createdBy: "demo-admin", createdAt: "2026-07-05T09:00:00Z" },
+  { id: "MAIL-004", businessUnitId: "jender", campaignName: "Captación distribuidores", campaignType: "captacion", sentDate: "2026-06-20", sentCount: 950, deliveredCount: 928, opens: 305, clicks: 58, leads: 9, salesCount: 1, revenue: 640, unsubscribes: 4, notes: null, createdBy: "demo-admin", createdAt: "2026-06-20T09:00:00Z" },
 ];
 
 export const demoProfiles: Profile[] = [
