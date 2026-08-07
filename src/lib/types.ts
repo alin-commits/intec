@@ -135,6 +135,7 @@ export type AdCampaignStatus = "active" | "paused" | "finished";
 export type MetaAdsEntry = {
   id: string;
   businessUnitId: string;
+  campaignId: string | null;
   campaignName: string;
   adSet: string | null;
   adName: string | null;

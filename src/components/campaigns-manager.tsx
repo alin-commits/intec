@@ -15,6 +15,7 @@ const STORAGE_KEY = "intec-demo-campaigns";
 
 type CampaignDraft = Omit<Campaign, "id" | "createdAt">;
 type LeadStub = { campaignId: string | null; status: LeadStatus; saleValue: number | null };
+type AdsStub = { campaignId: string | null; amountSpent: number; revenue: number };
 
 function blankDraft(units: BusinessUnit[]): CampaignDraft {
   return {
@@ -77,6 +78,13 @@ function statsFor(campaign: Campaign, leads: LeadStub[]) {
   return { total, contacted, offers, won, lost, conversion: total ? (leadsWon / total) * 100 : 0, value };
 }
 
+function adsStatsFor(campaign: Campaign, ads: AdsStub[]) {
+  const rows = ads.filter((ad) => ad.campaignId === campaign.id);
+  const spend = rows.reduce((sum, ad) => sum + ad.amountSpent, 0);
+  const revenue = rows.reduce((sum, ad) => sum + ad.revenue, 0);
+  return { count: rows.length, spend, revenue, roas: spend > 0 ? revenue / spend : 0 };
+}
+
 function initialDemoCampaigns(configured: boolean): Campaign[] {
   if (configured || typeof window === "undefined") return demoCampaigns;
   const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -88,6 +96,7 @@ export function CampaignsManager() {
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => initialDemoCampaigns(configured));
   const [units, setUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
   const [leads, setLeads] = useState<LeadStub[]>(() => demoLeads.map((lead) => ({ campaignId: lead.campaignId ?? null, status: lead.status, saleValue: lead.saleValue })));
+  const [ads, setAds] = useState<AdsStub[]>([]);
   const [unitId, setUnitId] = useState("all");
   const [status, setStatus] = useState("all");
   const [query, setQuery] = useState("");
@@ -107,10 +116,11 @@ export function CampaignsManager() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
       supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, created_at, updated_at").order("created_at", { ascending: false }),
       supabase.from("leads").select("campaign_id, status, sale_value").limit(2000),
+      supabase.from("meta_ads_entries").select("campaign_id, amount_spent, revenue").not("campaign_id", "is", null),
       supabase.auth.getUser(),
     ]);
     if (unitError || campaignError || leadError) {
@@ -120,6 +130,7 @@ export function CampaignsManager() {
     setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
     setCampaigns((campaignData ?? []).map((row) => mapCampaignRow(row as Record<string, unknown>)));
     setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>)));
+    setAds((adsData ?? []).map((row) => ({ campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), revenue: Number(row.revenue ?? 0) })));
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
@@ -281,6 +292,7 @@ export function CampaignsManager() {
         {visibleCampaigns.map((campaign) => {
           const unit = units.find((item) => item.id === campaign.businessUnitId);
           const stats = statsFor(campaign, leads);
+          const adsStats = adsStatsFor(campaign, ads);
           return (
             <article className="panel campaign-card" key={campaign.id}>
               <div className="campaign-card-heading">
@@ -305,6 +317,9 @@ export function CampaignsManager() {
               </div>
               {campaign.directSalesCount > 0 || campaign.directSaleValue > 0 ? (
                 <p className="muted campaign-direct-sales-note">Incluye {campaign.directSalesCount} venta{campaign.directSalesCount === 1 ? "" : "s"} directa{campaign.directSalesCount === 1 ? "" : "s"} ({currencyFormatter.format(campaign.directSaleValue)}) sin pasar por leads.</p>
+              ) : null}
+              {adsStats.count > 0 ? (
+                <p className="muted campaign-direct-sales-note">Meta Ads: {adsStats.count} entrada{adsStats.count === 1 ? "" : "s"} vinculada{adsStats.count === 1 ? "" : "s"} · gasto {currencyFormatter.format(adsStats.spend)} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2)}x</p>
               ) : null}
               {canEdit ? (
                 <div className="modal-actions campaign-card-actions">

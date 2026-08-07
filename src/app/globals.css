@@ -120,16 +120,27 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .panel-heading h2, .section-heading h2, .intro-grid h2 { margin: 5px 0 0; font-size: 20px; letter-spacing: -0.025em; }
 .muted { color: var(--muted); font-size: 12px; }
-.chart-wrap { width: 100%; overflow: hidden; }
+.chart-wrap { width: 100%; overflow: hidden; position: relative; }
 .chart-svg { display: block; width: 100%; min-height: 235px; }
 .chart-grid { stroke: #e2e8f0; stroke-width: 1; }
-.chart-line { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
-.chart-line-web { stroke: #2563eb; }
-.chart-line-phone { stroke: #06b6d4; }
+.chart-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-label { fill: #64748b; font-size: 12px; }
-.chart-legend { display: flex; justify-content: center; gap: 20px; color: var(--muted); font-size: 12px; }
+.chart-crosshair { stroke: #cbd5e1; stroke-width: 1; pointer-events: none; }
+.chart-legend { display: flex; justify-content: center; gap: 20px; color: var(--muted); font-size: 12px; margin-top: 8px; }
 .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
-.legend-web { background: #2563eb; }.legend-phone { background: #06b6d4; }
+.chart-tooltip { background: #0f172a; color: white; border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 8px 20px rgba(15, 23, 42, .25); }
+.chart-tooltip strong { display: block; font-size: 11px; font-weight: 700; margin-bottom: 4px; color: #e2e8f0; }
+.chart-tooltip-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.chart-tooltip-row i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.chart-tooltip-row span { flex: 1; color: #cbd5e1; }
+.chart-tooltip-row strong { display: inline; margin: 0; color: white; font-size: 12px; }
+.bar-chart { display: grid; gap: 10px; }
+.bar-chart-row { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 10px; }
+.bar-chart-row span { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-chart-track { height: 18px; background: #f1f5f9; border-radius: 4px; position: relative; }
+.bar-chart-fill { height: 100%; border-radius: 4px; transition: filter .1s ease; }
+.bar-chart-row:hover .bar-chart-fill { filter: brightness(1.08); }
+.bar-chart-row strong { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .status-bars { display: grid; gap: 15px; padding-top: 5px; }
 .status-row { display: grid; grid-template-columns: 105px 1fr 24px; align-items: center; gap: 10px; font-size: 12px; }
 .status-track { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }

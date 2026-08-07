@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { TrendChart } from "@/components/charts/trend-chart";
 import { campaignStatusLabels } from "@/lib/constants";
-import { monthKey } from "@/lib/dates";
+import { monthKey, monthShortLabel } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -25,6 +26,7 @@ export function MarketingDashboardView() {
   const [leads, setLeads] = useState<LeadStub[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [rrssSummary, setRrssSummary] = useState({ newFollowers: 0, adsLeads: 0, adsSpend: 0, mailingSent: 0, mailingOpenRate: 0 });
+  const [rrssTrend, setRrssTrend] = useState<{ label: string; newFollowers: number }[]>([]);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,6 +41,7 @@ export function MarketingDashboardView() {
         { data: socialData },
         { data: adsData },
         { data: mailingData },
+        { data: socialTrendData },
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
         supabase.from("leads").select("business_unit_id, campaign_id, status, sale_value").limit(2000),
@@ -46,6 +49,7 @@ export function MarketingDashboardView() {
         supabase.from("social_media_stats").select("new_followers").eq("period_month", currentMonth),
         supabase.from("meta_ads_entries").select("amount_spent, leads"),
         supabase.from("mailing_campaigns").select("sent_count, opens, delivered_count"),
+        supabase.from("social_media_stats").select("period_month, new_followers"),
       ]);
       if (unitError || leadError || campaignError) {
         setMessage(reportSafeError(unitError ?? leadError ?? campaignError, "No se pudieron cargar los datos de marketing."));
@@ -63,6 +67,12 @@ export function MarketingDashboardView() {
         mailingSent: (mailingData ?? []).reduce((sum, row) => sum + Number(row.sent_count ?? 0), 0),
         mailingOpenRate: totalDelivered ? (totalOpens / totalDelivered) * 100 : 0,
       });
+      const byMonth = new Map<string, number>();
+      for (const row of socialTrendData ?? []) {
+        const month = String(row.period_month).slice(0, 7);
+        byMonth.set(month, (byMonth.get(month) ?? 0) + Number(row.new_followers ?? 0));
+      }
+      setRrssTrend(Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-6).map(([month, newFollowers]) => ({ label: monthShortLabel(month), newFollowers })));
     })();
   }, [configured]);
 
@@ -155,6 +165,11 @@ export function MarketingDashboardView() {
             </tbody>
           </table>
         </div>
+        <TrendChart
+          data={rrssTrend}
+          series={[{ key: "newFollowers", label: "Nuevos seguidores", color: "#2563eb" }]}
+          ariaLabel="Evolución mensual de nuevos seguidores"
+        />
       </section>
     </div>
   );

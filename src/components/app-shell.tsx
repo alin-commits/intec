@@ -164,6 +164,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const title = Object.entries(pageTitles).find(([path]) => pathname.startsWith(path))?.[1] ?? "Actividad comercial";
   const isDirection = profile.roles.includes("direction");
   const navRoles: AppRole[] = isDirection ? (directionView ? [directionView] : []) : profile.roles;
+  const showConsultaActions = hasAnyRole(profile.roles, ["commercial"]) || (hasAnyRole(profile.roles, ["admin"]) && pathname.startsWith("/consultas"));
 
   async function signOut() {
     if (configured) {
@@ -221,8 +222,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div><span className="eyebrow">Panel interno</span><h1>{title}</h1></div>
           <div className="topbar-actions">
             {!configured ? <span className="demo-badge">Modo demostración</span> : <span className="live-badge">Datos conectados</span>}
-            {hasAnyRole(profile.roles, ["admin", "commercial"]) ? <Link href="/consultas?openSale=1" className="button button-secondary">Registrar venta</Link> : null}
-            <Link href="/consultas" className="button button-primary">Registrar consulta</Link>
+            {showConsultaActions ? (
+              <>
+                <Link href="/consultas?openSale=1" className="button button-secondary">Registrar venta</Link>
+                <Link href="/consultas" className="button button-primary">Registrar consulta</Link>
+              </>
+            ) : null}
           </div>
         </header>
         {children}

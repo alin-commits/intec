@@ -861,7 +861,14 @@ export function InquiryRegister() {
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
           <div className="panel-heading"><div><span className="eyebrow">Evolución</span><h2>{viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}`}</h2></div><span className="muted">Web y telefónicas</span></div>
-          <TrendChart data={trendData} />
+          <TrendChart
+            data={trendData}
+            series={[
+              { key: "web", label: "Web", color: "#2563eb" },
+              { key: "phone", label: "Telefónicas", color: "#06b6d4" },
+            ]}
+            ariaLabel="Evolución de consultas web y telefónicas"
+          />
         </article>
         <article className="panel chart-panel">
           <div className="panel-heading"><div><span className="eyebrow">Distribución</span><h2>Canales del periodo</h2></div></div>

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { BarChart } from "@/components/charts/bar-chart";
+import { TrendChart } from "@/components/charts/trend-chart";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -16,11 +18,12 @@ import {
 } from "@/lib/constants";
 import {
   businessUnits as demoBusinessUnits,
+  campaigns as demoCampaigns,
   demoMailingCampaigns,
   demoMetaAdsEntries,
   demoSocialMediaStats,
 } from "@/lib/demo-data";
-import { monthKey, monthLabel } from "@/lib/dates";
+import { monthKey, monthLabel, monthShortLabel } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -45,6 +48,7 @@ type AdsDraft = Omit<MetaAdsEntry, "id" | "createdAt" | "createdBy">;
 type MailingDraft = Omit<MailingCampaign, "id" | "createdAt" | "createdBy">;
 
 type PendingDelete = { table: "social_media_stats" | "meta_ads_entries" | "mailing_campaigns"; id: string; label: string };
+type CampaignOption = { id: string; businessUnitId: string; name: string };
 
 function ratio(numerator: number, denominator: number): number {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;
@@ -74,6 +78,7 @@ function blankSocialDraft(units: BusinessUnit[]): SocialDraft {
 function blankAdsDraft(units: BusinessUnit[]): AdsDraft {
   return {
     businessUnitId: units[0]?.id ?? "",
+    campaignId: null,
     campaignName: "",
     adSet: "",
     adName: "",
@@ -134,6 +139,7 @@ function mapAdsRow(row: Record<string, unknown>): MetaAdsEntry {
   return {
     id: String(row.id),
     businessUnitId: String(row.business_unit_id),
+    campaignId: row.campaign_id ? String(row.campaign_id) : null,
     campaignName: String(row.campaign_name),
     adSet: row.ad_set ? String(row.ad_set) : null,
     adName: row.ad_name ? String(row.ad_name) : null,
@@ -188,6 +194,7 @@ export function RrssManager() {
   const [socialStats, setSocialStats] = useState<SocialMediaStat[]>(() => initialDemoState(configured, SOCIAL_STORAGE_KEY, demoSocialMediaStats));
   const [adsEntries, setAdsEntries] = useState<MetaAdsEntry[]>(() => initialDemoState(configured, ADS_STORAGE_KEY, demoMetaAdsEntries));
   const [mailingCampaigns, setMailingCampaigns] = useState<MailingCampaign[]>(() => initialDemoState(configured, MAILING_STORAGE_KEY, demoMailingCampaigns));
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>(demoCampaigns.map((campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name })));
   const [canEdit, setCanEdit] = useState(true);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [message, setMessage] = useState<string | null>(null);
@@ -206,12 +213,14 @@ export function RrssManager() {
       { data: socialData, error: socialError },
       { data: adsData, error: adsError },
       { data: mailingData, error: mailingError },
+      { data: campaignData },
       { data: authData },
     ] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
       supabase.from("social_media_stats").select("id, business_unit_id, network, period_month, followers_end, new_followers, posts, interactions, reach, active_campaigns, link_clicks, leads, notes, created_by, created_at").order("period_month", { ascending: false }),
-      supabase.from("meta_ads_entries").select("id, business_unit_id, campaign_name, ad_set, ad_name, objective, status, start_date, end_date, amount_spent, impressions, link_clicks, leads, qualified_leads, purchases, revenue, notes, created_by, created_at").order("created_at", { ascending: false }),
+      supabase.from("meta_ads_entries").select("id, business_unit_id, campaign_id, campaign_name, ad_set, ad_name, objective, status, start_date, end_date, amount_spent, impressions, link_clicks, leads, qualified_leads, purchases, revenue, notes, created_by, created_at").order("created_at", { ascending: false }),
       supabase.from("mailing_campaigns").select("id, business_unit_id, campaign_name, campaign_type, sent_date, sent_count, delivered_count, opens, clicks, leads, sales_count, revenue, unsubscribes, notes, created_by, created_at").order("sent_date", { ascending: false }),
+      supabase.from("campaigns").select("id, business_unit_id, name").neq("status", "archived").order("name"),
       supabase.auth.getUser(),
     ]);
     if (unitError || socialError || adsError || mailingError) {
@@ -222,6 +231,7 @@ export function RrssManager() {
     setSocialStats((socialData ?? []).map((row) => mapSocialRow(row as Record<string, unknown>)));
     setAdsEntries((adsData ?? []).map((row) => mapAdsRow(row as Record<string, unknown>)));
     setMailingCampaigns((mailingData ?? []).map((row) => mapMailingRow(row as Record<string, unknown>)));
+    setCampaignOptions((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name })));
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
@@ -301,7 +311,7 @@ export function RrssManager() {
         <SocialTab units={units} stats={socialStats} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistSocial} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
       ) : null}
       {tab === "ads" ? (
-        <AdsTab units={units} entries={adsEntries} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistAds} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
+        <AdsTab units={units} entries={adsEntries} campaignOptions={campaignOptions} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistAds} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
       ) : null}
       {tab === "mailing" ? (
         <MailingTab units={units} campaigns={mailingCampaigns} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistMailing} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
@@ -371,6 +381,16 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     }
     return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
   }, [stats]);
+
+  const monthlyTrendData = useMemo(() => monthlyTrend.map(([month, entry]) => ({
+    label: monthShortLabel(month),
+    newFollowers: entry.newFollowers,
+    interactions: entry.interactions,
+  })), [monthlyTrend]);
+
+  const newFollowersByUnit = useMemo(() => unitSummaries
+    .filter((row) => row.newFollowers > 0)
+    .map((row) => ({ label: row.unit.name, value: row.newFollowers, color: row.unit.accent })), [unitSummaries]);
 
   const visibleRows = useMemo(() => stats
     .filter((row) => (unitFilter === "all" || row.businessUnitId === unitFilter) && (networkFilter === "all" || row.network === networkFilter))
@@ -462,6 +482,24 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         <KpiCard label="Alcance" value={numberFormatter.format(totals.reach)} delta="Sin comparación" helper="último mes registrado" />
       </section>
 
+      <section className="dashboard-grid">
+        <article className="panel chart-panel chart-panel-wide">
+          <div className="panel-heading"><div><span className="eyebrow">Evolución</span><h2>Últimos meses (todas las marcas)</h2></div></div>
+          <TrendChart
+            data={monthlyTrendData}
+            series={[
+              { key: "newFollowers", label: "Nuevos seguidores", color: "#2563eb" },
+              { key: "interactions", label: "Interacciones", color: "#d97706" },
+            ]}
+            ariaLabel="Evolución mensual de nuevos seguidores e interacciones"
+          />
+        </article>
+        <article className="panel chart-panel">
+          <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Nuevos seguidores</h2></div></div>
+          <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca este mes" valueFormatter={(value) => numberFormatter.format(value)} />
+        </article>
+      </section>
+
       <section className="panel table-panel">
         <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Resumen del mes</h2></div></div>
         <div className="table-scroll">
@@ -474,21 +512,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
                   <td>{numberFormatter.format(followers)}</td><td>{numberFormatter.format(newFollowers)}</td><td>{numberFormatter.format(interactions)}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Evolución</span><h2>Últimos meses (todas las marcas)</h2></div></div>
-        <div className="table-scroll">
-          <table>
-            <thead><tr><th>Mes</th><th>Nuevos seguidores</th><th>Interacciones</th><th>Alcance</th></tr></thead>
-            <tbody>
-              {monthlyTrend.map(([month, entry]) => (
-                <tr key={month}><td>{monthLabel(month)}</td><td>{numberFormatter.format(entry.newFollowers)}</td><td>{numberFormatter.format(entry.interactions)}</td><td>{numberFormatter.format(entry.reach)}</td></tr>
-              ))}
-              {monthlyTrend.length === 0 ? <tr><td colSpan={4} className="muted">Sin datos registrados.</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -571,7 +594,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   );
 }
 
-function AdsTab({ units, entries, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[] }) {
+function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -590,6 +613,11 @@ function AdsTab({ units, entries, canEdit, configured, busy, setBusy, setMessage
     revenue: acc.revenue + entry.revenue,
   }), { spend: 0, leads: 0, revenue: 0 }), [visibleEntries]);
 
+  const spendByUnit = useMemo(() => units
+    .map((unit) => ({ unit, spend: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.amountSpent, 0) }))
+    .filter((row) => row.spend > 0)
+    .map((row) => ({ label: row.unit.name, value: row.spend, color: row.unit.accent })), [units, visibleEntries]);
+
   function openNew() {
     setEditingId(null);
     setDraft(blankAdsDraft(units));
@@ -601,6 +629,7 @@ function AdsTab({ units, entries, canEdit, configured, busy, setBusy, setMessage
     setEditingId(entry.id);
     setDraft({
       businessUnitId: entry.businessUnitId,
+      campaignId: entry.campaignId,
       campaignName: entry.campaignName,
       adSet: entry.adSet,
       adName: entry.adName,
@@ -643,6 +672,7 @@ function AdsTab({ units, entries, canEdit, configured, busy, setBusy, setMessage
       } else {
         const payload = {
           business_unit_id: draft.businessUnitId,
+          campaign_id: draft.campaignId || null,
           campaign_name: draft.campaignName.trim(),
           ad_set: draft.adSet?.trim() || null,
           ad_name: draft.adName?.trim() || null,
@@ -685,6 +715,11 @@ function AdsTab({ units, entries, canEdit, configured, busy, setBusy, setMessage
         <KpiCard label="Leads" value={numberFormatter.format(totals.leads)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="CPL medio" value={currencyFormatter.format(safeDiv(totals.spend, totals.leads))} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="según filtros" />
+      </section>
+
+      <section className="panel chart-panel">
+        <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Gasto en Meta Ads</h2></div></div>
+        <BarChart items={spendByUnit} ariaLabel="Gasto en Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
       </section>
 
       <CollapsibleFilters
@@ -758,6 +793,10 @@ function AdsTab({ units, entries, canEdit, configured, busy, setBusy, setMessage
           <div className="form-grid">
             <label><span>Marca *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => updateDraft("businessUnitId", event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
             <label><span>Nombre de campaña *</span><input value={draft.campaignName} readOnly={!canEdit} onChange={(event) => updateDraft("campaignName", event.target.value)} /></label>
+            <label><span>Campaña general (opcional)</span><select value={draft.campaignId ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("campaignId", event.target.value || null)}>
+              <option value="">— Sin vincular —</option>
+              {campaignOptions.filter((option) => option.businessUnitId === draft.businessUnitId).map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+            </select></label>
             <label><span>Conjunto de anuncios</span><input value={draft.adSet ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("adSet", event.target.value)} /></label>
             <label><span>Anuncio</span><input value={draft.adName ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("adName", event.target.value)} /></label>
             <label><span>Objetivo</span><input value={draft.objective ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("objective", event.target.value)} placeholder="Leads, Conversiones, Tráfico…" /></label>
@@ -799,6 +838,16 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
     opens: acc.opens + campaign.opens,
     revenue: acc.revenue + campaign.revenue,
   }), { sent: 0, delivered: 0, opens: 0, revenue: 0 }), [visibleCampaigns]);
+
+  const openRateByUnit = useMemo(() => units
+    .map((unit) => {
+      const rows = visibleCampaigns.filter((campaign) => campaign.businessUnitId === unit.id);
+      const delivered = rows.reduce((sum, campaign) => sum + campaign.deliveredCount, 0);
+      const opens = rows.reduce((sum, campaign) => sum + campaign.opens, 0);
+      return { unit, delivered, rate: ratio(opens, delivered) };
+    })
+    .filter((row) => row.delivered > 0)
+    .map((row) => ({ label: row.unit.name, value: Math.round(row.rate * 10) / 10, color: row.unit.accent })), [units, visibleCampaigns]);
 
   function openNew() {
     setEditingId(null);
@@ -889,6 +938,11 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
         <KpiCard label="Entregados" value={numberFormatter.format(totals.delivered)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Open rate medio" value={formatPercent(ratio(totals.opens, totals.delivered))} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
+      </section>
+
+      <section className="panel chart-panel">
+        <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Open rate</h2></div></div>
+        <BarChart items={openRateByUnit} ariaLabel="Open rate por marca" valueFormatter={(value) => formatPercent(value)} />
       </section>
 
       <CollapsibleFilters
