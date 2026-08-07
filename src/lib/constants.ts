@@ -22,7 +22,7 @@ export const roleLabels: Record<AppRole, string> = {
 
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
-export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
+export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "commercial", "viewer", "direction"];
 
 export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
 
