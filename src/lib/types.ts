@@ -1,5 +1,6 @@
-export type InquiryType = "web" | "phone";
-export type AppRole = "admin" | "commercial" | "viewer";
+export type InquiryType = "phone" | "chat" | "email_form" | "whatsapp" | "portal_rrss";
+export type AppRole = "admin" | "commercial" | "viewer" | "it" | "marketing" | "direction";
+export type CampaignStatus = "draft" | "active" | "finished" | "archived";
 export type LeadStatus =
   | "new"
   | "contact_attempt"
@@ -16,6 +17,7 @@ export type BusinessUnit = {
   slug: string;
   accent: string;
   active: boolean;
+  logo?: string | null;
 };
 
 export type LeadStatusEvent = {
@@ -47,12 +49,45 @@ export type Lead = {
   statusHistory?: LeadStatusEvent[];
 };
 
+export type Campaign = {
+  id: string;
+  businessUnitId: string;
+  name: string;
+  channel: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  status: CampaignStatus;
+  budget: number | null;
+  notes: string | null;
+  directSalesCount: number;
+  directSaleValue: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
 export type InquiryRecord = {
   id: string;
   businessUnitId: string;
   inquiryType: InquiryType;
   createdAt: string;
   createdBy?: string | null;
+};
+
+export type SaleType = "oferta" | "seguimiento" | "pedido";
+export type SaleEntryMode = "inquiry" | "weekly";
+
+export type SalesEntry = {
+  id: string;
+  businessUnitId: string;
+  saleType: SaleType;
+  entryMode: SaleEntryMode;
+  inquiryId: string | null;
+  weekStart: string | null;
+  occurredOn: string;
+  count: number;
+  value: number;
+  createdBy: string | null;
+  createdAt: string;
 };
 
 export type Profile = {

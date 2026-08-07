@@ -1,23 +1,17 @@
-import type { BusinessUnit, InquiryRecord, Lead, MonthlyStat, Profile } from "@/lib/types";
+import type { BusinessUnit, Campaign, InquiryRecord, InquiryType, Lead, MonthlyStat, Profile, SalesEntry } from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
-  { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true },
-  { id: "blizzcool", name: "BlizzCool", slug: "blizzcool", accent: "#0891b2", active: true },
-  { id: "sumifluid", name: "Sumifluid", slug: "sumifluid", accent: "#7c3aed", active: true },
-  { id: "jender", name: "Jender", slug: "jender", accent: "#ea580c", active: true },
-  { id: "cst", name: "CST Ibérica", slug: "cst-iberica", accent: "#16a34a", active: true },
-  { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: true },
+  { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp" },
+  { id: "blizzcool", name: "BlizzCool", slug: "blizzcool", accent: "#0891b2", active: true, logo: "/logo-blizzcool.webp" },
+  { id: "sumifluid", name: "Sumifluid", slug: "sumifluid", accent: "#7c3aed", active: true, logo: "/logo-sumifluid.webp" },
+  { id: "jender", name: "Jender", slug: "jender", accent: "#ea580c", active: true, logo: "/logo-jender.webp" },
+  // Marcas sin actividad comercial por ahora: se conservan (histórico de leads/campañas)
+  // pero no aparecen en registro de consultas ni en comparativas activas.
+  { id: "cst", name: "CST Ibérica", slug: "cst-iberica", accent: "#16a34a", active: false },
+  { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: false },
 ];
 
-const months = ["Mar", "Abr", "May", "Jun", "Jul", "Ago"];
-const monthKeys: Record<string, string> = {
-  Mar: "2026-03",
-  Abr: "2026-04",
-  May: "2026-05",
-  Jun: "2026-06",
-  Jul: "2026-07",
-  Ago: "2026-08",
-};
+const monthKeys = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"];
 const baseByUnit: Record<string, { web: number; phone: number; leads: number; won: number }> = {
   intec: { web: 102, phone: 76, leads: 16, won: 4 },
   blizzcool: { web: 74, phone: 28, leads: 34, won: 6 },
@@ -27,8 +21,8 @@ const baseByUnit: Record<string, { web: number; phone: number; leads: number; wo
   blizztherm: { web: 22, phone: 16, leads: 7, won: 1 },
 };
 
-export const monthlyStats: MonthlyStat[] = businessUnits.flatMap((unit, unitIndex) =>
-  months.map((month, monthIndex) => {
+export const monthlyStats: MonthlyStat[] = businessUnits.filter((unit) => unit.active).flatMap((unit, unitIndex) =>
+  monthKeys.map((month, monthIndex) => {
     const base = baseByUnit[unit.id];
     const progression = 0.72 + monthIndex * 0.06 + unitIndex * 0.012;
     const leads = Math.max(1, Math.round(base.leads * progression));
@@ -49,7 +43,7 @@ export const monthlyStats: MonthlyStat[] = businessUnits.flatMap((unit, unitInde
 function distributeRecords(
   records: InquiryRecord[],
   unitId: string,
-  type: "web" | "phone",
+  type: InquiryType,
   month: string,
   total: number,
 ) {
@@ -70,17 +64,37 @@ function distributeRecords(
   }
 }
 
+// Proportions of the legacy "web" total across the 5 real channels, roughly
+// matching the historical spreadsheet (email/whatsapp dominate; chat and
+// portals are kept residual so those columns aren't empty in demo mode).
+const webChannelWeights: { type: InquiryType; weight: number }[] = [
+  { type: "email_form", weight: 0.55 },
+  { type: "whatsapp", weight: 0.35 },
+  { type: "chat", weight: 0.06 },
+  { type: "portal_rrss", weight: 0.04 },
+];
+
 export const demoInquiries: InquiryRecord[] = (() => {
   const records: InquiryRecord[] = [];
   for (const row of monthlyStats) {
-    const key = monthKeys[row.month];
-    if (!key) continue;
+    const key = row.month;
     const factor = key === "2026-08" ? 0.2 : 1;
-    distributeRecords(records, row.businessUnitId, "web", key, Math.max(1, Math.round(row.web * factor)));
+    const webTotal = Math.max(1, Math.round(row.web * factor));
+    let assigned = 0;
+    webChannelWeights.forEach(({ type, weight }, index) => {
+      const isLast = index === webChannelWeights.length - 1;
+      const count = isLast ? webTotal - assigned : Math.round(webTotal * weight);
+      assigned += count;
+      if (count > 0) distributeRecords(records, row.businessUnitId, type, key, count);
+    });
     distributeRecords(records, row.businessUnitId, "phone", key, Math.max(1, Math.round(row.phone * factor)));
   }
   return records;
 })();
+
+// Empty in demo mode: the demo dashboard's "Valor ganado" figure comes from
+// the static monthlyStats above, not from recomputing sales entries.
+export const demoSalesEntries: SalesEntry[] = [];
 
 export const demoLeads: Lead[] = [
   {
@@ -189,12 +203,12 @@ export const demoLeads: Lead[] = [
   },
 ];
 
-export const campaigns = [
-  { id: "CP-001", name: "Distribuidores verano", businessUnitId: "blizzcool", status: "Activa", leads: 34, won: 6, value: 9140 },
-  { id: "CP-002", name: "Generadores profesionales", businessUnitId: "intec", status: "Activa", leads: 16, won: 4, value: 11360 },
-  { id: "CP-003", name: "Soluciones de bombeo", businessUnitId: "sumifluid", status: "Activa", leads: 12, won: 2, value: 3260 },
-  { id: "CP-004", name: "Mantenimiento industrial", businessUnitId: "cst", status: "Finalizada", leads: 5, won: 1, value: 1460 },
-  { id: "CP-005", name: "Equipamiento verano", businessUnitId: "jender", status: "Finalizada", leads: 8, won: 1, value: 980 },
+export const campaigns: Campaign[] = [
+  { id: "CP-001", businessUnitId: "blizzcool", name: "Distribuidores verano", channel: "Email", startDate: "2026-06-01", endDate: "2026-08-31", status: "active", budget: 4500, notes: "Campaña dirigida a distribuidores del norte peninsular.", directSalesCount: 0, directSaleValue: 0, createdAt: "2026-06-01T08:00:00Z" },
+  { id: "CP-002", businessUnitId: "intec", name: "Generadores profesionales", channel: "Landing", startDate: "2026-05-15", endDate: "2026-08-15", status: "active", budget: 6000, notes: "Promoción de generadores para obra e industria.", directSalesCount: 0, directSaleValue: 0, createdAt: "2026-05-15T08:00:00Z" },
+  { id: "CP-003", businessUnitId: "sumifluid", name: "Soluciones de bombeo", channel: "Web", startDate: "2026-06-10", endDate: null, status: "active", budget: 2200, notes: null, directSalesCount: 0, directSaleValue: 0, createdAt: "2026-06-10T08:00:00Z" },
+  { id: "CP-004", businessUnitId: "cst", name: "Mantenimiento industrial", channel: "Teléfono", startDate: "2026-03-01", endDate: "2026-05-31", status: "finished", budget: 1800, notes: "Contratos anuales de mantenimiento.", directSalesCount: 0, directSaleValue: 0, createdAt: "2026-03-01T08:00:00Z" },
+  { id: "CP-005", businessUnitId: "jender", name: "Equipamiento verano", channel: "RRSS", startDate: "2026-05-01", endDate: "2026-07-31", status: "finished", budget: 1200, notes: null, directSalesCount: 0, directSaleValue: 0, createdAt: "2026-05-01T08:00:00Z" },
 ];
 
 export const demoProfiles: Profile[] = [

@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
+import { LEADS_ROLES, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
+import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { UnitBrandMark } from "@/components/unit-brand-mark";
 
 const STORAGE_KEY = "intec-demo-leads";
 
@@ -41,6 +44,10 @@ function nestedName(value: unknown): string {
   return "";
 }
 
+function isLeadTypeValue(value: unknown): value is LeadTypeValue {
+  return typeof value === "string" && value in leadTypeLabels;
+}
+
 function mapLeadRow(row: Record<string, unknown>): Lead {
   const historyValue = Array.isArray(row.lead_status_history) ? row.lead_status_history : [];
   return {
@@ -57,7 +64,7 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
     location: String(row.location ?? ""),
     productInterest: String(row.product_interest ?? ""),
     status: row.status as LeadStatus,
-    type: row.lead_type && row.lead_type in leadTypeLabels ? leadTypeLabels[row.lead_type as LeadTypeValue] : "Otro",
+    type: isLeadTypeValue(row.lead_type) ? leadTypeLabels[row.lead_type] : "Otro",
     source: String(row.source ?? ""),
     notes: String(row.notes ?? ""),
     saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
@@ -78,28 +85,31 @@ function typeValueFromLabel(label: string): LeadTypeValue {
   return (entry?.[0] as LeadTypeValue | undefined) ?? "other";
 }
 
+function initialDemoLeads(configured: boolean): Lead[] {
+  if (configured || typeof window === "undefined") return demoLeads;
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  return saved ? (JSON.parse(saved) as Lead[]) : demoLeads;
+}
+
 export function LeadsTable() {
   const configured = isSupabaseConfigured();
-  const [rows, setRows] = useState<Lead[]>(demoLeads);
-  const [units, setUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
+  const [rows, setRows] = useState<Lead[]>(() => initialDemoLeads(configured));
+  const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>(demoCampaigns.map((campaign) => ({ id: campaign.id, name: campaign.name, businessUnitId: campaign.businessUnitId })));
   const [query, setQuery] = useState("");
-  const [unitId, setUnitId] = useState("all");
+  const [unitId, setUnitId] = useState<string>(() => demoBusinessUnits.filter((unit) => unit.active)[0]?.id ?? "all");
   const [status, setStatus] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<LeadDraft>(() => blankDraft(demoBusinessUnits));
+  const [draft, setDraft] = useState<LeadDraft>(() => blankDraft(demoBusinessUnits.filter((unit) => unit.active)));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(true);
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   useEffect(() => {
-    if (!configured) {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setRows(JSON.parse(saved) as Lead[]);
-      return;
-    }
+    if (!configured) return;
     void loadRealData();
   }, [configured]);
 
@@ -112,23 +122,27 @@ export function LeadsTable() {
   async function loadRealData() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }] = await Promise.all([
-      supabase.from("business_units").select("id, name, slug, brand_color, is_active").eq("is_active", true).order("name"),
+      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
       supabase.from("campaigns").select("id, name, business_unit_id").neq("status", "archived").order("name"),
       supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at)").order("created_at", { ascending: false }).limit(500),
       supabase.auth.getUser(),
     ]);
     if (unitError || campaignError || leadError) {
-      setMessage(unitError?.message || campaignError?.message || leadError?.message || "No se pudieron cargar los datos.");
+      setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar los datos."));
       return;
     }
-    const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active }));
+    const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url }));
     setUnits(mappedUnits);
+    setUnitId((current) => (current === "all" || mappedUnits.some((unit) => unit.id === current)) ? current : (mappedUnits[0]?.id ?? "all"));
     setCampaignOptions((campaignData ?? []).map((row) => ({ id: row.id, name: row.name, businessUnitId: row.business_unit_id })));
     setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>)));
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-      setCanEdit(profile?.role !== "viewer");
+      setCanEdit(profile?.role === "admin" || profile?.role === "commercial" || profile?.role === "marketing");
+      setAccess(profile && LEADS_ROLES.includes(profile.role) ? "allowed" : "denied");
+    } else {
+      setAccess("denied");
     }
   }
 
@@ -139,7 +153,8 @@ export function LeadsTable() {
 
   function openNew() {
     setEditingId(null);
-    setDraft(blankDraft(units));
+    const draftForNew = blankDraft(units);
+    setDraft(unitId !== "all" ? { ...draftForNew, businessUnitId: unitId } : draftForNew);
     setEditorOpen(true);
     setMessage(null);
   }
@@ -222,7 +237,7 @@ export function LeadsTable() {
       }
       setEditorOpen(false);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "No se pudo guardar el lead.");
+      setMessage(reportSafeError(cause, "No se pudo guardar el lead."));
     } finally {
       setBusy(false);
     }
@@ -248,25 +263,57 @@ export function LeadsTable() {
       setMessage(`Estado actualizado a ${leadStatusLabels[pendingStatus.status]}.`);
       setPendingStatus(null);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "No se pudo actualizar el estado.");
+      setMessage(reportSafeError(cause, "No se pudo actualizar el estado."));
     } finally {
       setBusy(false);
     }
   }
 
+  const activeUnitLabel = unitId === "all" ? "Todas las unidades" : units.find((unit) => unit.id === unitId)?.name ?? "Leads";
+
+  if (access === "checking") return <div className="page-stack" />;
+
+  if (access === "denied") {
+    return (
+      <div className="page-stack">
+        <section className="panel">
+          <h2>No tienes permiso para ver esta página</h2>
+          <p>Leads no está disponible para tu rol.</p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Base comercial</span><h2>Leads</h2><p>Edita la información, cambia estados de forma controlada y consulta el historial comercial.</p></div>
+        <div><span className="eyebrow">Base comercial</span><h2>Leads · {activeUnitLabel}</h2><p>Cada marca tiene sus propios leads: elige una arriba antes de crear o editar registros para no mezclarlos.</p></div>
         {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nuevo lead</button> : null}
       </section>
-      {message ? <div className="form-message" role="status">{message}</div> : null}
-      <section className="panel filter-bar lead-filters">
-        <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
-        <label><span>Unidad</span><select value={unitId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setUnitId(event.target.value)}><option value="all">Todas</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
-        <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <div className="filter-summary"><span>Resultados</span><strong>{visibleRows.length} leads</strong></div>
+
+      <section className="brand-picker">
+        {units.map((unit) => (
+          <button key={unit.id} type="button" className={unitId === unit.id ? "brand-tile active" : "brand-tile"} onClick={() => setUnitId(unit.id)}>
+            <UnitBrandMark unit={unit} width={150} height={56} />
+          </button>
+        ))}
+        <button type="button" className={unitId === "all" ? "brand-tile active" : "brand-tile"} onClick={() => setUnitId("all")}>
+          <strong>Todas las unidades</strong>
+        </button>
       </section>
+
+      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <CollapsibleFilters
+        hasActiveFilters={query !== "" || status !== "all"}
+        onClear={() => { setQuery(""); setStatus("all"); }}
+        resultCount={visibleRows.length}
+        resultLabel="Leads"
+      >
+        <div className="filter-bar lead-filters">
+          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
+          <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        </div>
+      </CollapsibleFilters>
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
@@ -304,7 +351,7 @@ export function LeadsTable() {
       <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" onClose={() => setEditorOpen(false)}>
         <form className="lead-editor-form" onSubmit={saveLead}>
           <div className="form-grid">
-            <label><span>Unidad de negocio *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => { updateDraft("businessUnitId", event.target.value); updateDraft("campaignId", null); }}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
+            <label><span>Unidad de negocio *</span><select value={draft.businessUnitId} disabled={!canEdit || (!editingId && unitId !== "all")} onChange={(event) => { updateDraft("businessUnitId", event.target.value); updateDraft("campaignId", null); }}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
             <label><span>Campaña</span><select value={draft.campaignId ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("campaignId", event.target.value || null)}><option value="">General / sin campaña</option>{filteredCampaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label>
             <label><span>Contacto</span><input value={draft.contactName} readOnly={!canEdit} onChange={(event) => updateDraft("contactName", event.target.value)} /></label>
             <label><span>Empresa cliente</span><input value={draft.clientCompanyName} readOnly={!canEdit} onChange={(event) => updateDraft("clientCompanyName", event.target.value)} /></label>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
+import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { AppRole, Profile } from "@/lib/types";
 
@@ -19,30 +20,49 @@ function mapProfile(row: Record<string, unknown>): Profile {
   };
 }
 
+function initialDemoProfiles(configured: boolean): Profile[] {
+  if (configured || typeof window === "undefined") return demoProfiles;
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  return saved ? (JSON.parse(saved) as Profile[]) : demoProfiles;
+}
+
 export function UsersManager() {
   const configured = isSupabaseConfigured();
-  const [profiles, setProfiles] = useState<Profile[]>(demoProfiles);
+  const [profiles, setProfiles] = useState<Profile[]>(() => initialDemoProfiles(configured));
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AppRole>("commercial");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   useEffect(() => {
-    if (!configured) {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setProfiles(JSON.parse(saved) as Profile[]);
-      return;
-    }
-    void loadProfiles();
+    if (!configured) return;
+    const supabase = createClient();
+    supabase.auth.getUser().then(async ({ data: authData }) => {
+      if (!authData.user) {
+        setAccess("denied");
+        return;
+      }
+      setCurrentUserId(authData.user.id);
+      const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
+      if (ownProfile?.role !== "admin") {
+        setAccess("denied");
+        return;
+      }
+      setAccess("allowed");
+      await loadProfiles();
+    });
   }, [configured]);
 
   const activeCount = useMemo(() => profiles.filter((profile) => profile.isActive).length, [profiles]);
 
   async function loadProfiles() {
-    const { data, error } = await createClient().from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name");
+    const supabase = createClient();
+    const { data, error } = await supabase.from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name");
     if (error) {
-      setMessage(error.message);
+      setMessage(reportSafeError(error, "No se pudieron cargar los usuarios."));
       return;
     }
     setProfiles((data ?? []).map((row) => mapProfile(row as Record<string, unknown>)));
@@ -55,6 +75,10 @@ export function UsersManager() {
 
   async function updateProfile(id: string, patch: Partial<Pick<Profile, "role" | "isActive">>) {
     setMessage(null);
+    if (id === currentUserId) {
+      setMessage("No puedes cambiar tu propio rol o estado de activación.");
+      return;
+    }
     if (!configured) {
       persistDemo(profiles.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
       setMessage("Usuario actualizado en el modo demostración.");
@@ -64,7 +88,7 @@ export function UsersManager() {
     if (patch.role) dbPatch.role = patch.role;
     if (typeof patch.isActive === "boolean") dbPatch.is_active = patch.isActive;
     const { error } = await createClient().from("profiles").update(dbPatch).eq("id", id);
-    if (error) setMessage(error.message);
+    if (error) setMessage(reportSafeError(error, "No se pudo actualizar el usuario."));
     else {
       setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
       setMessage("Usuario actualizado correctamente.");
@@ -102,10 +126,27 @@ export function UsersManager() {
       setEmail("");
       setRole("commercial");
     } catch (cause) {
+      // La ruta /api/users/invite ya devuelve mensajes seguros y en español;
+      // aquí solo cubrimos errores de red inesperados.
       setMessage(cause instanceof Error ? cause.message : "No se pudo crear el usuario.");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (access === "checking") {
+    return <div className="page-stack" />;
+  }
+
+  if (access === "denied") {
+    return (
+      <div className="page-stack">
+        <section className="panel">
+          <h2>No tienes permiso para ver esta página</h2>
+          <p>La gestión de usuarios está reservada a administradores.</p>
+        </section>
+      </div>
+    );
   }
 
   return (

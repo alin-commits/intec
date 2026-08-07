@@ -24,9 +24,11 @@ export async function proxy(request: NextRequest) {
   });
 
   const { data: { user } } = await supabase.auth.getUser();
+  const publicPrefixes = ["/login", "/forgot-password", "/reset-password", "/invitacion", "/soporte", "/api/tickets", "/api/auth"];
   const isLogin = request.nextUrl.pathname.startsWith("/login");
+  const isPublicPath = request.nextUrl.pathname === "/" || publicPrefixes.some((path) => request.nextUrl.pathname.startsWith(path));
 
-  if (!user && !isLogin) {
+  if (!user && !isPublicPath) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);

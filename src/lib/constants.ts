@@ -1,4 +1,4 @@
-import type { AppRole, LeadStatus } from "@/lib/types";
+import type { AppRole, CampaignStatus, InquiryType, LeadStatus, SaleType } from "@/lib/types";
 
 export const leadStatusLabels: Record<LeadStatus, string> = {
   new: "Nuevo",
@@ -15,7 +15,14 @@ export const roleLabels: Record<AppRole, string> = {
   admin: "Administrador",
   commercial: "Comercial",
   viewer: "Solo lectura",
+  it: "Informática",
+  marketing: "Marketing",
+  direction: "Dirección",
 };
+
+export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
+export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
+export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 
 export const leadTypeLabels = {
   sale: "Venta",
@@ -26,3 +33,28 @@ export const leadTypeLabels = {
 } as const;
 
 export type LeadTypeValue = keyof typeof leadTypeLabels;
+
+export const inquiryChannelOrder: InquiryType[] = ["phone", "chat", "email_form", "whatsapp", "portal_rrss"];
+
+export const inquiryChannelLabels: Record<InquiryType, string> = {
+  phone: "Teléfono",
+  chat: "Chat",
+  email_form: "Email/Formulario",
+  whatsapp: "Whatsapp",
+  portal_rrss: "Portales/RRSS",
+};
+
+export const campaignStatusLabels: Record<CampaignStatus, string> = {
+  draft: "Borrador",
+  active: "Activa",
+  finished: "Finalizada",
+  archived: "Archivada",
+};
+
+export const saleTypeOrder: SaleType[] = ["oferta", "seguimiento", "pedido"];
+
+export const saleTypeLabels: Record<SaleType, string> = {
+  oferta: "Oferta",
+  seguimiento: "Seguimiento",
+  pedido: "Pedido",
+};
