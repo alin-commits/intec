@@ -25,7 +25,7 @@ export function MarketingDashboardView() {
   const [units, setUnits] = useState<BusinessUnit[]>([]);
   const [leads, setLeads] = useState<LeadStub[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
-  const [rrssSummary, setRrssSummary] = useState({ newFollowers: 0, adsLeads: 0, adsSpend: 0, mailingSent: 0, mailingOpenRate: 0 });
+  const [rrssSummary, setRrssSummary] = useState({ newFollowers: 0, adsLeads: 0, adsSpend: 0, revenue: 0, mailingSent: 0, mailingOpenRate: 0 });
   const [rrssTrend, setRrssTrend] = useState<{ label: string; newFollowers: number }[]>([]);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -47,8 +47,8 @@ export function MarketingDashboardView() {
         supabase.from("leads").select("business_unit_id, campaign_id, status, sale_value").limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         supabase.from("social_media_stats").select("new_followers").eq("period_month", currentMonth),
-        supabase.from("meta_ads_entries").select("amount_spent, leads"),
-        supabase.from("mailing_campaigns").select("sent_count, opens, delivered_count"),
+        supabase.from("meta_ads_entries").select("amount_spent, leads, revenue"),
+        supabase.from("mailing_campaigns").select("sent_count, opens, delivered_count, revenue"),
         supabase.from("social_media_stats").select("period_month, new_followers"),
       ]);
       if (unitError || leadError || campaignError) {
@@ -60,10 +60,13 @@ export function MarketingDashboardView() {
       setCampaigns((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
       const totalDelivered = (mailingData ?? []).reduce((sum, row) => sum + Number(row.delivered_count ?? 0), 0);
       const totalOpens = (mailingData ?? []).reduce((sum, row) => sum + Number(row.opens ?? 0), 0);
+      const adsRevenue = (adsData ?? []).reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
+      const mailingRevenue = (mailingData ?? []).reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
       setRrssSummary({
         newFollowers: (socialData ?? []).reduce((sum, row) => sum + Number(row.new_followers ?? 0), 0),
         adsSpend: (adsData ?? []).reduce((sum, row) => sum + Number(row.amount_spent ?? 0), 0),
         adsLeads: (adsData ?? []).reduce((sum, row) => sum + Number(row.leads ?? 0), 0),
+        revenue: adsRevenue + mailingRevenue,
         mailingSent: (mailingData ?? []).reduce((sum, row) => sum + Number(row.sent_count ?? 0), 0),
         mailingOpenRate: totalDelivered ? (totalOpens / totalDelivered) * 100 : 0,
       });
@@ -153,11 +156,12 @@ export function MarketingDashboardView() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Nuevos seguidores (mes)</th><th>Gasto Meta Ads</th><th>Leads Meta Ads</th><th>Envíos de email</th><th>Open rate medio</th></tr></thead>
+            <thead><tr><th>Nuevos seguidores (mes)</th><th>Gasto Meta Ads</th><th>Ingresos RRSS</th><th>Leads Meta Ads</th><th>Envíos de email</th><th>Open rate medio</th></tr></thead>
             <tbody>
               <tr>
                 <td>{numberFormatter.format(rrssSummary.newFollowers)}</td>
                 <td>{currencyFormatter.format(rrssSummary.adsSpend)}</td>
+                <td>{currencyFormatter.format(rrssSummary.revenue)}</td>
                 <td>{numberFormatter.format(rrssSummary.adsLeads)}</td>
                 <td>{numberFormatter.format(rrssSummary.mailingSent)}</td>
                 <td>{formatPercent(rrssSummary.mailingOpenRate)}</td>

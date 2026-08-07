@@ -712,6 +712,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
 
       <section className="kpi-grid">
         <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} delta="Sin comparación" helper="según filtros" />
+        <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Leads" value={numberFormatter.format(totals.leads)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="CPL medio" value={currencyFormatter.format(safeDiv(totals.spend, totals.leads))} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="según filtros" />

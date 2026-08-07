@@ -21,8 +21,8 @@ type StatusCounts = Partial<Record<LeadStatus, number>>;
 
 type Totals = { web: number; phone: number; leads: number; won: number; saleValue: number };
 type SocialStub = { businessUnitId: string; periodMonth: string; newFollowers: number };
-type AdsStub = { businessUnitId: string; amountSpent: number; leads: number };
-type MailingStub = { businessUnitId: string; sentCount: number; opens: number; deliveredCount: number };
+type AdsStub = { businessUnitId: string; amountSpent: number; leads: number; revenue: number };
+type MailingStub = { businessUnitId: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
 
 function sumRows(rows: MonthlyStat[]): Totals {
   return rows.reduce((acc, row) => ({
@@ -111,8 +111,8 @@ export function DashboardClient() {
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         supabase.from("social_media_stats").select("business_unit_id, period_month, new_followers"),
-        supabase.from("meta_ads_entries").select("business_unit_id, amount_spent, leads"),
-        supabase.from("mailing_campaigns").select("business_unit_id, sent_count, opens, delivered_count"),
+        supabase.from("meta_ads_entries").select("business_unit_id, amount_spent, leads, revenue"),
+        supabase.from("mailing_campaigns").select("business_unit_id, sent_count, opens, delivered_count, revenue"),
       ]);
       if (unitError || inquiryError || salesError || leadError || historyError || campaignError) {
         setMessage(reportSafeError(unitError ?? inquiryError ?? salesError ?? leadError ?? historyError ?? campaignError, "No se pudieron cargar los datos del dashboard."));
@@ -168,8 +168,8 @@ export function DashboardClient() {
       setStatusCounts(counts);
 
       setSocialStats((socialData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, periodMonth: String(row.period_month).slice(0, 7), newFollowers: Number(row.new_followers ?? 0) })));
-      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0) })));
-      setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0) })));
+      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0), revenue: Number(row.revenue ?? 0) })));
+      setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0), revenue: Number(row.revenue ?? 0) })));
     })();
   }, [configured, selectedMonthYear, selectedYear]);
 
@@ -232,9 +232,17 @@ export function DashboardClient() {
   const rrssSummary = useMemo(() => {
     const spend = rrssAdsFiltered.reduce((sum, row) => sum + row.amountSpent, 0);
     const adsLeads = rrssAdsFiltered.reduce((sum, row) => sum + row.leads, 0);
+    const adsRevenue = rrssAdsFiltered.reduce((sum, row) => sum + row.revenue, 0);
+    const mailingRevenue = rrssMailingFiltered.reduce((sum, row) => sum + row.revenue, 0);
     const delivered = rrssMailingFiltered.reduce((sum, row) => sum + row.deliveredCount, 0);
     const opens = rrssMailingFiltered.reduce((sum, row) => sum + row.opens, 0);
-    return { adsSpend: spend, adsLeads, mailingSent: rrssMailingFiltered.reduce((sum, row) => sum + row.sentCount, 0), mailingOpenRate: delivered ? (opens / delivered) * 100 : 0 };
+    return {
+      adsSpend: spend,
+      adsLeads,
+      revenue: adsRevenue + mailingRevenue,
+      mailingSent: rrssMailingFiltered.reduce((sum, row) => sum + row.sentCount, 0),
+      mailingOpenRate: delivered ? (opens / delivered) * 100 : 0,
+    };
   }, [rrssAdsFiltered, rrssMailingFiltered]);
 
   const rrssTrend = useMemo(() => {
@@ -335,6 +343,32 @@ export function DashboardClient() {
         </article>
       </section>
 
+      <section className="dashboard-grid">
+        <article className="panel chart-panel chart-panel-wide">
+          <div className="panel-heading">
+            <div><span className="eyebrow">RRSS</span><h2>Evolución de nuevos seguidores</h2></div>
+            <a href="/rrss" className="text-link">Ver todas →</a>
+          </div>
+          <TrendChart
+            data={rrssTrend}
+            series={[{ key: "newFollowers", label: "Nuevos seguidores", color: "#2563eb" }]}
+            ariaLabel="Evolución mensual de nuevos seguidores"
+          />
+        </article>
+        <article className="panel chart-panel">
+          <div className="panel-heading">
+            <div><span className="eyebrow">Marketing</span><h2>Meta Ads y mailing</h2></div>
+          </div>
+          <div className="channel-breakdown">
+            <div><span>Gasto Meta Ads</span><strong>{currencyFormatter.format(rrssSummary.adsSpend)}</strong></div>
+            <div><span>Ingresos RRSS</span><strong>{currencyFormatter.format(rrssSummary.revenue)}</strong></div>
+            <div><span>Leads Meta Ads</span><strong>{numberFormatter.format(rrssSummary.adsLeads)}</strong></div>
+            <div><span>Envíos de email</span><strong>{numberFormatter.format(rrssSummary.mailingSent)}</strong></div>
+            <div><span>Open rate medio</span><strong>{formatPercent(rrssSummary.mailingOpenRate)}</strong></div>
+          </div>
+        </article>
+      </section>
+
       <section className="panel table-panel">
         <div className="panel-heading">
           <div><span className="eyebrow">Rendimiento</span><h2>Comparativa por unidad</h2></div>
@@ -382,31 +416,6 @@ export function DashboardClient() {
             </tbody>
           </table>
         </div>
-      </section>
-
-      <section className="dashboard-grid">
-        <article className="panel chart-panel chart-panel-wide">
-          <div className="panel-heading">
-            <div><span className="eyebrow">RRSS</span><h2>Evolución de nuevos seguidores</h2></div>
-            <a href="/rrss" className="text-link">Ver todas →</a>
-          </div>
-          <TrendChart
-            data={rrssTrend}
-            series={[{ key: "newFollowers", label: "Nuevos seguidores", color: "#2563eb" }]}
-            ariaLabel="Evolución mensual de nuevos seguidores"
-          />
-        </article>
-        <article className="panel chart-panel">
-          <div className="panel-heading">
-            <div><span className="eyebrow">Marketing</span><h2>Meta Ads y mailing</h2></div>
-          </div>
-          <div className="channel-breakdown">
-            <div><span>Gasto Meta Ads</span><strong>{currencyFormatter.format(rrssSummary.adsSpend)}</strong></div>
-            <div><span>Leads Meta Ads</span><strong>{numberFormatter.format(rrssSummary.adsLeads)}</strong></div>
-            <div><span>Envíos de email</span><strong>{numberFormatter.format(rrssSummary.mailingSent)}</strong></div>
-            <div><span>Open rate medio</span><strong>{formatPercent(rrssSummary.mailingOpenRate)}</strong></div>
-          </div>
-        </article>
       </section>
     </div>
   );
