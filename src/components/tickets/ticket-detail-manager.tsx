@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { hasAnyRole } from "@/lib/constants";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow } from "@/lib/tickets/map";
@@ -82,12 +83,12 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
         return;
       }
       setCurrentUserId(authData.user.id);
-      const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (!ownProfile || !TICKET_VIEW_ROLES.includes(ownProfile.role)) {
+      const { data: ownProfile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+      if (!ownProfile || !hasAnyRole(ownProfile.roles, TICKET_VIEW_ROLES)) {
         setAccess("denied");
         return;
       }
-      setCanManage(TICKET_MANAGER_ROLES.includes(ownProfile.role));
+      setCanManage(hasAnyRole(ownProfile.roles, TICKET_MANAGER_ROLES));
       await loadTicket();
     });
   }, [configured, loadTicket]);

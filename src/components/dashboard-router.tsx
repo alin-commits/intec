@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { hasAnyRole } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
@@ -11,7 +12,7 @@ import { DirectionDepartmentPicker } from "./direction-department-picker";
 
 export function DashboardRouter() {
   const configured = isSupabaseConfigured();
-  const [role, setRole] = useState<AppRole | null>(configured ? null : "admin");
+  const [roles, setRoles] = useState<AppRole[] | null>(configured ? null : ["admin"]);
   const [directionView, setDirectionViewState] = useState<DirectionDepartment | null>(null);
 
   useEffect(() => {
@@ -19,19 +20,19 @@ export function DashboardRouter() {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: authData }) => {
       if (!authData.user) {
-        setRole("admin");
+        setRoles(["admin"]);
         return;
       }
-      const { data } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      const resolvedRole = (data?.role as AppRole) ?? "admin";
-      setRole(resolvedRole);
-      if (resolvedRole === "direction") setDirectionViewState(getDirectionViewAs());
+      const { data } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+      const resolvedRoles = (data?.roles as AppRole[] | undefined) ?? ["admin"];
+      setRoles(resolvedRoles);
+      if (resolvedRoles.includes("direction")) setDirectionViewState(getDirectionViewAs());
     });
   }, [configured]);
 
-  if (role === null) return <div className="page-stack" />;
+  if (roles === null) return <div className="page-stack" />;
 
-  if (role === "direction") {
+  if (roles.includes("direction")) {
     if (!directionView) {
       return (
         <DirectionDepartmentPicker
@@ -48,7 +49,10 @@ export function DashboardRouter() {
     return <DashboardClient />;
   }
 
-  if (role === "it") return <TicketsDashboardView />;
-  if (role === "marketing") return <MarketingDashboardView />;
+  // Admin/commercial/viewer own the general dashboard — anyone holding one
+  // of those roles (alone or combined with marketing/it) lands there.
+  if (hasAnyRole(roles, ["admin", "commercial", "viewer"])) return <DashboardClient />;
+  if (roles.includes("marketing")) return <MarketingDashboardView />;
+  if (roles.includes("it")) return <TicketsDashboardView />;
   return <DashboardClient />;
 }

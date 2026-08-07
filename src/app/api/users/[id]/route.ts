@@ -11,8 +11,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-    const { data: currentProfile } = await supabase.from("profiles").select("role, is_active").eq("id", user.id).maybeSingle();
-    if (!currentProfile || currentProfile.role !== "admin" || !currentProfile.is_active) {
+    const { data: currentProfile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
+    if (!currentProfile || !currentProfile.roles.includes("admin") || !currentProfile.is_active) {
       return NextResponse.json({ error: "Solo un administrador puede eliminar usuarios." }, { status: 403 });
     }
 

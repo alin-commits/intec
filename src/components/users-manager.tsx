@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { roleLabels } from "@/lib/constants";
+import { ALL_APP_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -15,7 +15,7 @@ function mapProfile(row: Record<string, unknown>): Profile {
     id: String(row.id),
     fullName: String(row.full_name ?? "Usuario"),
     email: row.email ? String(row.email) : null,
-    role: row.role as AppRole,
+    roles: row.roles as AppRole[],
     isActive: Boolean(row.is_active),
     createdAt: row.created_at ? String(row.created_at) : undefined,
   };
@@ -27,12 +27,42 @@ function initialDemoProfiles(configured: boolean): Profile[] {
   return saved ? (JSON.parse(saved) as Profile[]) : demoProfiles;
 }
 
+/** Dirección is a read-only department-preview mode, not a real permission —
+ * it can never combine with another role, matching the DB constraint. */
+function toggleRole(current: AppRole[], role: AppRole): AppRole[] {
+  if (role === "direction") {
+    return current.includes("direction") ? [] : ["direction"];
+  }
+  if (current.includes("direction")) {
+    return [role];
+  }
+  return current.includes(role) ? current.filter((item) => item !== role) : [...current, role];
+}
+
+function RoleChips({ value, onChange, disabled }: { value: AppRole[]; onChange: (next: AppRole[]) => void; disabled?: boolean }) {
+  return (
+    <div className="role-chip-group">
+      {ALL_APP_ROLES.map((role) => (
+        <button
+          key={role}
+          type="button"
+          disabled={disabled}
+          className={value.includes(role) ? "role-chip active" : "role-chip"}
+          onClick={() => onChange(toggleRole(value, role))}
+        >
+          {roleLabels[role]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function UsersManager() {
   const configured = isSupabaseConfigured();
   const [profiles, setProfiles] = useState<Profile[]>(() => initialDemoProfiles(configured));
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<AppRole>("commercial");
+  const [roles, setRoles] = useState<AppRole[]>(["commercial"]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -49,8 +79,8 @@ export function UsersManager() {
         return;
       }
       setCurrentUserId(authData.user.id);
-      const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (ownProfile?.role !== "admin") {
+      const { data: ownProfile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+      if (!ownProfile || !hasAnyRole(ownProfile.roles, ["admin"])) {
         setAccess("denied");
         return;
       }
@@ -63,7 +93,7 @@ export function UsersManager() {
 
   async function loadProfiles() {
     const supabase = createClient();
-    const { data, error } = await supabase.from("profiles").select("id, full_name, email, role, is_active, created_at").order("full_name");
+    const { data, error } = await supabase.from("profiles").select("id, full_name, email, roles, is_active, created_at").order("full_name");
     if (error) {
       setMessage(reportSafeError(error, "No se pudieron cargar los usuarios."));
       return;
@@ -76,10 +106,14 @@ export function UsersManager() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
 
-  async function updateProfile(id: string, patch: Partial<Pick<Profile, "role" | "isActive">>) {
+  async function updateProfile(id: string, patch: Partial<Pick<Profile, "roles" | "isActive">>) {
     setMessage(null);
     if (id === currentUserId) {
       setMessage("No puedes cambiar tu propio rol o estado de activación.");
+      return;
+    }
+    if (patch.roles && patch.roles.length === 0) {
+      setMessage("Selecciona al menos un rol.");
       return;
     }
     if (!configured) {
@@ -88,7 +122,7 @@ export function UsersManager() {
       return;
     }
     const dbPatch: Record<string, unknown> = {};
-    if (patch.role) dbPatch.role = patch.role;
+    if (patch.roles) dbPatch.roles = patch.roles;
     if (typeof patch.isActive === "boolean") dbPatch.is_active = patch.isActive;
     const { error } = await createClient().from("profiles").update(dbPatch).eq("id", id);
     if (error) setMessage(reportSafeError(error, "No se pudo actualizar el usuario."));
@@ -124,6 +158,10 @@ export function UsersManager() {
 
   async function inviteUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (roles.length === 0) {
+      setMessage("Selecciona al menos un rol.");
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -132,7 +170,7 @@ export function UsersManager() {
           id: `demo-${Date.now()}`,
           fullName,
           email,
-          role,
+          roles,
           isActive: true,
           createdAt: new Date().toISOString(),
         }];
@@ -142,7 +180,7 @@ export function UsersManager() {
         const response = await fetch("/api/users/invite", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fullName, email, role }),
+          body: JSON.stringify({ fullName, email, roles }),
         });
         const result = await response.json() as { error?: string };
         if (!response.ok) throw new Error(result.error || "No se pudo invitar al usuario.");
@@ -151,7 +189,7 @@ export function UsersManager() {
       }
       setFullName("");
       setEmail("");
-      setRole("commercial");
+      setRoles(["commercial"]);
     } catch (cause) {
       // La ruta /api/users/invite ya devuelve mensajes seguros y en español;
       // aquí solo cubrimos errores de red inesperados.
@@ -179,17 +217,19 @@ export function UsersManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Acceso y permisos</span><h2>Usuarios</h2><p>Gestiona quién puede entrar en la plataforma y qué acciones puede realizar.</p></div>
+        <div><span className="eyebrow">Acceso y permisos</span><h2>Usuarios</h2><p>Gestiona quién puede entrar en la plataforma y qué acciones puede realizar. Un usuario puede tener varios roles a la vez (excepto Dirección, que es exclusivo).</p></div>
         <div className="summary-pill"><strong>{activeCount}</strong><span>usuarios activos</span></div>
       </section>
 
       <section className="panel user-invite-panel">
         <div className="panel-heading"><div><span className="eyebrow">Nuevo acceso</span><h2>Invitar usuario</h2></div></div>
-        <form className="inline-form" onSubmit={inviteUser}>
+        <form className="form-grid" onSubmit={inviteUser}>
           <label><span>Nombre</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} required /></label>
           <label><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
-          <label><span>Rol</span><select value={role} onChange={(event) => setRole(event.target.value as AppRole)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <button className="button button-primary" disabled={busy}>{busy ? "Enviando…" : "Invitar usuario"}</button>
+          <label className="form-field-wide"><span>Roles</span><RoleChips value={roles} onChange={setRoles} /></label>
+          <div className="form-field-wide modal-actions" style={{ justifyContent: "flex-start" }}>
+            <button className="button button-primary" disabled={busy}>{busy ? "Enviando…" : "Invitar usuario"}</button>
+          </div>
         </form>
         {message ? <div className="form-message" role="status">{message}</div> : null}
       </section>
@@ -198,12 +238,12 @@ export function UsersManager() {
         <div className="panel-heading"><div><span className="eyebrow">Equipo</span><h2>Usuarios registrados</h2></div></div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Email</th><th>Roles</th><th>Estado</th><th></th></tr></thead>
             <tbody>{profiles.map((profile) => (
               <tr key={profile.id}>
                 <td><strong>{profile.fullName}</strong></td>
                 <td>{profile.email || "—"}</td>
-                <td><select className="table-select" value={profile.role} onChange={(event) => void updateProfile(profile.id, { role: event.target.value as AppRole })}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+                <td><RoleChips value={profile.roles} onChange={(next) => void updateProfile(profile.id, { roles: next })} /></td>
                 <td><button type="button" className={profile.isActive ? "status-toggle active" : "status-toggle"} onClick={() => void updateProfile(profile.id, { isActive: !profile.isActive })}>{profile.isActive ? "Activo" : "Desactivado"}</button></td>
                 <td>{profile.id !== currentUserId ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}</td>
               </tr>
@@ -225,7 +265,7 @@ export function UsersManager() {
           <div className="confirmation-summary">
             <span>Usuario</span><strong>{pendingDelete.fullName}</strong>
             <span>Email</span><strong>{pendingDelete.email || "—"}</strong>
-            <p>Se eliminará su acceso por completo. Si tiene consultas, leads, campañas o ventas registradas, no se podrá eliminar: desactívalo en su lugar para conservar el historial.</p>
+            <p>Se eliminará su acceso por completo. Sus consultas, leads, campañas o ventas registradas se conservan, solo se les quita el vínculo con este usuario.</p>
           </div>
         ) : null}
       </ConfirmationDialog>

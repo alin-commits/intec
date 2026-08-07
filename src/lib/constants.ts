@@ -24,6 +24,13 @@ export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "dir
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
 export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 
+export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
+
+/** True if the user holds at least one of the given roles. */
+export function hasAnyRole(userRoles: AppRole[], allowed: AppRole[]): boolean {
+  return userRoles.some((role) => allowed.includes(role));
+}
+
 export const leadTypeLabels = {
   sale: "Venta",
   distributor: "Distribuidor",

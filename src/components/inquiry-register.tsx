@@ -8,7 +8,7 @@ import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { CONSULTAS_ROLES, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
@@ -153,10 +153,10 @@ export function InquiryRegister() {
       setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
         setCurrentUserId(authData.user.id);
-        const { data: profile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-        setCanRegister(profile?.role === "admin" || profile?.role === "commercial");
-        setIsAdmin(profile?.role === "admin");
-        setAccess(profile && CONSULTAS_ROLES.includes(profile.role) ? "allowed" : "denied");
+        const { data: profile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+        setCanRegister(Boolean(profile && hasAnyRole(profile.roles, ["admin", "commercial"])));
+        setIsAdmin(Boolean(profile?.roles.includes("admin")));
+        setAccess(profile && hasAnyRole(profile.roles, CONSULTAS_ROLES) ? "allowed" : "denied");
       } else {
         setAccess("denied");
       }

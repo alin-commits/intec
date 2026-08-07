@@ -94,7 +94,7 @@ export type Profile = {
   id: string;
   fullName: string;
   email?: string | null;
-  role: AppRole;
+  roles: AppRole[];
   isActive: boolean;
   createdAt?: string;
 };

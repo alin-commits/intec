@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
-import { roleLabels } from "@/lib/constants";
+import { hasAnyRole, roleLabels } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
@@ -114,7 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const configured = isSupabaseConfigured();
-  const [profile, setProfile] = useState<{ fullName: string; role: AppRole }>(() => ({ fullName: "Alín", role: "admin" }));
+  const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[] }>(() => ({ fullName: "Alín", roles: ["admin"] }));
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [directionView, setDirectionView] = useState<DirectionDepartment | null>(() => getDirectionViewAs());
   const [lastPathname, setLastPathname] = useState(pathname);
@@ -138,10 +138,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || !active) return;
-      const { data } = await supabase.from("profiles").select("full_name, role").eq("id", user.id).maybeSingle();
+      const { data } = await supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle();
       if (data && active) {
         const rawName = data.full_name || user.email || "Usuario";
-        setProfile({ fullName: rawName.includes("@") ? nameFromEmail(rawName) : rawName, role: data.role as AppRole });
+        setProfile({ fullName: rawName.includes("@") ? nameFromEmail(rawName) : rawName, roles: data.roles as AppRole[] });
       }
     }
     void loadProfile();
@@ -149,7 +149,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [configured]);
 
   const title = Object.entries(pageTitles).find(([path]) => pathname.startsWith(path))?.[1] ?? "Actividad comercial";
-  const navRole: AppRole | null = profile.role === "direction" ? directionView : profile.role;
+  const isDirection = profile.roles.includes("direction");
+  const navRoles: AppRole[] = isDirection ? (directionView ? [directionView] : []) : profile.roles;
 
   async function signOut() {
     if (configured) {
@@ -180,7 +181,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
-          {navigation.filter((item) => !item.roles || (navRole !== null && item.roles.includes(navRole))).map((item) => {
+          {navigation.filter((item) => !item.roles || hasAnyRole(navRoles, item.roles)).map((item) => {
             const active = pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
@@ -191,13 +192,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-bottom">
-          {profile.role === "direction" ? (
+          {isDirection ? (
             <button type="button" className="sidebar-department-switch" onClick={changeDepartment}>
               {directionView ? `Viendo: ${departmentLabels[directionView]} · Cambiar` : "Elegir departamento"}
             </button>
           ) : null}
           <div className="sidebar-footer">
-            <div><strong>{profile.fullName}</strong><small>{roleLabels[profile.role]}</small></div>
+            <div><strong>{profile.fullName}</strong><small>{profile.roles.map((role) => roleLabels[role]).join(" + ")}</small></div>
             <button type="button" className="sidebar-logout" onClick={signOut}>Salir</button>
           </div>
         </div>
@@ -207,7 +208,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div><span className="eyebrow">Panel interno</span><h1>{title}</h1></div>
           <div className="topbar-actions">
             {!configured ? <span className="demo-badge">Modo demostración</span> : <span className="live-badge">Datos conectados</span>}
-            {navRole === "admin" || navRole === "commercial" ? <Link href="/consultas?openSale=1" className="button button-secondary">Registrar venta</Link> : null}
+            {hasAnyRole(profile.roles, ["admin", "commercial"]) ? <Link href="/consultas?openSale=1" className="button button-secondary">Registrar venta</Link> : null}
             <Link href="/consultas" className="button button-primary">Registrar consulta</Link>
           </div>
         </header>

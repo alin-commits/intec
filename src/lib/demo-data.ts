@@ -212,7 +212,7 @@ export const campaigns: Campaign[] = [
 ];
 
 export const demoProfiles: Profile[] = [
-  { id: "demo-admin", fullName: "Alín", email: "alin@suministrointec.com", role: "admin", isActive: true, createdAt: "2026-08-01T08:00:00Z" },
-  { id: "demo-commercial", fullName: "Comercial Web", email: "comercial@suministrointec.com", role: "commercial", isActive: true, createdAt: "2026-08-02T08:00:00Z" },
-  { id: "demo-viewer", fullName: "Dirección", email: "direccion@suministrointec.com", role: "viewer", isActive: true, createdAt: "2026-08-03T08:00:00Z" },
+  { id: "demo-admin", fullName: "Alín", email: "alin@suministrointec.com", roles: ["admin"], isActive: true, createdAt: "2026-08-01T08:00:00Z" },
+  { id: "demo-commercial", fullName: "Comercial Web", email: "comercial@suministrointec.com", roles: ["commercial"], isActive: true, createdAt: "2026-08-02T08:00:00Z" },
+  { id: "demo-viewer", fullName: "Dirección", email: "direccion@suministrointec.com", roles: ["viewer"], isActive: true, createdAt: "2026-08-03T08:00:00Z" },
 ];

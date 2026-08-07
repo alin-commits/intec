@@ -128,7 +128,7 @@ export async function POST(request: Request) {
     const { data: itStaff } = await admin
       .from("profiles")
       .select("email")
-      .in("role", ["admin", "it"])
+      .overlaps("roles", ["admin", "it"])
       .eq("is_active", true)
       .not("email", "is", null);
     const recipients = new Set((itStaff ?? []).map((row) => row.email as string));

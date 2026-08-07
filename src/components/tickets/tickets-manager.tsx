@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { hasAnyRole } from "@/lib/constants";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
@@ -33,12 +34,12 @@ export function TicketsManager() {
         return;
       }
       setCurrentUserId(authData.user.id);
-      const { data: ownProfile } = await supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle();
-      if (!ownProfile || !TICKET_VIEW_ROLES.includes(ownProfile.role)) {
+      const { data: ownProfile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+      if (!ownProfile || !hasAnyRole(ownProfile.roles, TICKET_VIEW_ROLES)) {
         setAccess("denied");
         return;
       }
-      setCanManage(TICKET_MANAGER_ROLES.includes(ownProfile.role));
+      setCanManage(hasAnyRole(ownProfile.roles, TICKET_MANAGER_ROLES));
       setAccess("allowed");
       const { data, error } = await supabase
         .from("tickets")

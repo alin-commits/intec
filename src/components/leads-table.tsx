@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { LEADS_ROLES, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
+import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate } from "@/lib/format";
@@ -138,9 +138,9 @@ export function LeadsTable() {
     setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>)));
     const user = authData.user;
     if (user) {
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-      setCanEdit(profile?.role === "admin" || profile?.role === "commercial" || profile?.role === "marketing");
-      setAccess(profile && LEADS_ROLES.includes(profile.role) ? "allowed" : "denied");
+      const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
+      setCanEdit(Boolean(profile && hasAnyRole(profile.roles, ["admin", "commercial", "marketing"])));
+      setAccess(profile && hasAnyRole(profile.roles, LEADS_ROLES) ? "allowed" : "denied");
     } else {
       setAccess("denied");
     }

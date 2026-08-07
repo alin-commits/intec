@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
-import { CAMPAIGNS_ROLES, campaignStatusLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, hasAnyRole, campaignStatusLabels } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
@@ -122,9 +122,9 @@ export function CampaignsManager() {
     setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>)));
     const user = authData.user;
     if (user) {
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-      setCanEdit(profile?.role === "admin" || profile?.role === "marketing");
-      setAccess(profile && CAMPAIGNS_ROLES.includes(profile.role) ? "allowed" : "denied");
+      const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
+      setCanEdit(Boolean(profile && hasAnyRole(profile.roles, ["admin", "marketing"])));
+      setAccess(profile && hasAnyRole(profile.roles, CAMPAIGNS_ROLES) ? "allowed" : "denied");
     } else {
       setCanEdit(false);
       setAccess("denied");
