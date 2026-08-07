@@ -21,7 +21,7 @@ type StatusCounts = Partial<Record<LeadStatus, number>>;
 
 type Totals = { web: number; phone: number; leads: number; won: number; saleValue: number };
 type SocialStub = { businessUnitId: string; periodMonth: string; newFollowers: number };
-type AdsStub = { businessUnitId: string; amountSpent: number; leads: number; revenue: number };
+type AdsStub = { businessUnitId: string; campaignId: string | null; amountSpent: number; leads: number; revenue: number };
 type MailingStub = { businessUnitId: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
 
 function sumRows(rows: MonthlyStat[]): Totals {
@@ -61,6 +61,13 @@ function campaignStatsFor(campaign: CampaignRow, leads: CampaignLeadStub[]) {
   const leadsWon = rows.filter((lead) => lead.status === "won").length;
   const leadsValue = rows.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
   return { total: rows.length, won: leadsWon + campaign.directSalesCount, value: leadsValue + campaign.directSaleValue };
+}
+
+function adsStatsFor(campaignId: string, ads: AdsStub[]) {
+  const rows = ads.filter((ad) => ad.campaignId === campaignId);
+  const spend = rows.reduce((sum, ad) => sum + ad.amountSpent, 0);
+  const revenue = rows.reduce((sum, ad) => sum + ad.revenue, 0);
+  return { count: rows.length, spend, roas: spend > 0 ? revenue / spend : 0 };
 }
 
 export function DashboardClient() {
@@ -111,7 +118,7 @@ export function DashboardClient() {
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         supabase.from("social_media_stats").select("business_unit_id, period_month, new_followers"),
-        supabase.from("meta_ads_entries").select("business_unit_id, amount_spent, leads, revenue"),
+        supabase.from("meta_ads_entries").select("business_unit_id, campaign_id, amount_spent, leads, revenue"),
         supabase.from("mailing_campaigns").select("business_unit_id, sent_count, opens, delivered_count, revenue"),
       ]);
       if (unitError || inquiryError || salesError || leadError || historyError || campaignError) {
@@ -168,7 +175,7 @@ export function DashboardClient() {
       setStatusCounts(counts);
 
       setSocialStats((socialData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, periodMonth: String(row.period_month).slice(0, 7), newFollowers: Number(row.new_followers ?? 0) })));
-      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0), revenue: Number(row.revenue ?? 0) })));
+      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0), revenue: Number(row.revenue ?? 0) })));
       setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0), revenue: Number(row.revenue ?? 0) })));
     })();
   }, [configured, selectedMonthYear, selectedYear]);
@@ -398,21 +405,23 @@ export function DashboardClient() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th></tr></thead>
+            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Meta Ads</th></tr></thead>
             <tbody>
               {campaignRows.map((campaign) => {
                 const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);
                 const stats = campaignStatsFor(campaign, campaignLeads);
+                const ads = adsStatsFor(campaign.id, adsEntries);
                 return (
                   <tr key={campaign.id}>
                     <td><strong>{campaign.name}</strong></td><td>{unit?.name ?? "—"}</td>
                     <td><span className={campaign.status === "active" ? "badge badge-active" : "badge"}>{campaignStatusLabels[campaign.status]}</span></td>
                     <td>{stats.total}</td><td>{stats.won}</td><td>{formatPercent(stats.total ? (stats.won / stats.total) * 100 : 0)}</td>
                     <td>{currencyFormatter.format(stats.value)}</td>
+                    <td>{ads.count > 0 ? `${currencyFormatter.format(ads.spend)} · ${ads.roas.toFixed(2)}x` : "—"}</td>
                   </tr>
                 );
               })}
-              {campaignRows.length === 0 ? <tr><td colSpan={7} className="muted">Sin campañas activas.</td></tr> : null}
+              {campaignRows.length === 0 ? <tr><td colSpan={8} className="muted">Sin campañas activas.</td></tr> : null}
             </tbody>
           </table>
         </div>

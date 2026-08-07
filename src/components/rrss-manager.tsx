@@ -348,6 +348,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const [unitFilter, setUnitFilter] = useState("all");
   const [networkFilter, setNetworkFilter] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [rowsExpanded, setRowsExpanded] = useState(false);
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
 
   const latestMonth = useMemo(() => stats.reduce((max, row) => (row.periodMonth > max ? row.periodMonth : max), stats[0]?.periodMonth ?? monthKey()), [stats]);
@@ -541,7 +542,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           <table>
             <thead><tr><th>Mes</th><th>Marca</th><th>Red</th><th>Seguidores</th><th>Nuevos</th><th>Publicaciones</th><th>Interacciones</th><th>Alcance</th><th>Leads</th>{canEdit ? <th /> : null}</tr></thead>
             <tbody>
-              {visibleRows.map((row) => {
+              {visibleRows.slice(0, rowsExpanded ? visibleRows.length : 5).map((row) => {
                 const unit = units.find((item) => item.id === row.businessUnitId);
                 return (
                   <tr key={row.id}>
@@ -569,6 +570,13 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
             </tbody>
           </table>
         </div>
+        {visibleRows.length > 5 ? (
+          <div className="table-panel-footer">
+            <button type="button" className="button button-secondary button-compact" onClick={() => setRowsExpanded((current) => !current)}>
+              {rowsExpanded ? "Mostrar menos" : `Mostrar más (${visibleRows.length - 5} más)`}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <Modal open={editorOpen} title="Registrar mes" eyebrow="Redes sociales" onClose={() => setEditorOpen(false)}>
@@ -617,6 +625,11 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
     .map((unit) => ({ unit, spend: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.amountSpent, 0) }))
     .filter((row) => row.spend > 0)
     .map((row) => ({ label: row.unit.name, value: row.spend, color: row.unit.accent })), [units, visibleEntries]);
+
+  const revenueByUnit = useMemo(() => units
+    .map((unit) => ({ unit, revenue: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.revenue, 0) }))
+    .filter((row) => row.revenue > 0)
+    .map((row) => ({ label: row.unit.name, value: row.revenue, color: row.unit.accent })), [units, visibleEntries]);
 
   function openNew() {
     setEditingId(null);
@@ -718,9 +731,15 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
         <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="según filtros" />
       </section>
 
-      <section className="panel chart-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Gasto en Meta Ads</h2></div></div>
-        <BarChart items={spendByUnit} ariaLabel="Gasto en Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
+      <section className="dashboard-grid">
+        <article className="panel chart-panel">
+          <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Gasto en Meta Ads</h2></div></div>
+          <BarChart items={spendByUnit} ariaLabel="Gasto en Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
+        </article>
+        <article className="panel chart-panel">
+          <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Ingresos de Meta Ads</h2></div></div>
+          <BarChart items={revenueByUnit} ariaLabel="Ingresos de Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
+        </article>
       </section>
 
       <CollapsibleFilters
