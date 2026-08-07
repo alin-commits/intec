@@ -317,14 +317,21 @@ export function DashboardClient() {
         </div>
       </CollapsibleFilters>
 
+      <span className="eyebrow kpi-group-label">Consultas</span>
       <section className="kpi-grid">
         <KpiCard label="Consultas web" value={numberFormatter.format(current.web)} helper={comparisonHelper} {...deltaProps(webDelta)} />
         <KpiCard label="Consultas telefónicas" value={numberFormatter.format(current.phone)} helper={comparisonHelper} {...deltaProps(phoneDelta)} />
         <KpiCard label="Consultas totales" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} {...deltaProps(totalDelta)} />
+      </section>
+
+      <span className="eyebrow kpi-group-label">Leads, campañas y RRSS</span>
+      <section className="kpi-grid">
         <KpiCard label="Leads" value={numberFormatter.format(current.leads)} helper={comparisonHelper} {...deltaProps(leadsDelta)} />
         <KpiCard label="Ganados" value={numberFormatter.format(current.won)} delta={wonDelta === null ? "Sin comparación" : `${wonDelta >= 0 ? "+" : ""}${wonDelta}`} positive={wonDelta === null || wonDelta >= 0} helper={comparisonHelper} />
         <KpiCard label="Conversión" value={formatPercent(conversion)} delta={conversionDelta === null ? "Sin comparación" : `${conversionDelta >= 0 ? "+" : ""}${conversionDelta.toFixed(1).replace(".", ",")} pts`} positive={conversionDelta === null || conversionDelta >= 0} helper={comparisonHelper} />
         <KpiCard label="Valor ganado" value={currencyFormatter.format(current.saleValue)} helper={comparisonHelper} {...deltaProps(saleValueDelta)} />
+        <KpiCard label="Ingresos RRSS" value={currencyFormatter.format(rrssSummary.revenue)} delta="Sin comparación" helper="Meta Ads + mailing" />
+        <KpiCard label="Gasto Meta Ads" value={currencyFormatter.format(rrssSummary.adsSpend)} delta="Sin comparación" helper="total registrado" />
       </section>
 
       <section className="dashboard-grid">

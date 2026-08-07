@@ -49,8 +49,8 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
 
   const hovered = hoverIndex !== null ? data[hoverIndex] : null;
   const tooltipX = hoverIndex !== null ? xForIndex(hoverIndex, data.length) : 0;
-  const tooltipWidth = 158;
-  const tooltipHeight = 22 + series.length * 20;
+  const tooltipWidth = 172;
+  const tooltipHeight = 40 + series.length * 24;
   const tooltipOnLeft = tooltipX > width - padding.right - tooltipWidth - 8;
   const tooltipLeft = tooltipOnLeft ? tooltipX - tooltipWidth - 10 : tooltipX + 10;
 
@@ -99,7 +99,7 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
           onMouseLeave={() => setHoverIndex(null)}
         />
         {hovered ? (
-          <foreignObject x={tooltipLeft} y={padding.top} width={tooltipWidth} height={tooltipHeight} style={{ pointerEvents: "none" }}>
+          <foreignObject x={tooltipLeft} y={padding.top} width={tooltipWidth} height={tooltipHeight} style={{ pointerEvents: "none", overflow: "visible" }}>
             <div className="chart-tooltip">
               <strong>{String(hovered.label)}</strong>
               {series.map((item) => (
