@@ -15,6 +15,9 @@ type TicketTableProps = {
   onQuickStatusChange: (ticket: Ticket, status: TicketStatus) => void;
   quickEditingId: string | null;
   canManage: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
+  onToggleSelectAll?: () => void;
 };
 
 const sortLabels: Record<TicketSortColumn, string> = {
@@ -23,7 +26,10 @@ const sortLabels: Record<TicketSortColumn, string> = {
   updatedAt: "Última actualización",
 };
 
-export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickEditingId, canManage }: TicketTableProps) {
+export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickEditingId, canManage, selectedIds, onToggleSelect, onToggleSelectAll }: TicketTableProps) {
+  const selectable = canManage && Boolean(selectedIds && onToggleSelect && onToggleSelectAll);
+  const allSelected = selectable && tickets.length > 0 && tickets.every((ticket) => selectedIds!.has(ticket.id));
+
   function headerCell(column: TicketSortColumn) {
     const arrow = sort.column === column ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
     return <th><button type="button" className="sort-button" onClick={() => onSort(column)}>{sortLabels[column]}{arrow}</button></th>;
@@ -34,6 +40,7 @@ export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickE
       <table>
         <thead>
           <tr>
+            {selectable ? <th><input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="Seleccionar todos" /></th> : null}
             <th>Nº ticket</th>
             {headerCell("createdAt")}
             <th>Trabajador</th>
@@ -49,6 +56,7 @@ export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickE
         <tbody>
           {tickets.map((ticket) => (
             <tr key={ticket.id}>
+              {selectable ? <td><input type="checkbox" checked={selectedIds!.has(ticket.id)} onChange={() => onToggleSelect!(ticket.id)} aria-label={`Seleccionar ${ticket.ticketNumber}`} /></td> : null}
               <td><strong>{ticket.ticketNumber}</strong></td>
               <td>{formatDate(ticket.createdAt)}</td>
               <td>{ticket.reporterName}</td>
