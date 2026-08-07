@@ -172,7 +172,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className={mobileNavOpen ? "sidebar mobile-open" : "sidebar"}>
         <div className="sidebar-top">
           <Link href="/dashboard" className="brand">
-            <span className="brand-logo-chip"><Logo className="brand-logo" priority /></span>
+            <span className="brand-logo-chip"><Logo className="brand-logo" variant="white" priority /></span>
             <small>Commercial Hub</small>
           </Link>
           <button type="button" className="sidebar-toggle" aria-label={mobileNavOpen ? "Cerrar menú" : "Abrir menú"} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((current) => !current)}>
