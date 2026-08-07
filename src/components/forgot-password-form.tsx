@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { reportSafeError } from "@/lib/errors";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -24,7 +23,9 @@ export function ForgotPasswordForm() {
       if (!response.ok) throw new Error(payload.error ?? "No se pudo enviar el correo.");
       setSent(true);
     } catch (cause) {
-      setError(reportSafeError(cause, "No se ha podido enviar el correo. Inténtalo de nuevo."));
+      // /api/auth/forgot-password ya devuelve mensajes seguros y en español;
+      // aquí solo cubrimos errores de red inesperados.
+      setError(cause instanceof Error ? cause.message : "No se ha podido enviar el correo. Inténtalo de nuevo.");
     } finally {
       setBusy(false);
     }

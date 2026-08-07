@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ticketBlockingLevelLabels, ticketBlockingLevelOrder, ticketCategoryLabels, ticketCategoryOrder } from "@/lib/tickets/constants";
-import { reportSafeError } from "@/lib/errors";
 import type { TicketBlockingLevel, TicketCategory } from "@/lib/tickets/types";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -84,7 +83,9 @@ export function TicketForm() {
       }
       router.push(`/soporte/enviado?ticket=${encodeURIComponent(result.ticketNumber)}`);
     } catch (cause) {
-      setFormError(reportSafeError(cause, "No se pudo enviar la incidencia. Inténtalo de nuevo."));
+      // /api/tickets/create ya devuelve mensajes seguros y en español (validación,
+      // límites de archivo...); aquí solo cubrimos errores de red inesperados.
+      setFormError(cause instanceof Error ? cause.message : "No se pudo enviar la incidencia. Inténtalo de nuevo.");
     } finally {
       setBusy(false);
     }
