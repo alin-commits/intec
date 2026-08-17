@@ -50,6 +50,8 @@ type MailingDraft = Omit<MailingCampaign, "id" | "createdAt" | "createdBy">;
 type PendingDelete = { table: "social_media_stats" | "meta_ads_entries" | "mailing_campaigns"; id: string; label: string };
 type CampaignOption = { id: string; businessUnitId: string; name: string };
 
+const NETWORK_COLORS: Record<SocialNetwork, string> = { facebook: "#1877F2", instagram: "#E4405F", linkedin: "#0A66C2" };
+
 function ratio(numerator: number, denominator: number): number {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;
 }
@@ -349,6 +351,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const [networkFilter, setNetworkFilter] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
   const [rowsExpanded, setRowsExpanded] = useState(false);
+  const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
 
   const latestMonth = useMemo(() => stats.reduce((max, row) => (row.periodMonth > max ? row.periodMonth : max), stats[0]?.periodMonth ?? monthKey()), [stats]);
@@ -374,6 +377,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const monthlyTrend = useMemo(() => {
     const byMonth = new Map<string, { newFollowers: number; interactions: number; reach: number }>();
     for (const row of stats) {
+      if (unitFilter !== "all" && row.businessUnitId !== unitFilter) continue;
       const entry = byMonth.get(row.periodMonth) ?? { newFollowers: 0, interactions: 0, reach: 0 };
       entry.newFollowers += row.newFollowers;
       entry.interactions += row.interactions;
@@ -381,7 +385,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       byMonth.set(row.periodMonth, entry);
     }
     return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
-  }, [stats]);
+  }, [stats, unitFilter]);
 
   const monthlyTrendData = useMemo(() => monthlyTrend.map(([month, entry]) => ({
     label: monthShortLabel(month),
@@ -393,9 +397,24 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     .filter((row) => row.newFollowers > 0)
     .map((row) => ({ label: row.unit.name, value: row.newFollowers, color: row.unit.accent })), [unitSummaries]);
 
+  const newFollowersByNetwork = useMemo(() => {
+    if (unitFilter === "all") return [];
+    const rows = latestRows.filter((row) => row.businessUnitId === unitFilter);
+    return socialNetworkOrder
+      .map((network) => ({ network, value: rows.find((row) => row.network === network)?.newFollowers ?? 0 }))
+      .filter((row) => row.value > 0)
+      .map((row) => ({ label: socialNetworkLabels[row.network], value: row.value, color: NETWORK_COLORS[row.network] }));
+  }, [unitFilter, latestRows]);
+
+  const selectedUnitName = unitFilter === "all" ? "todas las marcas" : units.find((unit) => unit.id === unitFilter)?.name ?? "";
+
   const visibleRows = useMemo(() => stats
     .filter((row) => (unitFilter === "all" || row.businessUnitId === unitFilter) && (networkFilter === "all" || row.network === networkFilter))
-    .sort((a, b) => (a.periodMonth === b.periodMonth ? a.network.localeCompare(b.network) : b.periodMonth.localeCompare(a.periodMonth))), [stats, unitFilter, networkFilter]);
+    .sort((a, b) => {
+      const monthCompare = a.periodMonth.localeCompare(b.periodMonth);
+      if (monthCompare !== 0) return sortAsc ? monthCompare : -monthCompare;
+      return a.network.localeCompare(b.network);
+    }), [stats, unitFilter, networkFilter, sortAsc]);
 
   function openNew() {
     setDraft(blankSocialDraft(units));
@@ -485,7 +504,13 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
 
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
-          <div className="panel-heading"><div><span className="eyebrow">Evolución</span><h2>Últimos meses (todas las marcas)</h2></div></div>
+          <div className="panel-heading">
+            <div><span className="eyebrow">Evolución</span><h2>Últimos meses ({selectedUnitName})</h2></div>
+            <select className="panel-heading-select" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
+              <option value="all">Todas las marcas</option>
+              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </div>
           <TrendChart
             data={monthlyTrendData}
             series={[
@@ -496,8 +521,12 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           />
         </article>
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Nuevos seguidores</h2></div></div>
-          <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca este mes" valueFormatter={(value) => numberFormatter.format(value)} />
+          <div className="panel-heading"><div><span className="eyebrow">{unitFilter === "all" ? "Por marca" : "Por red"}</span><h2>Nuevos seguidores</h2></div></div>
+          {unitFilter === "all" ? (
+            <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca este mes" valueFormatter={(value) => numberFormatter.format(value)} />
+          ) : (
+            <BarChart items={newFollowersByNetwork} ariaLabel={`Nuevos seguidores por red para ${selectedUnitName}`} valueFormatter={(value) => numberFormatter.format(value)} />
+          )}
         </article>
       </section>
 
@@ -537,7 +566,12 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       </CollapsibleFilters>
 
       <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Registros mensuales</h2></div></div>
+        <div className="panel-heading">
+          <div><span className="eyebrow">Detalle</span><h2>Registros mensuales</h2></div>
+          <button type="button" className="button button-compact button-secondary" onClick={() => setSortAsc((current) => !current)}>
+            {sortAsc ? "↑ Más antiguo primero" : "↓ Más reciente primero"}
+          </button>
+        </div>
         <div className="table-scroll">
           <table>
             <thead><tr><th>Mes</th><th>Marca</th><th>Red</th><th>Seguidores</th><th>Nuevos</th><th>Publicaciones</th><th>Interacciones</th><th>Alcance</th><th>Leads</th>{canEdit ? <th /> : null}</tr></thead>
@@ -608,12 +642,19 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
   const [statusFilter, setStatusFilter] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<AdsDraft>(() => blankAdsDraft(units));
 
-  const visibleEntries = useMemo(() => entries.filter((entry) => {
-    const matchesQuery = entry.campaignName.toLowerCase().includes(query.toLowerCase());
-    return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter);
-  }), [entries, query, unitFilter, statusFilter]);
+  const visibleEntries = useMemo(() => entries
+    .filter((entry) => {
+      const matchesQuery = entry.campaignName.toLowerCase().includes(query.toLowerCase());
+      return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter);
+    })
+    .sort((a, b) => {
+      const aDate = a.startDate ?? a.createdAt;
+      const bDate = b.startDate ?? b.createdAt;
+      return sortAsc ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate);
+    }), [entries, query, unitFilter, statusFilter, sortAsc]);
 
   const totals = useMemo(() => visibleEntries.reduce((acc, entry) => ({
     spend: acc.spend + entry.amountSpent,
@@ -762,7 +803,12 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
       </CollapsibleFilters>
 
       <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Campañas registradas</h2></div></div>
+        <div className="panel-heading">
+          <div><span className="eyebrow">Detalle</span><h2>Campañas registradas</h2></div>
+          <button type="button" className="button button-compact button-secondary" onClick={() => setSortAsc((current) => !current)}>
+            {sortAsc ? "↑ Más antiguo primero" : "↓ Más reciente primero"}
+          </button>
+        </div>
         <div className="table-scroll">
           <table>
             <thead><tr><th>Marca</th><th>Campaña</th><th>Estado</th><th>Gasto</th><th>Impresiones</th><th>Clics</th><th>CTR</th><th>CPC</th><th>Leads</th><th>Cualificados</th><th>Compras</th><th>Ingresos</th><th>CPL</th><th>ROAS</th><th>ROI</th>{canEdit ? <th /> : null}</tr></thead>
@@ -845,12 +891,15 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   const [typeFilter, setTypeFilter] = useState("all");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<MailingDraft>(() => blankMailingDraft(units));
 
-  const visibleCampaigns = useMemo(() => campaigns.filter((campaign) => {
-    const matchesQuery = campaign.campaignName.toLowerCase().includes(query.toLowerCase());
-    return matchesQuery && (unitFilter === "all" || campaign.businessUnitId === unitFilter) && (typeFilter === "all" || campaign.campaignType === typeFilter);
-  }), [campaigns, query, unitFilter, typeFilter]);
+  const visibleCampaigns = useMemo(() => campaigns
+    .filter((campaign) => {
+      const matchesQuery = campaign.campaignName.toLowerCase().includes(query.toLowerCase());
+      return matchesQuery && (unitFilter === "all" || campaign.businessUnitId === unitFilter) && (typeFilter === "all" || campaign.campaignType === typeFilter);
+    })
+    .sort((a, b) => sortAsc ? a.sentDate.localeCompare(b.sentDate) : b.sentDate.localeCompare(a.sentDate)), [campaigns, query, unitFilter, typeFilter, sortAsc]);
 
   const totals = useMemo(() => visibleCampaigns.reduce((acc, campaign) => ({
     sent: acc.sent + campaign.sentCount,
@@ -985,7 +1034,12 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
       </CollapsibleFilters>
 
       <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Campañas registradas</h2></div></div>
+        <div className="panel-heading">
+          <div><span className="eyebrow">Detalle</span><h2>Campañas registradas</h2></div>
+          <button type="button" className="button button-compact button-secondary" onClick={() => setSortAsc((current) => !current)}>
+            {sortAsc ? "↑ Más antiguo primero" : "↓ Más reciente primero"}
+          </button>
+        </div>
         <div className="table-scroll">
           <table>
             <thead><tr><th>Marca</th><th>Campaña</th><th>Tipo</th><th>Fecha</th><th>Enviados</th><th>Entregados</th><th>Aperturas</th><th>Clics</th><th>Leads</th><th>Ventas</th><th>Ingresos</th><th>Bajas</th><th>Open rate</th><th>CTR</th><th>CTOR</th>{canEdit ? <th /> : null}</tr></thead>
