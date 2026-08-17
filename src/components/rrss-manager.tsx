@@ -95,6 +95,7 @@ function blankAdsDraft(units: BusinessUnit[]): AdsDraft {
     leads: 0,
     qualifiedLeads: 0,
     purchases: 0,
+    followersGained: 0,
     revenue: 0,
     notes: "",
   };
@@ -156,6 +157,7 @@ function mapAdsRow(row: Record<string, unknown>): MetaAdsEntry {
     leads: Number(row.leads ?? 0),
     qualifiedLeads: Number(row.qualified_leads ?? 0),
     purchases: Number(row.purchases ?? 0),
+    followersGained: Number(row.followers_gained ?? 0),
     revenue: Number(row.revenue ?? 0),
     notes: row.notes ? String(row.notes) : null,
     createdBy: row.created_by ? String(row.created_by) : null,
@@ -221,7 +223,7 @@ export function RrssManager() {
     ] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("social_media_stats").select("id, business_unit_id, network, period_month, followers_end, new_followers, posts, interactions, reach, active_campaigns, link_clicks, leads, notes, created_by, created_at").order("period_month", { ascending: false }),
-      supabase.from("meta_ads_entries").select("id, business_unit_id, campaign_id, campaign_name, ad_set, ad_name, objective, status, start_date, end_date, amount_spent, impressions, link_clicks, leads, qualified_leads, purchases, revenue, notes, created_by, created_at").order("created_at", { ascending: false }),
+      supabase.from("meta_ads_entries").select("id, business_unit_id, campaign_id, campaign_name, ad_set, ad_name, objective, status, start_date, end_date, amount_spent, impressions, link_clicks, leads, qualified_leads, purchases, followers_gained, revenue, notes, created_by, created_at").order("created_at", { ascending: false }),
       supabase.from("mailing_campaigns").select("id, business_unit_id, campaign_name, campaign_type, sent_date, sent_count, delivered_count, opens, clicks, leads, sales_count, revenue, unsubscribes, notes, created_by, created_at").order("sent_date", { ascending: false }),
       supabase.from("campaigns").select("id, business_unit_id, name").neq("status", "archived").order("name"),
       supabase.auth.getUser(),
@@ -673,7 +675,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
     spend: acc.spend + entry.amountSpent,
     leads: acc.leads + entry.leads,
     revenue: acc.revenue + entry.revenue,
-  }), { spend: 0, leads: 0, revenue: 0 }), [visibleEntries]);
+    followersGained: acc.followersGained + entry.followersGained,
+  }), { spend: 0, leads: 0, revenue: 0, followersGained: 0 }), [visibleEntries]);
 
   const spendByUnit = useMemo(() => units
     .map((unit) => ({ unit, spend: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.amountSpent, 0) }))
@@ -710,6 +713,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
       leads: entry.leads,
       qualifiedLeads: entry.qualifiedLeads,
       purchases: entry.purchases,
+      followersGained: entry.followersGained,
       revenue: entry.revenue,
       notes: entry.notes,
     });
@@ -753,6 +757,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
           leads: draft.leads,
           qualified_leads: draft.qualifiedLeads,
           purchases: draft.purchases,
+          followers_gained: draft.followersGained,
           revenue: draft.revenue,
           notes: draft.notes?.trim() || null,
         };
@@ -781,6 +786,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
         <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Leads" value={numberFormatter.format(totals.leads)} delta="Sin comparación" helper="según filtros" />
+        <KpiCard label="Seguidores ganados" value={numberFormatter.format(totals.followersGained)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="CPL medio" value={currencyFormatter.format(safeDiv(totals.spend, totals.leads))} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="según filtros" />
       </section>
@@ -824,7 +830,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Marca</th><th>Campaña</th><th>Estado</th><th>Gasto</th><th>Impresiones</th><th>Clics</th><th>CTR</th><th>CPC</th><th>Leads</th><th>Cualificados</th><th>Compras</th><th>Ingresos</th><th>CPL</th><th>ROAS</th><th>ROI</th>{canEdit ? <th /> : null}</tr></thead>
+            <thead><tr><th>Marca</th><th>Campaña</th><th>Estado</th><th>Gasto</th><th>Impresiones</th><th>Clics</th><th>CTR</th><th>CPC</th><th>Leads</th><th>Cualificados</th><th>Compras</th><th>Seguidores ganados</th><th>Ingresos</th><th>CPL</th><th>ROAS</th><th>ROI</th>{canEdit ? <th /> : null}</tr></thead>
             <tbody>
               {visibleEntries.map((entry) => {
                 const unit = units.find((item) => item.id === entry.businessUnitId);
@@ -846,6 +852,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
                     <td>{numberFormatter.format(entry.leads)}</td>
                     <td>{numberFormatter.format(entry.qualifiedLeads)}</td>
                     <td>{numberFormatter.format(entry.purchases)}</td>
+                    <td>{numberFormatter.format(entry.followersGained)}</td>
                     <td>{currencyFormatter.format(entry.revenue)}</td>
                     <td>{currencyFormatter.format(cpl)}</td>
                     <td>{roas.toFixed(2)}x</td>
@@ -861,7 +868,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
                   </tr>
                 );
               })}
-              {visibleEntries.length === 0 ? <tr><td colSpan={canEdit ? 16 : 15} className="muted">Sin campañas que coincidan con los filtros.</td></tr> : null}
+              {visibleEntries.length === 0 ? <tr><td colSpan={canEdit ? 17 : 16} className="muted">Sin campañas que coincidan con los filtros.</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -888,6 +895,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
             <label><span>Leads</span><input type="number" min="0" step="1" value={draft.leads} readOnly={!canEdit} onChange={(event) => updateDraft("leads", Number(event.target.value) || 0)} /></label>
             <label><span>Leads cualificados</span><input type="number" min="0" step="1" value={draft.qualifiedLeads} readOnly={!canEdit} onChange={(event) => updateDraft("qualifiedLeads", Number(event.target.value) || 0)} /></label>
             <label><span>Compras</span><input type="number" min="0" step="1" value={draft.purchases} readOnly={!canEdit} onChange={(event) => updateDraft("purchases", Number(event.target.value) || 0)} /></label>
+            <label><span>Seguidores ganados</span><input type="number" min="0" step="1" value={draft.followersGained} readOnly={!canEdit} onChange={(event) => updateDraft("followersGained", Number(event.target.value) || 0)} /></label>
             <label><span>Ingresos (€)</span><input type="number" min="0" step="0.01" value={draft.revenue} readOnly={!canEdit} onChange={(event) => updateDraft("revenue", Number(event.target.value) || 0)} /></label>
             <label className="form-field-wide"><span>Notas</span><textarea rows={3} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>

@@ -152,6 +152,7 @@ export type MetaAdsEntry = {
   leads: number;
   qualifiedLeads: number;
   purchases: number;
+  followersGained: number;
   revenue: number;
   notes: string | null;
   createdBy: string | null;
