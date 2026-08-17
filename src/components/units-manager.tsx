@@ -352,8 +352,23 @@ export function UnitsManager() {
             <label className="form-field-wide"><span>Logo (JPG, PNG, WEBP o SVG, máx. 2 MB)</span>
               <input type="file" accept="image/jpeg,image/png,image/webp,image/svg+xml" onChange={(event) => handleLogoChange(event.target.files)} />
             </label>
-            <label className="unit-visibility-check"><input type="checkbox" checked={draft.visibleInConsultas} onChange={(event) => setDraft((current) => ({ ...current, visibleInConsultas: event.target.checked }))} /><span>Aparece en Consultas</span></label>
-            <label className="unit-visibility-check"><input type="checkbox" checked={draft.visibleInLeads} onChange={(event) => setDraft((current) => ({ ...current, visibleInLeads: event.target.checked }))} /><span>Aparece en Leads</span></label>
+            <div className="form-field-wide visibility-toggle-group">
+              <span className="visibility-toggle-group-label">Visibilidad por categoría</span>
+              <label className="visibility-toggle">
+                <span>Aparece en Consultas</span>
+                <span className="switch">
+                  <input type="checkbox" checked={draft.visibleInConsultas} onChange={(event) => setDraft((current) => ({ ...current, visibleInConsultas: event.target.checked }))} />
+                  <span className="switch-track"><span className="switch-thumb" /></span>
+                </span>
+              </label>
+              <label className="visibility-toggle">
+                <span>Aparece en Leads</span>
+                <span className="switch">
+                  <input type="checkbox" checked={draft.visibleInLeads} onChange={(event) => setDraft((current) => ({ ...current, visibleInLeads: event.target.checked }))} />
+                  <span className="switch-track"><span className="switch-thumb" /></span>
+                </span>
+              </label>
+            </div>
           </div>
           {logoError ? <div className="form-error form-field-wide" role="alert">{logoError}</div> : null}
           <div className="modal-actions">
