@@ -7,6 +7,7 @@ import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { KpiCard } from "@/components/kpi-card";
+import { UnitBrandMark } from "@/components/unit-brand-mark";
 import {
   RRSS_ROLES,
   adStatusLabels,
@@ -352,17 +353,19 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const [editorOpen, setEditorOpen] = useState(false);
   const [rowsExpanded, setRowsExpanded] = useState(false);
   const [sortAsc, setSortAsc] = useState(false);
+  const [networkChartPeriod, setNetworkChartPeriod] = useState<"month" | "total">("month");
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
 
   const latestMonth = useMemo(() => stats.reduce((max, row) => (row.periodMonth > max ? row.periodMonth : max), stats[0]?.periodMonth ?? monthKey()), [stats]);
   const latestRows = useMemo(() => stats.filter((row) => row.periodMonth === latestMonth), [stats, latestMonth]);
+  const filteredLatestRows = useMemo(() => (unitFilter === "all" ? latestRows : latestRows.filter((row) => row.businessUnitId === unitFilter)), [latestRows, unitFilter]);
 
-  const totals = useMemo(() => latestRows.reduce((acc, row) => ({
+  const totals = useMemo(() => filteredLatestRows.reduce((acc, row) => ({
     followers: acc.followers + row.followersEnd,
     newFollowers: acc.newFollowers + row.newFollowers,
     interactions: acc.interactions + row.interactions,
     reach: acc.reach + row.reach,
-  }), { followers: 0, newFollowers: 0, interactions: 0, reach: 0 }), [latestRows]);
+  }), { followers: 0, newFollowers: 0, interactions: 0, reach: 0 }), [filteredLatestRows]);
 
   const unitSummaries = useMemo(() => units.map((unit) => {
     const rows = latestRows.filter((row) => row.businessUnitId === unit.id);
@@ -399,12 +402,12 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
 
   const newFollowersByNetwork = useMemo(() => {
     if (unitFilter === "all") return [];
-    const rows = latestRows.filter((row) => row.businessUnitId === unitFilter);
+    const sourceRows = (networkChartPeriod === "month" ? latestRows : stats).filter((row) => row.businessUnitId === unitFilter);
     return socialNetworkOrder
-      .map((network) => ({ network, value: rows.find((row) => row.network === network)?.newFollowers ?? 0 }))
+      .map((network) => ({ network, value: sourceRows.filter((row) => row.network === network).reduce((sum, row) => sum + row.newFollowers, 0) }))
       .filter((row) => row.value > 0)
       .map((row) => ({ label: socialNetworkLabels[row.network], value: row.value, color: NETWORK_COLORS[row.network] }));
-  }, [unitFilter, latestRows]);
+  }, [unitFilter, latestRows, stats, networkChartPeriod]);
 
   const selectedUnitName = unitFilter === "all" ? "todas las marcas" : units.find((unit) => unit.id === unitFilter)?.name ?? "";
 
@@ -495,6 +498,16 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         {canEdit ? <button className="button button-primary" onClick={openNew}>+ Registrar mes</button> : null}
       </section>
 
+      <div className="brand-chip-row" role="tablist" aria-label="Filtrar por marca">
+        <button type="button" className={unitFilter === "all" ? "brand-chip active" : "brand-chip"} onClick={() => setUnitFilter("all")}>Todas las marcas</button>
+        {units.map((unit) => (
+          <button type="button" key={unit.id} className={unitFilter === unit.id ? "brand-chip active" : "brand-chip"} onClick={() => setUnitFilter(unit.id)}>
+            <UnitBrandMark unit={unit} size={22} />
+            {unit.name}
+          </button>
+        ))}
+      </div>
+
       <section className="kpi-grid">
         <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} delta="Sin comparación" helper="último mes registrado" />
         <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} delta="Sin comparación" helper="último mes registrado" />
@@ -506,10 +519,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         <article className="panel chart-panel chart-panel-wide">
           <div className="panel-heading">
             <div><span className="eyebrow">Evolución</span><h2>Últimos meses ({selectedUnitName})</h2></div>
-            <select className="panel-heading-select" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
-              <option value="all">Todas las marcas</option>
-              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-            </select>
           </div>
           <TrendChart
             data={monthlyTrendData}
@@ -521,7 +530,15 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           />
         </article>
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><span className="eyebrow">{unitFilter === "all" ? "Por marca" : "Por red"}</span><h2>Nuevos seguidores</h2></div></div>
+          <div className="panel-heading">
+            <div><span className="eyebrow">{unitFilter === "all" ? "Por marca" : "Por red"}</span><h2>Nuevos seguidores</h2></div>
+            {unitFilter !== "all" ? (
+              <select className="panel-heading-select" value={networkChartPeriod} onChange={(event) => setNetworkChartPeriod(event.target.value as "month" | "total")}>
+                <option value="month">Mes actual</option>
+                <option value="total">Total</option>
+              </select>
+            ) : null}
+          </div>
           {unitFilter === "all" ? (
             <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca este mes" valueFormatter={(value) => numberFormatter.format(value)} />
           ) : (
@@ -548,16 +565,12 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       </section>
 
       <CollapsibleFilters
-        hasActiveFilters={unitFilter !== "all" || networkFilter !== "all"}
-        onClear={() => { setUnitFilter("all"); setNetworkFilter("all"); }}
+        hasActiveFilters={networkFilter !== "all"}
+        onClear={() => setNetworkFilter("all")}
         resultCount={visibleRows.length}
         resultLabel="Registros"
       >
         <div className="filter-bar lead-filters">
-          <label><span>Marca</span><select value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
-            <option value="all">Todas</option>
-            {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-          </select></label>
           <label><span>Red</span><select value={networkFilter} onChange={(event) => setNetworkFilter(event.target.value)}>
             <option value="all">Todas</option>
             {socialNetworkOrder.map((network) => <option key={network} value={network}>{socialNetworkLabels[network]}</option>)}

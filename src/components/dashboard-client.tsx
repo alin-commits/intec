@@ -21,6 +21,7 @@ type StatusCounts = Partial<Record<LeadStatus, number>>;
 
 type Totals = { web: number; phone: number; leads: number; won: number; saleValue: number };
 type SocialStub = { businessUnitId: string; periodMonth: string; newFollowers: number };
+type InquirySaleStub = { businessUnitId: string; month: string; value: number };
 type AdsStub = { businessUnitId: string; campaignId: string | null; amountSpent: number; leads: number; revenue: number };
 type MailingStub = { businessUnitId: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
 
@@ -86,6 +87,7 @@ export function DashboardClient() {
   const [campaignLeads, setCampaignLeads] = useState<CampaignLeadStub[]>(demoCampaignLeads);
   const [statusCounts, setStatusCounts] = useState<StatusCounts>(demoStatusCounts);
   const [socialStats, setSocialStats] = useState<SocialStub[]>([]);
+  const [inquirySales, setInquirySales] = useState<InquirySaleStub[]>([]);
   const [adsEntries, setAdsEntries] = useState<AdsStub[]>([]);
   const [mailingRows, setMailingRows] = useState<MailingStub[]>([]);
 
@@ -113,7 +115,7 @@ export function DashboardClient() {
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
         supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd),
-        supabase.from("sales_entries").select("business_unit_id, occurred_on, value").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)),
+        supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)),
         supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
@@ -143,9 +145,18 @@ export function DashboardClient() {
         const b = bucket(row.business_unit_id, monthKeyOf(row.created_at));
         if (row.inquiry_type === "phone") b.phone += 1; else b.web += 1;
       }
+      const inquirySaleBuckets = new Map<string, number>();
       for (const row of salesData ?? []) {
         bucket(row.business_unit_id, monthKeyOf(row.occurred_on)).saleValue += row.value ?? 0;
+        if (row.entry_mode === "inquiry") {
+          const key = `${row.business_unit_id}|${monthKeyOf(row.occurred_on)}`;
+          inquirySaleBuckets.set(key, (inquirySaleBuckets.get(key) ?? 0) + (row.value ?? 0));
+        }
       }
+      setInquirySales(Array.from(inquirySaleBuckets.entries()).map(([key, value]) => {
+        const [businessUnitId, month] = key.split("|");
+        return { businessUnitId, month, value };
+      }));
       for (const row of leadData ?? []) {
         bucket(row.business_unit_id, monthKeyOf(row.created_at)).leads += 1;
       }
@@ -204,6 +215,22 @@ export function DashboardClient() {
     return filtered.filter((row) => row.month === key);
   }, [compareMode, currentMonthKey, filtered, selectedMonth, selectedYear, viewMode]);
 
+  const filteredInquirySales = useMemo(
+    () => inquirySales.filter((item) => businessUnitId === "all" || item.businessUnitId === businessUnitId),
+    [businessUnitId, inquirySales],
+  );
+  const currentInquirySaleValue = useMemo(() => {
+    const rows = viewMode === "month" ? filteredInquirySales.filter((row) => row.month === selectedMonth) : filteredInquirySales.filter((row) => yearOfMonth(row.month) === selectedYear);
+    return rows.reduce((sum, row) => sum + row.value, 0);
+  }, [filteredInquirySales, selectedMonth, selectedYear, viewMode]);
+  const previousInquirySaleValue = useMemo(() => {
+    if (viewMode === "year") return filteredInquirySales.filter((row) => yearOfMonth(row.month) === selectedYear - 1).reduce((sum, row) => sum + row.value, 0);
+    if (compareMode === "none") return null;
+    const key = compareMode === "current" ? currentMonthKey : compareMode === "previous" ? previousMonthKey(selectedMonth) : previousYearMonthKey(selectedMonth);
+    const rows = filteredInquirySales.filter((row) => row.month === key);
+    return rows.length ? rows.reduce((sum, row) => sum + row.value, 0) : null;
+  }, [compareMode, currentMonthKey, filteredInquirySales, selectedMonth, selectedYear, viewMode]);
+
   const hasComparison = previousRows.length > 0;
   const current = sumRows(currentRows);
   const previous = sumRows(previousRows);
@@ -219,6 +246,7 @@ export function DashboardClient() {
   const wonDelta = hasComparison ? current.won - previous.won : null;
   const conversionDelta = hasComparison && previousConversion !== null ? conversion - previousConversion : null;
   const saleValueDelta = hasComparison ? variation(current.saleValue, previous.saleValue) : null;
+  const inquirySaleValueDelta = previousInquirySaleValue !== null ? variation(currentInquirySaleValue, previousInquirySaleValue) : null;
 
   const comparisonHelper = viewMode === "year" ? `frente a ${selectedYear - 1}` : compareModeHelpers[compareMode];
 
@@ -322,6 +350,7 @@ export function DashboardClient() {
         <KpiCard label="Consultas web" value={numberFormatter.format(current.web)} helper={comparisonHelper} {...deltaProps(webDelta)} />
         <KpiCard label="Consultas telefónicas" value={numberFormatter.format(current.phone)} helper={comparisonHelper} {...deltaProps(phoneDelta)} />
         <KpiCard label="Consultas totales" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} {...deltaProps(totalDelta)} />
+        <KpiCard label="Ingresos consultas" value={currencyFormatter.format(currentInquirySaleValue)} helper={comparisonHelper} {...deltaProps(inquirySaleValueDelta)} />
       </section>
 
       <span className="eyebrow kpi-group-label">Leads, campañas y RRSS</span>
