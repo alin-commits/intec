@@ -21,7 +21,7 @@ const ALLOWED_LOGO_TYPES: Record<string, string> = {
   "image/svg+xml": "svg",
 };
 
-type UnitDraft = { name: string; slug: string; accent: string; active: boolean };
+type UnitDraft = { name: string; slug: string; accent: string; active: boolean; visibleInConsultas: boolean; visibleInLeads: boolean };
 type UnitStats = { inquiries: number; leads: number; won: number };
 
 const DIACRITICS_PATTERN = new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, "g");
@@ -36,7 +36,7 @@ function slugify(value: string): string {
 }
 
 function blankDraft(): UnitDraft {
-  return { name: "", slug: "", accent: "#2563eb", active: true };
+  return { name: "", slug: "", accent: "#2563eb", active: true, visibleInConsultas: true, visibleInLeads: true };
 }
 
 function mapUnitRow(row: Record<string, unknown>): BusinessUnit {
@@ -47,6 +47,9 @@ function mapUnitRow(row: Record<string, unknown>): BusinessUnit {
     accent: row.brand_color ? String(row.brand_color) : "#2563eb",
     active: Boolean(row.is_active),
     logo: row.logo_url ? String(row.logo_url) : null,
+    sortOrder: Number(row.sort_order ?? 0),
+    visibleInConsultas: row.visible_in_consultas !== false,
+    visibleInLeads: row.visible_in_leads !== false,
   };
 }
 
@@ -85,7 +88,7 @@ export function UnitsManager() {
     const supabase = createClient();
     const range = monthRange(monthKey());
     const [{ data: unitData, error: unitError }, { data: inquiryData }, { data: leadData }, { data: authData }] = await Promise.all([
-      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
+      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("inquiries").select("business_unit_id").gte("created_at", range.start).lt("created_at", range.end),
       supabase.from("leads").select("business_unit_id, status").gte("created_at", range.start).lt("created_at", range.end),
       supabase.auth.getUser(),
@@ -131,7 +134,7 @@ export function UnitsManager() {
 
   function openEdit(unit: BusinessUnit) {
     setEditingId(unit.id);
-    setDraft({ name: unit.name, slug: unit.slug, accent: unit.accent, active: unit.active });
+    setDraft({ name: unit.name, slug: unit.slug, accent: unit.accent, active: unit.active, visibleInConsultas: unit.visibleInConsultas, visibleInLeads: unit.visibleInLeads });
     setSlugTouched(true);
     setLogoFile(null);
     setLogoError(null);
@@ -171,14 +174,17 @@ export function UnitsManager() {
     setMessage(null);
     try {
       if (!configured) {
-        const previousLogo = editingId ? units.find((unit) => unit.id === editingId)?.logo ?? null : null;
+        const previous = editingId ? units.find((unit) => unit.id === editingId) : null;
         const nextUnit: BusinessUnit = {
           id: editingId ?? `demo-${Date.now()}`,
           name: draft.name.trim(),
           slug: draft.slug.trim(),
           accent: draft.accent,
           active: draft.active,
-          logo: logoFile ? URL.createObjectURL(logoFile) : previousLogo,
+          logo: logoFile ? URL.createObjectURL(logoFile) : (previous?.logo ?? null),
+          sortOrder: previous?.sortOrder ?? units.length,
+          visibleInConsultas: draft.visibleInConsultas,
+          visibleInLeads: draft.visibleInLeads,
         };
         setUnits((current) => editingId ? current.map((unit) => unit.id === editingId ? nextUnit : unit) : [...current, nextUnit]);
         setMessage(editingId ? "Unidad actualizada en el modo demostración." : "Unidad creada en el modo demostración.");
@@ -202,6 +208,9 @@ export function UnitsManager() {
         brand_color: draft.accent,
         is_active: draft.active,
         logo_url: logoUrl,
+        visible_in_consultas: draft.visibleInConsultas,
+        visible_in_leads: draft.visibleInLeads,
+        ...(editingId ? {} : { sort_order: units.length }),
       };
       const result = editingId
         ? await supabase.from("business_units").update(payload).eq("id", editingId)
@@ -214,6 +223,29 @@ export function UnitsManager() {
       setMessage(reportSafeError(cause, "No se pudo guardar la unidad. Comprueba que el nombre y el identificador no estén ya en uso."));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function moveUnit(unit: BusinessUnit, direction: "up" | "down") {
+    const sorted = [...units].sort((a, b) => a.sortOrder - b.sortOrder);
+    const index = sorted.findIndex((item) => item.id === unit.id);
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= sorted.length) return;
+    const other = sorted[swapIndex];
+    setUnits((current) => current.map((item) => {
+      if (item.id === unit.id) return { ...item, sortOrder: other.sortOrder };
+      if (item.id === other.id) return { ...item, sortOrder: unit.sortOrder };
+      return item;
+    }));
+    if (!configured) return;
+    const supabase = createClient();
+    const [a, b] = await Promise.all([
+      supabase.from("business_units").update({ sort_order: other.sortOrder }).eq("id", unit.id),
+      supabase.from("business_units").update({ sort_order: unit.sortOrder }).eq("id", other.id),
+    ]);
+    if (a.error || b.error) {
+      setMessage(reportSafeError(a.error ?? b.error, "No se pudo reordenar la unidad."));
+      await loadRealData();
     }
   }
 
@@ -279,7 +311,7 @@ export function UnitsManager() {
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
       <section className="units-grid">
-        {units.map((unit) => {
+        {[...units].sort((a, b) => a.sortOrder - b.sortOrder).map((unit, index, sorted) => {
           const unitStats = stats[unit.id] ?? { inquiries: 0, leads: 0, won: 0 };
           const conversion = unitStats.leads ? (unitStats.won / unitStats.leads) * 100 : 0;
           return (
@@ -290,8 +322,11 @@ export function UnitsManager() {
               </div>
               <h3>{unit.name}</h3>
               <p>{unitStats.inquiries} consultas · {unitStats.leads} leads · {formatPercent(conversion)} conversión</p>
+              <p className="muted">{unit.visibleInConsultas ? "En Consultas" : "Oculta en Consultas"} · {unit.visibleInLeads ? "En Leads" : "Oculta en Leads"}</p>
               {isAdmin ? (
                 <div className="modal-actions unit-summary-actions">
+                  <button type="button" className="button button-compact button-secondary" onClick={() => moveUnit(unit, "up")} disabled={index === 0} aria-label={`Subir ${unit.name}`}>↑</button>
+                  <button type="button" className="button button-compact button-secondary" onClick={() => moveUnit(unit, "down")} disabled={index === sorted.length - 1} aria-label={`Bajar ${unit.name}`}>↓</button>
                   <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(unit)}>Editar</button>
                   <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(unit)}>Eliminar</button>
                 </div>
@@ -317,6 +352,8 @@ export function UnitsManager() {
             <label className="form-field-wide"><span>Logo (JPG, PNG, WEBP o SVG, máx. 2 MB)</span>
               <input type="file" accept="image/jpeg,image/png,image/webp,image/svg+xml" onChange={(event) => handleLogoChange(event.target.files)} />
             </label>
+            <label className="unit-visibility-check"><input type="checkbox" checked={draft.visibleInConsultas} onChange={(event) => setDraft((current) => ({ ...current, visibleInConsultas: event.target.checked }))} /><span>Aparece en Consultas</span></label>
+            <label className="unit-visibility-check"><input type="checkbox" checked={draft.visibleInLeads} onChange={(event) => setDraft((current) => ({ ...current, visibleInLeads: event.target.checked }))} /><span>Aparece en Leads</span></label>
           </div>
           {logoError ? <div className="form-error form-field-wide" role="alert">{logoError}</div> : null}
           <div className="modal-actions">

@@ -113,7 +113,7 @@ export function DashboardClient() {
         { data: adsData },
         { data: mailingData },
       ] = await Promise.all([
-        supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
+        supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
         supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd),
         supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)),
         supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
@@ -128,7 +128,7 @@ export function DashboardClient() {
         return;
       }
 
-      const units: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url }));
+      const units: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true }));
       setAllBusinessUnits(units);
 
       const buckets = new Map<string, MonthlyStat>();

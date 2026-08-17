@@ -115,6 +115,10 @@ export function InquiryRegister() {
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
+  // Solo el selector de "nueva consulta" respeta visibleInConsultas; el resto de
+  // la página usa `units` sin filtrar para no perder nombre/color de marcas
+  // con registros históricos que se hayan ocultado después.
+  const registrableUnits = useMemo(() => units.filter((unit) => unit.visibleInConsultas), [units]);
 
   const selectedMonthYear = yearOfMonth(selectedMonth);
   const monthRangeValue = useMemo(() => monthRange(selectedMonth), [selectedMonth]);
@@ -139,7 +143,7 @@ export function InquiryRegister() {
     void (async () => {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
-        supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
+        supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
         supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
         supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)).order("occurred_on", { ascending: false }),
         supabase.auth.getUser(),
@@ -148,7 +152,7 @@ export function InquiryRegister() {
         setMessage(reportSafeError(unitError ?? inquiryError ?? salesError, "No se pudieron cargar las consultas."));
         return;
       }
-      setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
+      setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
       setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
       setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
@@ -742,7 +746,7 @@ export function InquiryRegister() {
       {canRegister ? (
         <>
           <section className="brand-picker">
-            {units.map((unit) => (
+            {registrableUnits.map((unit) => (
               <button
                 key={unit.id}
                 type="button"

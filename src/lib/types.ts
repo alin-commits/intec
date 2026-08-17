@@ -18,6 +18,9 @@ export type BusinessUnit = {
   accent: string;
   active: boolean;
   logo?: string | null;
+  sortOrder: number;
+  visibleInConsultas: boolean;
+  visibleInLeads: boolean;
 };
 
 export type LeadStatusEvent = {

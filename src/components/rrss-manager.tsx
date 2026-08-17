@@ -219,7 +219,7 @@ export function RrssManager() {
       { data: campaignData },
       { data: authData },
     ] = await Promise.all([
-      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").eq("is_active", true).order("name"),
+      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("social_media_stats").select("id, business_unit_id, network, period_month, followers_end, new_followers, posts, interactions, reach, active_campaigns, link_clicks, leads, notes, created_by, created_at").order("period_month", { ascending: false }),
       supabase.from("meta_ads_entries").select("id, business_unit_id, campaign_id, campaign_name, ad_set, ad_name, objective, status, start_date, end_date, amount_spent, impressions, link_clicks, leads, qualified_leads, purchases, revenue, notes, created_by, created_at").order("created_at", { ascending: false }),
       supabase.from("mailing_campaigns").select("id, business_unit_id, campaign_name, campaign_type, sent_date, sent_count, delivered_count, opens, clicks, leads, sales_count, revenue, unsubscribes, notes, created_by, created_at").order("sent_date", { ascending: false }),
@@ -230,7 +230,7 @@ export function RrssManager() {
       setMessage(reportSafeError(unitError ?? socialError ?? adsError ?? mailingError, "No se pudieron cargar las métricas de marketing."));
       return;
     }
-    setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
+    setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
     setSocialStats((socialData ?? []).map((row) => mapSocialRow(row as Record<string, unknown>)));
     setAdsEntries((adsData ?? []).map((row) => mapAdsRow(row as Record<string, unknown>)));
     setMailingCampaigns((mailingData ?? []).map((row) => mapMailingRow(row as Record<string, unknown>)));

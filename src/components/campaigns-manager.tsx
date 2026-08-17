@@ -117,7 +117,7 @@ export function CampaignsManager() {
   async function loadRealData() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData }, { data: authData }] = await Promise.all([
-      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active").order("name"),
+      supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, created_at, updated_at").order("created_at", { ascending: false }),
       supabase.from("leads").select("campaign_id, status, sale_value").limit(2000),
       supabase.from("meta_ads_entries").select("campaign_id, amount_spent, revenue").not("campaign_id", "is", null),
@@ -127,7 +127,7 @@ export function CampaignsManager() {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar las campañas."));
       return;
     }
-    setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url })));
+    setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
     setCampaigns((campaignData ?? []).map((row) => mapCampaignRow(row as Record<string, unknown>)));
     setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>)));
     setAds((adsData ?? []).map((row) => ({ campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), revenue: Number(row.revenue ?? 0) })));

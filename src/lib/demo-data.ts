@@ -14,14 +14,14 @@ import type {
 } from "@/lib/types";
 
 export const businessUnits: BusinessUnit[] = [
-  { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp" },
-  { id: "blizzcool", name: "BlizzCool", slug: "blizzcool", accent: "#0891b2", active: true, logo: "/logo-blizzcool.webp" },
-  { id: "sumifluid", name: "Sumifluid", slug: "sumifluid", accent: "#7c3aed", active: true, logo: "/logo-sumifluid.webp" },
-  { id: "jender", name: "Jender", slug: "jender", accent: "#ea580c", active: true, logo: "/logo-jender.webp" },
+  { id: "intec", name: "Suministros Intec", slug: "suministros-intec", accent: "#2563eb", active: true, logo: "/logo-intec.webp", sortOrder: 0, visibleInConsultas: true, visibleInLeads: true },
+  { id: "blizzcool", name: "BlizzCool", slug: "blizzcool", accent: "#0891b2", active: true, logo: "/logo-blizzcool.webp", sortOrder: 1, visibleInConsultas: true, visibleInLeads: true },
+  { id: "sumifluid", name: "Sumifluid", slug: "sumifluid", accent: "#7c3aed", active: true, logo: "/logo-sumifluid.webp", sortOrder: 2, visibleInConsultas: true, visibleInLeads: true },
+  { id: "jender", name: "Jender", slug: "jender", accent: "#ea580c", active: true, logo: "/logo-jender.webp", sortOrder: 3, visibleInConsultas: true, visibleInLeads: true },
   // Marcas sin actividad comercial por ahora: se conservan (histórico de leads/campañas)
   // pero no aparecen en registro de consultas ni en comparativas activas.
-  { id: "cst", name: "CST Ibérica", slug: "cst-iberica", accent: "#16a34a", active: false },
-  { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: false },
+  { id: "cst", name: "CST Ibérica", slug: "cst-iberica", accent: "#16a34a", active: false, sortOrder: 4, visibleInConsultas: true, visibleInLeads: true },
+  { id: "blizztherm", name: "Blizztherm", slug: "blizztherm", accent: "#dc2626", active: false, sortOrder: 5, visibleInConsultas: true, visibleInLeads: true },
 ];
 
 const monthKeys = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"];
