@@ -355,6 +355,8 @@ type SharedTabProps<T> = {
 function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<SocialMediaStat> & { stats: SocialMediaStat[] }) {
   const [unitFilter, setUnitFilter] = useState("all");
   const [networkFilter, setNetworkFilter] = useState("all");
+  const [monthFrom, setMonthFrom] = useState("");
+  const [monthTo, setMonthTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [rowsExpanded, setRowsExpanded] = useState(false);
   const [sortAsc, setSortAsc] = useState(false);
@@ -419,12 +421,15 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const selectedUnitName = unitFilter === "all" ? "todas las marcas" : units.find((unit) => unit.id === unitFilter)?.name ?? "";
 
   const visibleRows = useMemo(() => stats
-    .filter((row) => (unitFilter === "all" || row.businessUnitId === unitFilter) && (networkFilter === "all" || row.network === networkFilter))
+    .filter((row) => (unitFilter === "all" || row.businessUnitId === unitFilter)
+      && (networkFilter === "all" || row.network === networkFilter)
+      && (!monthFrom || row.periodMonth >= monthFrom)
+      && (!monthTo || row.periodMonth <= monthTo))
     .sort((a, b) => {
       const monthCompare = a.periodMonth.localeCompare(b.periodMonth);
       if (monthCompare !== 0) return sortAsc ? monthCompare : -monthCompare;
       return a.network.localeCompare(b.network);
-    }), [stats, unitFilter, networkFilter, sortAsc]);
+    }), [stats, unitFilter, networkFilter, sortAsc, monthFrom, monthTo]);
 
   function openNew() {
     setDraft(blankSocialDraft(units));
@@ -609,8 +614,8 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       </div>
 
       <CollapsibleFilters
-        hasActiveFilters={networkFilter !== "all"}
-        onClear={() => setNetworkFilter("all")}
+        hasActiveFilters={networkFilter !== "all" || monthFrom !== "" || monthTo !== ""}
+        onClear={() => { setNetworkFilter("all"); setMonthFrom(""); setMonthTo(""); }}
         resultCount={visibleRows.length}
         resultLabel="Registros"
       >
@@ -619,6 +624,8 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
             <option value="all">Todas</option>
             {socialNetworkOrder.map((network) => <option key={network} value={network}>{socialNetworkLabels[network]}</option>)}
           </select></label>
+          <label><span>Desde</span><input type="month" value={monthFrom} onChange={(event) => setMonthFrom(event.target.value)} /></label>
+          <label><span>Hasta</span><input type="month" value={monthTo} onChange={(event) => setMonthTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -697,6 +704,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(false);
@@ -707,13 +716,16 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
   const visibleEntries = useMemo(() => entries
     .filter((entry) => {
       const matchesQuery = entry.campaignName.toLowerCase().includes(query.toLowerCase());
-      return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter);
+      const entryDate = entry.startDate ?? entry.createdAt;
+      const matchesFrom = !dateFrom || entryDate >= dateFrom;
+      const matchesTo = !dateTo || entryDate <= `${dateTo}T23:59:59`;
+      return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter) && matchesFrom && matchesTo;
     })
     .sort((a, b) => {
       const aDate = a.startDate ?? a.createdAt;
       const bDate = b.startDate ?? b.createdAt;
       return sortAsc ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate);
-    }), [entries, query, unitFilter, statusFilter, sortAsc]);
+    }), [entries, query, unitFilter, statusFilter, sortAsc, dateFrom, dateTo]);
 
   const totals = useMemo(() => visibleEntries.reduce((acc, entry) => ({
     spend: acc.spend + entry.amountSpent,
@@ -887,8 +899,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
       </div>
 
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || unitFilter !== "all" || statusFilter !== "all"}
-        onClear={() => { setQuery(""); setUnitFilter("all"); setStatusFilter("all"); }}
+        hasActiveFilters={query !== "" || unitFilter !== "all" || statusFilter !== "all" || dateFrom !== "" || dateTo !== ""}
+        onClear={() => { setQuery(""); setUnitFilter("all"); setStatusFilter("all"); setDateFrom(""); setDateTo(""); }}
         resultCount={visibleEntries.length}
         resultLabel="Campañas"
       >
@@ -902,6 +914,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
             <option value="all">Todos</option>
             {Object.entries(adStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select></label>
+          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
+          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -994,6 +1008,8 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(false);
@@ -1004,9 +1020,11 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   const visibleCampaigns = useMemo(() => campaigns
     .filter((campaign) => {
       const matchesQuery = campaign.campaignName.toLowerCase().includes(query.toLowerCase());
-      return matchesQuery && (unitFilter === "all" || campaign.businessUnitId === unitFilter) && (typeFilter === "all" || campaign.campaignType === typeFilter);
+      const matchesFrom = !dateFrom || campaign.sentDate >= dateFrom;
+      const matchesTo = !dateTo || campaign.sentDate <= dateTo;
+      return matchesQuery && (unitFilter === "all" || campaign.businessUnitId === unitFilter) && (typeFilter === "all" || campaign.campaignType === typeFilter) && matchesFrom && matchesTo;
     })
-    .sort((a, b) => sortAsc ? a.sentDate.localeCompare(b.sentDate) : b.sentDate.localeCompare(a.sentDate)), [campaigns, query, unitFilter, typeFilter, sortAsc]);
+    .sort((a, b) => sortAsc ? a.sentDate.localeCompare(b.sentDate) : b.sentDate.localeCompare(a.sentDate)), [campaigns, query, unitFilter, typeFilter, sortAsc, dateFrom, dateTo]);
 
   const totals = useMemo(() => visibleCampaigns.reduce((acc, campaign) => ({
     sent: acc.sent + campaign.sentCount,
@@ -1161,8 +1179,8 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
       </div>
 
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || unitFilter !== "all" || typeFilter !== "all"}
-        onClear={() => { setQuery(""); setUnitFilter("all"); setTypeFilter("all"); }}
+        hasActiveFilters={query !== "" || unitFilter !== "all" || typeFilter !== "all" || dateFrom !== "" || dateTo !== ""}
+        onClear={() => { setQuery(""); setUnitFilter("all"); setTypeFilter("all"); setDateFrom(""); setDateTo(""); }}
         resultCount={visibleCampaigns.length}
         resultLabel="Campañas"
       >
@@ -1176,6 +1194,8 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
             <option value="all">Todos</option>
             {mailingTypeOrder.map((type) => <option key={type} value={type}>{mailingTypeLabels[type]}</option>)}
           </select></label>
+          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
+          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
 

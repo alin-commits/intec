@@ -102,6 +102,8 @@ export function LeadsTable() {
   const [query, setQuery] = useState("");
   const [unitId, setUnitId] = useState<string>(() => demoBusinessUnits.filter((unit) => unit.active)[0]?.id ?? "all");
   const [status, setStatus] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<LeadDraft>(() => blankDraft(demoBusinessUnits.filter((unit) => unit.active)));
@@ -125,8 +127,10 @@ export function LeadsTable() {
   const filteredCampaigns = useMemo(() => campaignOptions.filter((campaign) => !draft.businessUnitId || campaign.businessUnitId === draft.businessUnitId), [campaignOptions, draft.businessUnitId]);
   const visibleRows = useMemo(() => rows.filter((lead) => {
     const matchesQuery = `${lead.contactName} ${lead.clientCompanyName} ${lead.productInterest} ${lead.phone} ${lead.email}`.toLowerCase().includes(query.toLowerCase());
-    return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status);
-  }), [query, rows, status, unitId]);
+    const matchesFrom = !dateFrom || lead.createdAt >= dateFrom;
+    const matchesTo = !dateTo || lead.createdAt <= `${dateTo}T23:59:59`;
+    return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status) && matchesFrom && matchesTo;
+  }), [query, rows, status, unitId, dateFrom, dateTo]);
 
   async function loadRealData() {
     const supabase = createClient();
@@ -353,14 +357,16 @@ export function LeadsTable() {
 
       {message ? <div className="form-message" role="status">{message}</div> : null}
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || status !== "all"}
-        onClear={() => { setQuery(""); setStatus("all"); }}
+        hasActiveFilters={query !== "" || status !== "all" || dateFrom !== "" || dateTo !== ""}
+        onClear={() => { setQuery(""); setStatus("all"); setDateFrom(""); setDateTo(""); }}
         resultCount={visibleRows.length}
         resultLabel="Leads"
       >
         <div className="filter-bar lead-filters">
           <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
           <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateFrom(event.target.value)} /></label>
+          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
       <section className="panel table-panel" ref={reportRef}>

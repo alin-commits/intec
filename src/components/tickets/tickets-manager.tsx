@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { TrendChart } from "@/components/charts/trend-chart";
 import { hasAnyRole } from "@/lib/constants";
+import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
+import { monthShortLabel } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
+import { formatDate } from "@/lib/format";
+import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
-import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
+import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES, ticketBlockingLevelLabels, ticketCategoryLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
 import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
 import { TicketDashboardCards } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
 import { EmptyState } from "./empty-state";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
 const PAGE_SIZE = 5;
@@ -31,6 +37,8 @@ export function TicketsManager() {
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [pendingBulkAction, setPendingBulkAction] = useState<"archive" | "delete" | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -87,6 +95,55 @@ export function TicketsManager() {
 
   const activeTickets = useMemo(() => visibleTickets.filter((ticket) => OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
   const completedTickets = useMemo(() => visibleTickets.filter((ticket) => !OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
+
+  const monthlyCounts = useMemo(() => {
+    const byMonth = new Map<string, number>();
+    for (const ticket of visibleTickets) {
+      const month = ticket.createdAt.slice(0, 7);
+      byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
+    }
+    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-12);
+  }, [visibleTickets]);
+
+  const monthlyChartData = useMemo(() => monthlyCounts.map(([month, count]) => ({ label: monthShortLabel(month), count })), [monthlyCounts]);
+
+  function exportReportCsv() {
+    const summary: CsvSummaryItem[] = [
+      { label: "Tickets en la vista actual", value: visibleTickets.length },
+      { label: "Tickets nuevos", value: counts.newCount },
+      { label: "Tickets abiertos", value: counts.openCount },
+      { label: "En curso", value: counts.inProgressCount },
+      { label: "Pendientes", value: counts.pendingCount },
+      { label: "Resueltos este mes", value: counts.resolvedThisMonthCount },
+      { label: "Abiertos +3 días", value: counts.staleOpenCount },
+      ...monthlyCounts.map(([month, count]) => ({ label: `Tickets en ${monthShortLabel(month)}`, value: count })),
+    ];
+    downloadCsvReport(`informe_tickets_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleTickets, [
+      { header: "Ticket", value: (ticket) => ticket.ticketNumber },
+      { header: "Fecha", value: (ticket) => formatDate(ticket.createdAt) },
+      { header: "Solicitante", value: (ticket) => ticket.reporterName },
+      { header: "Teléfono", value: (ticket) => ticket.reporterPhone },
+      { header: "Departamento", value: (ticket) => ticket.department },
+      { header: "Título", value: (ticket) => ticket.title },
+      { header: "Categoría", value: (ticket) => ticketCategoryLabels[ticket.category] },
+      { header: "Nivel de bloqueo", value: (ticket) => ticketBlockingLevelLabels[ticket.blockingLevel] },
+      { header: "Prioridad", value: (ticket) => ticketPriorityLabels[ticket.priority] },
+      { header: "Estado", value: (ticket) => ticketStatusLabels[ticket.status] },
+      { header: "Resuelto", value: (ticket) => ticket.resolvedAt ? formatDate(ticket.resolvedAt) : "" },
+      { header: "Cerrado", value: (ticket) => ticket.closedAt ? formatDate(ticket.closedAt) : "" },
+      { header: "Descripción", value: (ticket) => ticket.description },
+    ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      await exportElementToPdf(reportRef.current, `informe_tickets_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
 
   function handleSort(column: TicketSortColumn) {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
@@ -181,11 +238,22 @@ export function TicketsManager() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Soporte interno</span><h2>Tickets informáticos</h2><p>Incidencias enviadas desde /soporte por cualquier trabajador de la empresa.</p></div>
+        <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
       </section>
 
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
+      <div ref={reportRef}>
       <TicketDashboardCards counts={counts} />
+      <section className="panel chart-panel">
+        <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>
+        <TrendChart
+          data={monthlyChartData}
+          series={[{ key: "count", label: "Tickets", color: "#2563eb" }]}
+          ariaLabel="Tickets creados por mes"
+        />
+      </section>
+      </div>
       <TicketFilters filters={filters} departments={departments} resultCount={visibleTickets.length} onChange={setFilters} />
 
       {canManage && selectedIds.size > 0 ? (

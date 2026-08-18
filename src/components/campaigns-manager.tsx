@@ -103,6 +103,8 @@ export function CampaignsManager() {
   const [unitId, setUnitId] = useState("all");
   const [status, setStatus] = useState("all");
   const [query, setQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CampaignDraft>(() => blankDraft(demoBusinessUnits));
@@ -154,8 +156,10 @@ export function CampaignsManager() {
 
   const visibleCampaigns = useMemo(() => campaigns.filter((campaign) => {
     const matchesQuery = campaign.name.toLowerCase().includes(query.toLowerCase());
-    return matchesQuery && (unitId === "all" || campaign.businessUnitId === unitId) && (status === "all" || campaign.status === status);
-  }), [campaigns, query, status, unitId]);
+    const matchesFrom = !dateFrom || campaign.createdAt >= dateFrom;
+    const matchesTo = !dateTo || campaign.createdAt <= `${dateTo}T23:59:59`;
+    return matchesQuery && (unitId === "all" || campaign.businessUnitId === unitId) && (status === "all" || campaign.status === status) && matchesFrom && matchesTo;
+  }), [campaigns, query, status, unitId, dateFrom, dateTo]);
 
   function openNew() {
     setEditingId(null);
@@ -316,8 +320,8 @@ export function CampaignsManager() {
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || unitId !== "all" || status !== "all"}
-        onClear={() => { setQuery(""); setUnitId("all"); setStatus("all"); }}
+        hasActiveFilters={query !== "" || unitId !== "all" || status !== "all" || dateFrom !== "" || dateTo !== ""}
+        onClear={() => { setQuery(""); setUnitId("all"); setStatus("all"); setDateFrom(""); setDateTo(""); }}
         resultCount={visibleCampaigns.length}
         resultLabel="Campañas"
       >
@@ -331,6 +335,8 @@ export function CampaignsManager() {
             <option value="all">Todos</option>
             {Object.entries(campaignStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select></label>
+          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateFrom(event.target.value)} /></label>
+          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
 
