@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { BarChart } from "@/components/charts/bar-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import {
@@ -24,9 +25,11 @@ import {
   demoMetaAdsEntries,
   demoSocialMediaStats,
 } from "@/lib/demo-data";
+import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { monthKey, monthLabel, monthShortLabel } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
+import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
   AdCampaignStatus,
@@ -357,6 +360,8 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const [sortAsc, setSortAsc] = useState(false);
   const [networkChartPeriod, setNetworkChartPeriod] = useState<"month" | "total">("month");
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const latestMonth = useMemo(() => stats.reduce((max, row) => (row.periodMonth > max ? row.periodMonth : max), stats[0]?.periodMonth ?? monthKey()), [stats]);
   const latestRows = useMemo(() => stats.filter((row) => row.periodMonth === latestMonth), [stats, latestMonth]);
@@ -493,11 +498,46 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     }
   }
 
+  function exportReportCsv() {
+    const summary: CsvSummaryItem[] = [
+      { label: "Mes de referencia", value: monthLabel(latestMonth) },
+      { label: "Marca", value: selectedUnitName === "todas las marcas" ? "Todas las marcas" : selectedUnitName },
+      { label: "Seguidores totales", value: totals.followers },
+      { label: "Nuevos seguidores", value: totals.newFollowers },
+      { label: "Interacciones", value: totals.interactions },
+      { label: "Alcance", value: totals.reach },
+    ];
+    downloadCsvReport(`informe_rrss_${latestMonth}.csv`, summary, visibleRows, [
+      { header: "Mes", value: (row) => monthLabel(row.periodMonth) },
+      { header: "Marca", value: (row) => units.find((unit) => unit.id === row.businessUnitId)?.name ?? "" },
+      { header: "Red", value: (row) => socialNetworkLabels[row.network] },
+      { header: "Seguidores", value: (row) => row.followersEnd },
+      { header: "Nuevos", value: (row) => row.newFollowers },
+      { header: "Publicaciones", value: (row) => row.posts },
+      { header: "Interacciones", value: (row) => row.interactions },
+      { header: "Alcance", value: (row) => row.reach },
+      { header: "Leads", value: (row) => row.leads },
+    ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      await exportElementToPdf(reportRef.current, `informe_rrss_${latestMonth}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   return (
     <>
       <section className="section-heading">
         <div><span className="eyebrow">{monthLabel(latestMonth)}</span><h2>Redes sociales</h2></div>
-        {canEdit ? <button className="button button-primary" onClick={openNew}>+ Registrar mes</button> : null}
+        <div className="panel-heading-trailing">
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+          {canEdit ? <button className="button button-primary" onClick={openNew}>+ Registrar mes</button> : null}
+        </div>
       </section>
 
       <div className="brand-chip-row" role="tablist" aria-label="Filtrar por marca">
@@ -510,6 +550,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         ))}
       </div>
 
+      <div ref={reportRef}>
       <section className="kpi-grid">
         <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} delta="Sin comparación" helper="último mes registrado" />
         <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} delta="Sin comparación" helper="último mes registrado" />
@@ -565,6 +606,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           </table>
         </div>
       </section>
+      </div>
 
       <CollapsibleFilters
         hasActiveFilters={networkFilter !== "all"}
@@ -659,6 +701,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<AdsDraft>(() => blankAdsDraft(units));
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const visibleEntries = useMemo(() => entries
     .filter((entry) => {
@@ -775,13 +819,52 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
     }
   }
 
+  function exportReportCsv() {
+    const summary: CsvSummaryItem[] = [
+      { label: "Campañas", value: visibleEntries.length },
+      { label: "Gasto total (€)", value: totals.spend },
+      { label: "Ingresos (€)", value: totals.revenue },
+      { label: "Leads", value: totals.leads },
+      { label: "Seguidores ganados", value: totals.followersGained },
+      { label: "CPL medio (€)", value: safeDiv(totals.spend, totals.leads).toFixed(2).replace(".", ",") },
+      { label: "ROAS medio", value: `${safeDiv(totals.revenue, totals.spend).toFixed(2)}x` },
+    ];
+    downloadCsvReport(`informe_meta_ads_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleEntries, [
+      { header: "Marca", value: (entry) => units.find((unit) => unit.id === entry.businessUnitId)?.name ?? "" },
+      { header: "Campaña", value: (entry) => entry.campaignName },
+      { header: "Estado", value: (entry) => adStatusLabels[entry.status] },
+      { header: "Gasto (€)", value: (entry) => entry.amountSpent },
+      { header: "Impresiones", value: (entry) => entry.impressions },
+      { header: "Clics", value: (entry) => entry.linkClicks },
+      { header: "Leads", value: (entry) => entry.leads },
+      { header: "Cualificados", value: (entry) => entry.qualifiedLeads },
+      { header: "Compras", value: (entry) => entry.purchases },
+      { header: "Seguidores ganados", value: (entry) => entry.followersGained },
+      { header: "Ingresos (€)", value: (entry) => entry.revenue },
+    ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      await exportElementToPdf(reportRef.current, `informe_meta_ads_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   return (
     <>
       <section className="section-heading">
         <div><span className="eyebrow">Publicidad</span><h2>Meta Ads</h2></div>
-        {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva entrada</button> : null}
+        <div className="panel-heading-trailing">
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+          {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva entrada</button> : null}
+        </div>
       </section>
 
+      <div ref={reportRef}>
       <section className="kpi-grid">
         <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
@@ -801,6 +884,7 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
           <BarChart items={revenueByUnit} ariaLabel="Ingresos de Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
         </article>
       </section>
+      </div>
 
       <CollapsibleFilters
         hasActiveFilters={query !== "" || unitFilter !== "all" || statusFilter !== "all"}
@@ -914,6 +998,8 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<MailingDraft>(() => blankMailingDraft(units));
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const visibleCampaigns = useMemo(() => campaigns
     .filter((campaign) => {
@@ -1016,13 +1102,51 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
     }
   }
 
+  function exportReportCsv() {
+    const summary: CsvSummaryItem[] = [
+      { label: "Campañas", value: visibleCampaigns.length },
+      { label: "Enviados", value: totals.sent },
+      { label: "Entregados", value: totals.delivered },
+      { label: "Open rate medio (%)", value: formatPercent(ratio(totals.opens, totals.delivered)) },
+      { label: "Ingresos (€)", value: totals.revenue },
+    ];
+    downloadCsvReport(`informe_mailing_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleCampaigns, [
+      { header: "Marca", value: (campaign) => units.find((unit) => unit.id === campaign.businessUnitId)?.name ?? "" },
+      { header: "Campaña", value: (campaign) => campaign.campaignName },
+      { header: "Tipo", value: (campaign) => mailingTypeLabels[campaign.campaignType] },
+      { header: "Fecha", value: (campaign) => formatDate(campaign.sentDate) },
+      { header: "Enviados", value: (campaign) => campaign.sentCount },
+      { header: "Entregados", value: (campaign) => campaign.deliveredCount },
+      { header: "Aperturas", value: (campaign) => campaign.opens },
+      { header: "Clics", value: (campaign) => campaign.clicks },
+      { header: "Leads", value: (campaign) => campaign.leads },
+      { header: "Ventas", value: (campaign) => campaign.salesCount },
+      { header: "Ingresos (€)", value: (campaign) => campaign.revenue },
+      { header: "Bajas", value: (campaign) => campaign.unsubscribes },
+    ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      await exportElementToPdf(reportRef.current, `informe_mailing_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   return (
     <>
       <section className="section-heading">
         <div><span className="eyebrow">Email marketing</span><h2>Mailing</h2></div>
-        {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva entrada</button> : null}
+        <div className="panel-heading-trailing">
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+          {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva entrada</button> : null}
+        </div>
       </section>
 
+      <div ref={reportRef}>
       <section className="kpi-grid">
         <KpiCard label="Enviados" value={numberFormatter.format(totals.sent)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Entregados" value={numberFormatter.format(totals.delivered)} delta="Sin comparación" helper="según filtros" />
@@ -1034,6 +1158,7 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
         <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Open rate</h2></div></div>
         <BarChart items={openRateByUnit} ariaLabel="Open rate por marca" valueFormatter={(value) => formatPercent(value)} />
       </section>
+      </div>
 
       <CollapsibleFilters
         hasActiveFilters={query !== "" || unitFilter !== "all" || typeFilter !== "all"}

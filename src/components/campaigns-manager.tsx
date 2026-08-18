@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { CAMPAIGNS_ROLES, hasAnyRole, campaignStatusLabels } from "@/lib/constants";
-import { downloadCsv } from "@/lib/csv-export";
+import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
+import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 
@@ -109,6 +111,8 @@ export function CampaignsManager() {
   const [canEdit, setCanEdit] = useState(true);
   const [pendingArchive, setPendingArchive] = useState<Campaign | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -248,8 +252,18 @@ export function CampaignsManager() {
     }
   }
 
-  function exportCampaignsCsv() {
-    downloadCsv(`campanas_${new Date().toISOString().slice(0, 10)}.csv`, visibleCampaigns, [
+  function exportReportCsv() {
+    const stats = visibleCampaigns.map((campaign) => statsFor(campaign, leads));
+    const adsStats = visibleCampaigns.map((campaign) => adsStatsFor(campaign, ads));
+    const summary: CsvSummaryItem[] = [
+      { label: "Campañas", value: visibleCampaigns.length },
+      { label: "Leads totales", value: stats.reduce((sum, item) => sum + item.total, 0) },
+      { label: "Ganados", value: stats.reduce((sum, item) => sum + item.won, 0) },
+      { label: "Valor total (€)", value: stats.reduce((sum, item) => sum + item.value, 0) },
+      { label: "Gasto Meta Ads (€)", value: adsStats.reduce((sum, item) => sum + item.spend, 0) },
+      { label: "Ingresos Meta Ads (€)", value: adsStats.reduce((sum, item) => sum + item.revenue, 0) },
+    ];
+    downloadCsvReport(`informe_campanas_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleCampaigns, [
       { header: "Unidad", value: (campaign) => units.find((unit) => unit.id === campaign.businessUnitId)?.name ?? "" },
       { header: "Nombre", value: (campaign) => campaign.name },
       { header: "Canal", value: (campaign) => campaign.channel ?? "" },
@@ -264,6 +278,16 @@ export function CampaignsManager() {
       { header: "Gasto Meta Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).spend },
       { header: "Ingresos Meta Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).revenue },
     ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      await exportElementToPdf(reportRef.current, `informe_campanas_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
   }
 
   if (access === "checking") return <div className="page-stack" />;
@@ -284,7 +308,7 @@ export function CampaignsManager() {
       <section className="section-heading">
         <div><span className="eyebrow">Captación</span><h2>Campañas</h2><p>Crea campañas, sigue sus leads y su conversión, y archívalas cuando terminen (nunca se eliminan).</p></div>
         <div className="panel-heading-trailing">
-          <button type="button" className="button button-compact button-secondary" onClick={exportCampaignsCsv}>Exportar CSV</button>
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva campaña</button> : null}
         </div>
       </section>
@@ -310,7 +334,7 @@ export function CampaignsManager() {
         </div>
       </CollapsibleFilters>
 
-      <section className="campaigns-grid">
+      <section className="campaigns-grid" ref={reportRef}>
         {visibleCampaigns.map((campaign) => {
           const unit = units.find((item) => item.id === campaign.businessUnitId);
           const stats = statsFor(campaign, leads);

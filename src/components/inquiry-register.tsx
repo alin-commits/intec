@@ -1,19 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { KpiCard } from "@/components/kpi-card";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
-import { downloadCsv } from "@/lib/csv-export";
+import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
+import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
 
@@ -114,6 +116,8 @@ export function InquiryRegister() {
   const [salesExpanded, setSalesExpanded] = useState(false);
   const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
   // Solo el selector de "nueva consulta" respeta visibleInConsultas; el resto de
@@ -716,6 +720,45 @@ export function InquiryRegister() {
     }
   }
 
+  function exportReportCsv() {
+    const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
+    const summary: CsvSummaryItem[] = [
+      { label: "Periodo", value: viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}` },
+      { label: "Consultas totales", value: total },
+      { label: viewMode === "month" ? "Media diaria" : "Media mensual", value: (viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ",") },
+      { label: "Canal principal", value: topChannel ? `${inquiryChannelLabels[topChannel.channel]} (${topChannel.count})` : "—" },
+      { label: "Unidad líder", value: topUnit ? `${topUnit.unit.name} (${topUnit.count})` : "—" },
+      { label: "Ofertas (valor)", value: currencyFormatter.format(salesSummary.oferta.value) },
+      { label: "Seguimientos (valor)", value: currencyFormatter.format(salesSummary.seguimiento.value) },
+      { label: "Pedidos (valor)", value: currencyFormatter.format(salesSummary.pedido.value) },
+    ];
+    const unitReportRows = units
+      .filter((unit) => selectedUnit === "all" || unit.id === selectedUnit)
+      .map((unit) => {
+        const unitCurrent = currentRecords.filter((record) => record.businessUnitId === unit.id);
+        const unitPrevious = previousRecords.filter((record) => record.businessUnitId === unit.id);
+        const unitVariation = unitPrevious.length ? ((unitCurrent.length - unitPrevious.length) / unitPrevious.length) * 100 : null;
+        return { name: unit.name, total: unitCurrent.length, variation: unitVariation, counts: countsByChannel(unitCurrent) };
+      });
+    downloadCsvReport(`informe_consultas_${periodLabel}.csv`, summary, unitReportRows, [
+      { header: "Unidad", value: (row) => row.name },
+      { header: "Total", value: (row) => row.total },
+      { header: "Variación (%)", value: (row) => row.variation === null ? "" : row.variation.toFixed(1).replace(".", ",") },
+      ...inquiryChannelOrder.map((channel) => ({ header: inquiryChannelLabels[channel], value: (row: (typeof unitReportRows)[number]) => row.counts[channel] ?? 0 })),
+    ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
+      await exportElementToPdf(reportRef.current, `informe_consultas_${periodLabel}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   function exportInquiriesCsv() {
     const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
     downloadCsv(`consultas_${periodLabel}.csv`, filtered, [
@@ -805,6 +848,7 @@ export function InquiryRegister() {
 
       <section className="section-heading inquiries-dashboard-heading">
         <div><span className="eyebrow">Estadísticas de consultas</span><h2>Dashboard de consultas</h2><p>Elige vista mensual o anual, filtra por unidad y canal. Las tablas se pueden ordenar pulsando sus encabezados.</p></div>
+        <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
       </section>
 
       <CollapsibleFilters
@@ -869,6 +913,7 @@ export function InquiryRegister() {
         </div>
       </CollapsibleFilters>
 
+      <div ref={reportRef}>
       <section className="kpi-grid inquiry-kpi-grid">
         <KpiCard label="Consultas totales" value={numberFormatter.format(total)} delta={variation === null ? "Sin comparación" : formatPercent(Math.abs(variation))} positive={variation === null || variation >= 0} helper={comparisonHelper} />
         <KpiCard label={viewMode === "month" ? "Media diaria" : "Media mensual"} value={(viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ",")} delta={viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`} helper="" />
@@ -935,6 +980,7 @@ export function InquiryRegister() {
           sort={{ activeColumn: sortColumn, direction: sortDirection, onSort: changeSort }}
         />
       </section>
+      </div>
 
       <section className="panel table-panel recent-inquiries">
         <div className="panel-heading">

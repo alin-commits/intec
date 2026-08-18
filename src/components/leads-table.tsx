@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
-import { downloadCsv } from "@/lib/csv-export";
+import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
-import { currencyFormatter, formatDate } from "@/lib/format";
+import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
+import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 
 const STORAGE_KEY = "intec-demo-leads";
@@ -108,6 +110,8 @@ export function LeadsTable() {
   const [canEdit, setCanEdit] = useState(true);
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
   // Nuevos leads solo ofrecen unidades marcadas visibleInLeads; al editar uno
   // existente se mantienen todas para no perder su marca si se ocultó después.
   const registrableUnits = useMemo(() => units.filter((unit) => unit.visibleInLeads), [units]);
@@ -276,8 +280,17 @@ export function LeadsTable() {
 
   const activeUnitLabel = unitId === "all" ? "Todas las unidades" : units.find((unit) => unit.id === unitId)?.name ?? "Leads";
 
-  function exportLeadsCsv() {
-    downloadCsv(`leads_${new Date().toISOString().slice(0, 10)}.csv`, visibleRows, [
+  function exportReportCsv() {
+    const won = visibleRows.filter((lead) => lead.status === "won");
+    const totalValue = won.reduce((sum, lead) => sum + (lead.saleValue ?? 0), 0);
+    const summary: CsvSummaryItem[] = [
+      { label: "Unidad", value: activeUnitLabel },
+      { label: "Leads totales", value: visibleRows.length },
+      { label: "Ganados", value: won.length },
+      { label: "Conversión (%)", value: visibleRows.length ? formatPercent((won.length / visibleRows.length) * 100) : "0,0 %" },
+      { label: "Valor ganado (€)", value: totalValue },
+    ];
+    downloadCsvReport(`informe_leads_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleRows, [
       { header: "Fecha", value: (lead) => formatDate(lead.createdAt) },
       { header: "Unidad", value: (lead) => units.find((unit) => unit.id === lead.businessUnitId)?.name ?? "" },
       { header: "Contacto", value: (lead) => lead.contactName },
@@ -292,6 +305,16 @@ export function LeadsTable() {
       { header: "Valor (€)", value: (lead) => lead.saleValue ?? "" },
       { header: "Notas", value: (lead) => lead.notes ?? "" },
     ]);
+  }
+
+  async function exportReportPdf() {
+    if (!reportRef.current) return;
+    setPdfBusy(true);
+    try {
+      await exportElementToPdf(reportRef.current, `informe_leads_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
   }
 
   if (access === "checking") return <div className="page-stack" />;
@@ -312,7 +335,7 @@ export function LeadsTable() {
       <section className="section-heading">
         <div><span className="eyebrow">Base comercial</span><h2>Leads · {activeUnitLabel}</h2><p>Cada marca tiene sus propios leads: elige una arriba antes de crear o editar registros para no mezclarlos.</p></div>
         <div className="panel-heading-trailing">
-          <button type="button" className="button button-compact button-secondary" onClick={exportLeadsCsv}>Exportar CSV</button>
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nuevo lead</button> : null}
         </div>
       </section>
@@ -340,7 +363,7 @@ export function LeadsTable() {
           <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         </div>
       </CollapsibleFilters>
-      <section className="panel table-panel">
+      <section className="panel table-panel" ref={reportRef}>
         <div className="table-scroll">
           <table>
             <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>
