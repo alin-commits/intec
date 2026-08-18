@@ -294,7 +294,11 @@ export function DashboardClient() {
       ? monthlyStats.filter((item) => item.month === selectedMonth && item.businessUnitId === unit.id)
       : monthlyStats.filter((item) => yearOfMonth(item.month) === selectedYear && item.businessUnitId === unit.id);
     const summed = sumRows(rows);
-    return { unit, summed, inquiries: summed.web + summed.phone, conversion: summed.leads ? (summed.won / summed.leads) * 100 : 0 };
+    const inquiryRows = viewMode === "month"
+      ? inquirySales.filter((item) => item.month === selectedMonth && item.businessUnitId === unit.id)
+      : inquirySales.filter((item) => yearOfMonth(item.month) === selectedYear && item.businessUnitId === unit.id);
+    const inquiryValue = inquiryRows.reduce((sum, item) => sum + item.value, 0);
+    return { unit, summed, inquiries: summed.web + summed.phone, conversion: summed.leads ? (summed.won / summed.leads) * 100 : 0, inquiryValue };
   });
 
   return (
@@ -422,14 +426,15 @@ export function DashboardClient() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Unidad</th><th>Web</th><th>Teléfono</th><th>Total</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th></tr></thead>
+            <thead><tr><th>Unidad</th><th>Web</th><th>Teléfono</th><th>Total</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Ingresos consultas</th></tr></thead>
             <tbody>
-              {unitRows.map(({ unit, summed, inquiries, conversion: unitConversion }) => (
+              {unitRows.map(({ unit, summed, inquiries, conversion: unitConversion, inquiryValue }) => (
                 <tr key={unit.id}>
                   <td><span className="unit-name"><i style={{ background: unit.accent }} />{unit.name}</span></td>
                   <td>{summed.web}</td><td>{summed.phone}</td><td><strong>{inquiries}</strong></td>
                   <td>{summed.leads}</td><td>{summed.won}</td><td>{formatPercent(unitConversion)}</td>
                   <td>{currencyFormatter.format(summed.saleValue)}</td>
+                  <td>{currencyFormatter.format(inquiryValue)}</td>
                 </tr>
               ))}
             </tbody>
