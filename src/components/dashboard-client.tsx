@@ -75,7 +75,7 @@ export function DashboardClient() {
   const configured = isSupabaseConfigured();
   const currentMonthKey = monthKey();
   const [businessUnitId, setBusinessUnitId] = useState("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [viewMode, setViewMode] = useState<ViewMode>("year");
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
   const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
   const [compareMode, setCompareMode] = useState<CompareMode>("previous");
@@ -115,7 +115,7 @@ export function DashboardClient() {
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
         supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, count").gte("created_at", fetchStart).lt("created_at", fetchEnd),
-        supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)),
+        supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode, sale_type").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)),
         supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
@@ -146,13 +146,15 @@ export function DashboardClient() {
         const amount = Number(row.count ?? 1);
         if (row.inquiry_type === "phone") b.phone += amount; else b.web += amount;
       }
+      // Las ventas de Consultas (sales_entries) son un embudo propio de esa página
+      // (oferta/seguimiento/pedido/perdido) y no deben sumarse al "Valor ganado"
+      // de Leads/Campañas, que solo cuenta leads realmente ganados. Solo los
+      // "pedido" (venta confirmada) cuentan como ingreso real de Consultas.
       const inquirySaleBuckets = new Map<string, number>();
       for (const row of salesData ?? []) {
-        bucket(row.business_unit_id, monthKeyOf(row.occurred_on)).saleValue += row.value ?? 0;
-        if (row.entry_mode === "inquiry") {
-          const key = `${row.business_unit_id}|${monthKeyOf(row.occurred_on)}`;
-          inquirySaleBuckets.set(key, (inquirySaleBuckets.get(key) ?? 0) + (row.value ?? 0));
-        }
+        if (row.sale_type !== "pedido") continue;
+        const key = `${row.business_unit_id}|${monthKeyOf(row.occurred_on)}`;
+        inquirySaleBuckets.set(key, (inquirySaleBuckets.get(key) ?? 0) + (row.value ?? 0));
       }
       setInquirySales(Array.from(inquirySaleBuckets.entries()).map(([key, value]) => {
         const [businessUnitId, month] = key.split("|");
@@ -299,8 +301,8 @@ export function DashboardClient() {
     <div className="page-stack">
       {message ? <div className="form-message" role="status">{message}</div> : null}
       <CollapsibleFilters
-        hasActiveFilters={businessUnitId !== "all" || viewMode !== "month" || compareMode !== "previous"}
-        onClear={() => { setBusinessUnitId("all"); setViewMode("month"); setSelectedMonth(currentMonthKey); setCompareMode("previous"); }}
+        hasActiveFilters={businessUnitId !== "all" || viewMode !== "year" || compareMode !== "previous"}
+        onClear={() => { setBusinessUnitId("all"); setViewMode("year"); setSelectedYear(yearOfMonth(currentMonthKey)); setCompareMode("previous"); }}
       >
         <div className="filter-bar">
           <label>

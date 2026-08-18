@@ -90,7 +90,7 @@ export function InquiryRegister() {
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [records, setRecords] = useState<InquiryRecord[]>(demoInquiries);
   const [salesEntries, setSalesEntries] = useState<SalesEntry[]>(demoSalesEntries);
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [viewMode, setViewMode] = useState<ViewMode>("year");
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
   const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
   const [compareMode, setCompareMode] = useState<CompareMode>("previous");
@@ -951,11 +951,11 @@ export function InquiryRegister() {
       </section>
 
       <CollapsibleFilters
-        hasActiveFilters={selectedUnit !== "all" || viewMode !== "month" || compareMode !== "previous" || selectedType !== "all" || sortColumn !== "total" || sortDirection !== "desc"}
+        hasActiveFilters={selectedUnit !== "all" || viewMode !== "year" || compareMode !== "previous" || selectedType !== "all" || sortColumn !== "total" || sortDirection !== "desc"}
         onClear={() => {
           setSelectedUnit("all");
-          setViewMode("month");
-          setSelectedMonth(currentMonthKey);
+          setViewMode("year");
+          setSelectedYear(yearOfMonth(currentMonthKey));
           setCompareMode("previous");
           setSelectedType("all");
           setSortColumn("total");
