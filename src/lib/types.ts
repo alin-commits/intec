@@ -68,15 +68,20 @@ export type Campaign = {
   updatedAt?: string;
 };
 
+export type InquiryEntryMode = "single" | "weekly";
+
 export type InquiryRecord = {
   id: string;
   businessUnitId: string;
   inquiryType: InquiryType;
+  entryMode: InquiryEntryMode;
+  weekStart: string | null;
+  count: number;
   createdAt: string;
   createdBy?: string | null;
 };
 
-export type SaleType = "oferta" | "seguimiento" | "pedido";
+export type SaleType = "oferta" | "seguimiento" | "pedido" | "perdido";
 export type SaleEntryMode = "inquiry" | "weekly";
 
 export type SalesEntry = {

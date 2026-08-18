@@ -114,7 +114,7 @@ export function DashboardClient() {
         { data: mailingData },
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
-        supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd),
+        supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, count").gte("created_at", fetchStart).lt("created_at", fetchEnd),
         supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)),
         supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").limit(2000),
         supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).limit(2000),
@@ -143,7 +143,8 @@ export function DashboardClient() {
       }
       for (const row of inquiryData ?? []) {
         const b = bucket(row.business_unit_id, monthKeyOf(row.created_at));
-        if (row.inquiry_type === "phone") b.phone += 1; else b.web += 1;
+        const amount = Number(row.count ?? 1);
+        if (row.inquiry_type === "phone") b.phone += amount; else b.web += amount;
       }
       const inquirySaleBuckets = new Map<string, number>();
       for (const row of salesData ?? []) {

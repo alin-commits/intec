@@ -89,7 +89,7 @@ export function UnitsManager() {
     const range = monthRange(monthKey());
     const [{ data: unitData, error: unitError }, { data: inquiryData }, { data: leadData }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
-      supabase.from("inquiries").select("business_unit_id").gte("created_at", range.start).lt("created_at", range.end),
+      supabase.from("inquiries").select("business_unit_id, count").gte("created_at", range.start).lt("created_at", range.end),
       supabase.from("leads").select("business_unit_id, status").gte("created_at", range.start).lt("created_at", range.end),
       supabase.auth.getUser(),
     ]);
@@ -104,7 +104,7 @@ export function UnitsManager() {
       if (!nextStats[id]) nextStats[id] = { inquiries: 0, leads: 0, won: 0 };
       return nextStats[id];
     }
-    for (const row of inquiryData ?? []) bucket(row.business_unit_id as string).inquiries += 1;
+    for (const row of inquiryData ?? []) bucket(row.business_unit_id as string).inquiries += Number(row.count ?? 1);
     for (const row of leadData ?? []) {
       const entry = bucket(row.business_unit_id as string);
       entry.leads += 1;

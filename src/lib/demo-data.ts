@@ -71,6 +71,9 @@ function distributeRecords(
       id: `INQ-${month}-${unitId}-${type}-${index + 1}`,
       businessUnitId: unitId,
       inquiryType: type,
+      entryMode: "single",
+      weekStart: null,
+      count: 1,
       createdAt: new Date(Date.UTC(year, monthNumber - 1, day, hour, minute)).toISOString(),
       createdBy: "demo-admin",
     });

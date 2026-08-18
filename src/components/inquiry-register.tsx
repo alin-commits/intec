@@ -34,6 +34,9 @@ function mapInquiry(row: Record<string, unknown>): InquiryRecord {
     id: String(row.id),
     businessUnitId: String(row.business_unit_id),
     inquiryType: row.inquiry_type as InquiryType,
+    entryMode: (row.entry_mode as InquiryRecord["entryMode"]) ?? "single",
+    weekStart: row.week_start ? String(row.week_start) : null,
+    count: Number(row.count ?? 1),
     createdAt: String(row.created_at),
     createdBy: row.created_by ? String(row.created_by) : null,
   };
@@ -56,7 +59,11 @@ function mapSalesEntry(row: Record<string, unknown>): SalesEntry {
 }
 
 function blankWeeklyDraft(): Record<SaleType, { count: string; value: string }> {
-  return { oferta: { count: "", value: "" }, seguimiento: { count: "", value: "" }, pedido: { count: "", value: "" } };
+  return { oferta: { count: "", value: "" }, seguimiento: { count: "", value: "" }, pedido: { count: "", value: "" }, perdido: { count: "", value: "" } };
+}
+
+function blankWeeklyInquiryDraft(): Record<InquiryType, string> {
+  return { phone: "", chat: "", email_form: "", whatsapp: "", portal_rrss: "" };
 }
 
 function inRange(record: InquiryRecord, start: string, end: string) {
@@ -65,8 +72,12 @@ function inRange(record: InquiryRecord, start: string, end: string) {
 
 function countsByChannel(records: InquiryRecord[]): Partial<Record<InquiryType, number>> {
   const counts: Partial<Record<InquiryType, number>> = {};
-  for (const record of records) counts[record.inquiryType] = (counts[record.inquiryType] ?? 0) + 1;
+  for (const record of records) counts[record.inquiryType] = (counts[record.inquiryType] ?? 0) + record.count;
   return counts;
+}
+
+function totalCount(records: InquiryRecord[]): number {
+  return records.reduce((sum, record) => sum + record.count, 0);
 }
 
 function monthsOfYear(year: number): string[] {
@@ -98,7 +109,11 @@ export function InquiryRegister() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
-  const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType }>({ businessUnitId: "", inquiryType: "phone" });
+  const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; count: string }>({ businessUnitId: "", inquiryType: "phone", count: "1" });
+  const [weeklyInquiryOpen, setWeeklyInquiryOpen] = useState(false);
+  const [weeklyInquiryUnitId, setWeeklyInquiryUnitId] = useState("");
+  const [weeklyInquiryDate, setWeeklyInquiryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [weeklyInquiryDraft, setWeeklyInquiryDraft] = useState(() => blankWeeklyInquiryDraft());
   const [newSaleDraft, setNewSaleDraft] = useState<{ saleType: SaleType; value: string }>({ saleType: "pedido", value: "" });
   const [pendingDeleteSale, setPendingDeleteSale] = useState<SalesEntry | null>(null);
   const [saleChooserOpen, setSaleChooserOpen] = useState(false);
@@ -149,7 +164,7 @@ export function InquiryRegister() {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
+        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
         supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)).order("occurred_on", { ascending: false }),
         supabase.auth.getUser(),
       ]);
@@ -200,10 +215,10 @@ export function InquiryRegister() {
   const filtered = useMemo(() => currentRecords.filter((record) => (selectedUnit === "all" || record.businessUnitId === selectedUnit) && (selectedType === "all" || record.inquiryType === selectedType)), [currentRecords, selectedType, selectedUnit]);
   const filteredPrevious = useMemo(() => previousRecords.filter((record) => (selectedUnit === "all" || record.businessUnitId === selectedUnit) && (selectedType === "all" || record.inquiryType === selectedType)), [previousRecords, selectedType, selectedUnit]);
 
-  const webTotal = filtered.filter((record) => record.inquiryType !== "phone").length;
-  const phoneTotal = filtered.filter((record) => record.inquiryType === "phone").length;
-  const total = filtered.length;
-  const previousTotal = filteredPrevious.length;
+  const webTotal = totalCount(filtered.filter((record) => record.inquiryType !== "phone"));
+  const phoneTotal = totalCount(filtered.filter((record) => record.inquiryType === "phone"));
+  const total = totalCount(filtered);
+  const previousTotal = totalCount(filteredPrevious);
   const hasComparison = previousPeriod !== null && filteredPrevious.length > 0;
   const variation = hasComparison ? ((total - previousTotal) / previousTotal) * 100 : null;
   const elapsedDays = selectedMonth === currentMonthKey ? Math.max(1, dayNumber(new Date().toISOString())) : daysInMonth(selectedMonth);
@@ -225,7 +240,7 @@ export function InquiryRegister() {
   const topUnit = useMemo(() => {
     const source = currentRecords.filter((record) => selectedType === "all" || record.inquiryType === selectedType);
     const counts = new Map<string, number>();
-    for (const record of source) counts.set(record.businessUnitId, (counts.get(record.businessUnitId) ?? 0) + 1);
+    for (const record of source) counts.set(record.businessUnitId, (counts.get(record.businessUnitId) ?? 0) + record.count);
     let best: { unitId: string; count: number } | null = null;
     for (const [unitId, count] of counts) {
       if (!best || count > best.count) best = { unitId, count };
@@ -240,13 +255,13 @@ export function InquiryRegister() {
       return Array.from({ length: daysInMonth(selectedMonth) }, (_, index) => {
         const day = index + 1;
         const rows = filtered.filter((record) => dayNumber(record.createdAt) === day);
-        return { label: String(day), web: rows.filter((record) => record.inquiryType !== "phone").length, phone: rows.filter((record) => record.inquiryType === "phone").length };
+        return { label: String(day), web: totalCount(rows.filter((record) => record.inquiryType !== "phone")), phone: totalCount(rows.filter((record) => record.inquiryType === "phone")) };
       });
     }
     return monthsOfYear(selectedYear).map((month) => {
       const monthR = monthRange(month);
       const rows = filtered.filter((record) => inRange(record, monthR.start, monthR.end));
-      return { label: monthShortLabel(month), web: rows.filter((record) => record.inquiryType !== "phone").length, phone: rows.filter((record) => record.inquiryType === "phone").length };
+      return { label: monthShortLabel(month), web: totalCount(rows.filter((record) => record.inquiryType !== "phone")), phone: totalCount(rows.filter((record) => record.inquiryType === "phone")) };
     });
   }, [filtered, selectedMonth, selectedYear, viewMode]);
 
@@ -257,13 +272,13 @@ export function InquiryRegister() {
     if (viewMode === "month") {
       return weekBuckets.map((bucket) => {
         const bucketRecords = unitCurrentRecords.filter((record) => inRange(record, bucket.start, bucket.end));
-        return { key: bucket.key, label: bucket.label, counts: countsByChannel(bucketRecords), total: bucketRecords.length };
+        return { key: bucket.key, label: bucket.label, counts: countsByChannel(bucketRecords), total: totalCount(bucketRecords) };
       });
     }
     return monthsOfYear(selectedYear).map((month) => {
       const monthR = monthRange(month);
       const monthRecords = unitCurrentRecords.filter((record) => inRange(record, monthR.start, monthR.end));
-      return { key: month, label: monthShortLabel(month), counts: countsByChannel(monthRecords), total: monthRecords.length };
+      return { key: month, label: monthShortLabel(month), counts: countsByChannel(monthRecords), total: totalCount(monthRecords) };
     });
   }, [selectedYear, unitCurrentRecords, viewMode, weekBuckets]);
 
@@ -271,7 +286,7 @@ export function InquiryRegister() {
     key: "period-total",
     label: viewMode === "month" ? "Total mes" : "Total año",
     counts: countsByChannel(unitCurrentRecords),
-    total: unitCurrentRecords.length,
+    total: totalCount(unitCurrentRecords),
   }), [unitCurrentRecords, viewMode]);
 
   const annualCountsForMonth = useMemo(() => countsByChannel(unitYearRecordsForMonth), [unitYearRecordsForMonth]);
@@ -282,13 +297,15 @@ export function InquiryRegister() {
       .map((unit) => {
         const unitCurrent = currentRecords.filter((record) => record.businessUnitId === unit.id);
         const unitPrevious = previousRecords.filter((record) => record.businessUnitId === unit.id);
-        const unitVariation = unitPrevious.length ? ((unitCurrent.length - unitPrevious.length) / unitPrevious.length) * 100 : null;
+        const unitCurrentTotal = totalCount(unitCurrent);
+        const unitPreviousTotal = totalCount(unitPrevious);
+        const unitVariation = unitPreviousTotal ? ((unitCurrentTotal - unitPreviousTotal) / unitPreviousTotal) * 100 : null;
         return {
           key: unit.id,
           label: <span className="unit-name"><i style={{ background: unit.accent }} />{unit.name}</span>,
           name: unit.name,
           counts: countsByChannel(unitCurrent),
-          total: unitCurrent.length,
+          total: unitCurrentTotal,
           variation: unitVariation,
           trailing: unitVariation === null
             ? <span className="muted">Sin comparación</span>
@@ -313,7 +330,7 @@ export function InquiryRegister() {
   ), [salesEntries, periodStartDate, periodEndDate, selectedUnit]);
 
   const salesSummary = useMemo(() => {
-    const base: Record<SaleType, { count: number; value: number }> = { oferta: { count: 0, value: 0 }, seguimiento: { count: 0, value: 0 }, pedido: { count: 0, value: 0 } };
+    const base: Record<SaleType, { count: number; value: number }> = { oferta: { count: 0, value: 0 }, seguimiento: { count: 0, value: 0 }, pedido: { count: 0, value: 0 }, perdido: { count: 0, value: 0 } };
     for (const entry of filteredSales) {
       base[entry.saleType].count += entry.count;
       base[entry.saleType].value += entry.value;
@@ -339,7 +356,7 @@ export function InquiryRegister() {
   const editingRecordSales = useMemo(() => editingRecord ? (salesByInquiry.get(editingRecord.id) ?? []) : [], [editingRecord, salesByInquiry]);
 
   const quickSaleUnitRecords = useMemo(() => records
-    .filter((record) => record.businessUnitId === quickSaleUnitId)
+    .filter((record) => record.businessUnitId === quickSaleUnitId && record.entryMode === "single")
     .slice()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 30), [records, quickSaleUnitId]);
@@ -364,6 +381,9 @@ export function InquiryRegister() {
           id: `INQ-${Date.now()}`,
           businessUnitId: pending.unit.id,
           inquiryType: pending.type,
+          entryMode: "single",
+          weekStart: null,
+          count: 1,
           createdAt: new Date().toISOString(),
           createdBy: "demo-admin",
         };
@@ -444,24 +464,34 @@ export function InquiryRegister() {
 
   function openEditRecord(record: InquiryRecord) {
     setEditingRecord(record);
-    setEditDraft({ businessUnitId: record.businessUnitId, inquiryType: record.inquiryType });
+    setEditDraft({ businessUnitId: record.businessUnitId, inquiryType: record.inquiryType, count: String(record.count) });
     setNewSaleDraft({ saleType: "pedido", value: "" });
     setMessage(null);
   }
 
   async function saveEditRecord() {
     if (!editingRecord) return;
+    let count = 1;
+    if (editingRecord.entryMode === "weekly") {
+      const trimmedCount = editDraft.count.trim();
+      count = Number(trimmedCount);
+      if (trimmedCount === "" || Number.isNaN(count) || count < 1 || !Number.isInteger(count)) {
+        setMessage("La cantidad debe ser un número entero mayor que 0.");
+        return;
+      }
+    }
     setBusy(true);
     try {
       if (configured) {
         const { error } = await createClient().from("inquiries").update({
           business_unit_id: editDraft.businessUnitId,
           inquiry_type: editDraft.inquiryType,
+          ...(editingRecord.entryMode === "weekly" ? { count } : {}),
         }).eq("id", editingRecord.id);
         if (error) throw error;
       }
       setRecords((current) => current.map((item) => item.id === editingRecord.id
-        ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType }
+        ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType, count: editingRecord.entryMode === "weekly" ? count : item.count }
         : item));
       setMessage("Consulta actualizada.");
       setEditingRecord(null);
@@ -720,6 +750,70 @@ export function InquiryRegister() {
     }
   }
 
+  function openWeeklyInquiry() {
+    const defaultUnitId = registrationUnitId ?? units[0]?.id ?? "";
+    setWeeklyInquiryUnitId(defaultUnitId);
+    setWeeklyInquiryDate(new Date().toISOString().slice(0, 10));
+    setWeeklyInquiryDraft(blankWeeklyInquiryDraft());
+    setWeeklyInquiryOpen(true);
+    setMessage(null);
+  }
+
+  function updateWeeklyInquiryDraft(type: InquiryType, value: string) {
+    setWeeklyInquiryDraft((current) => ({ ...current, [type]: value }));
+  }
+
+  async function saveWeeklyInquiries() {
+    if (!weeklyInquiryUnitId) {
+      setMessage("Selecciona una unidad de negocio.");
+      return;
+    }
+    const weekStart = isoWeekStart(weeklyInquiryDate);
+    const rows = inquiryChannelOrder
+      .map((type) => ({ type, count: Number(weeklyInquiryDraft[type]) || 0 }))
+      .filter((row) => row.count > 0);
+    if (rows.length === 0) {
+      setMessage("Añade al menos una cantidad.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const createdAt = `${weekStart}T12:00:00`;
+      if (!configured) {
+        const newRecords: InquiryRecord[] = rows.map((row) => ({
+          id: `INQ-${Date.now()}-${row.type}`,
+          businessUnitId: weeklyInquiryUnitId,
+          inquiryType: row.type,
+          entryMode: "weekly",
+          weekStart,
+          count: row.count,
+          createdAt: new Date(createdAt).toISOString(),
+          createdBy: "demo-admin",
+        }));
+        setRecords((current) => [...newRecords, ...current]);
+      } else {
+        const payload = rows.map((row) => ({
+          business_unit_id: weeklyInquiryUnitId,
+          inquiry_type: row.type,
+          entry_mode: "weekly" as const,
+          week_start: weekStart,
+          count: row.count,
+          created_at: createdAt,
+        }));
+        const { data, error } = await createClient().from("inquiries").insert(payload)
+          .select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, created_by, created_at");
+        if (error) throw error;
+        setRecords((current) => [...(data ?? []).map((row) => mapInquiry(row as Record<string, unknown>)), ...current]);
+      }
+      setMessage("Consultas de la semana registradas correctamente.");
+      setWeeklyInquiryOpen(false);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudieron registrar las consultas de la semana."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function exportReportCsv() {
     const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
     const summary: CsvSummaryItem[] = [
@@ -737,8 +831,10 @@ export function InquiryRegister() {
       .map((unit) => {
         const unitCurrent = currentRecords.filter((record) => record.businessUnitId === unit.id);
         const unitPrevious = previousRecords.filter((record) => record.businessUnitId === unit.id);
-        const unitVariation = unitPrevious.length ? ((unitCurrent.length - unitPrevious.length) / unitPrevious.length) * 100 : null;
-        return { name: unit.name, total: unitCurrent.length, variation: unitVariation, counts: countsByChannel(unitCurrent) };
+        const unitCurrentTotal = totalCount(unitCurrent);
+        const unitPreviousTotal = totalCount(unitPrevious);
+        const unitVariation = unitPreviousTotal ? ((unitCurrentTotal - unitPreviousTotal) / unitPreviousTotal) * 100 : null;
+        return { name: unit.name, total: unitCurrentTotal, variation: unitVariation, counts: countsByChannel(unitCurrent) };
       });
     downloadCsvReport(`informe_consultas_${periodLabel}.csv`, summary, unitReportRows, [
       { header: "Unidad", value: (row) => row.name },
@@ -765,6 +861,8 @@ export function InquiryRegister() {
       { header: "Fecha", value: (record) => formatDate(record.createdAt) },
       { header: "Unidad", value: (record) => units.find((unit) => unit.id === record.businessUnitId)?.name ?? "" },
       { header: "Canal", value: (record) => inquiryChannelLabels[record.inquiryType] },
+      { header: "Origen", value: (record) => record.entryMode === "weekly" ? "Semanal" : "Individual" },
+      { header: "Cantidad", value: (record) => record.count },
       { header: "Venta asociada (€)", value: (record) => (salesByInquiry.get(record.id) ?? []).reduce((sum, entry) => sum + entry.value, 0) },
     ]);
   }
@@ -837,6 +935,7 @@ export function InquiryRegister() {
                     </button>
                   ))}
                   <button type="button" className="button button-secondary" onClick={openSaleChooser}>+ Registrar venta</button>
+                  <button type="button" className="button button-secondary" onClick={openWeeklyInquiry}>+ Consultas semanales</button>
                 </div>
               </div>
             </article>
@@ -966,7 +1065,7 @@ export function InquiryRegister() {
             {inquiryChannelOrder.map((channel) => (
               <div key={channel}><span>{inquiryChannelLabels[channel]}</span><strong>{numberFormatter.format(annualCountsForMonth[channel] ?? 0)}</strong></div>
             ))}
-            <div><span>Total</span><strong>{numberFormatter.format(unitYearRecordsForMonth.length)}</strong></div>
+            <div><span>Total</span><strong>{numberFormatter.format(totalCount(unitYearRecordsForMonth))}</strong></div>
           </div>
         </section>
       ) : null}
@@ -990,7 +1089,7 @@ export function InquiryRegister() {
             <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
           </div>
         </div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Ventas</th><th></th></tr></thead><tbody>{recentInquiries.slice(0, inquiriesExpanded ? recentInquiries.length : 5).map((record) => {
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Origen</th><th>Cantidad</th><th>Ventas</th><th></th></tr></thead><tbody>{recentInquiries.slice(0, inquiriesExpanded ? recentInquiries.length : 5).map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
           const recordSales = salesByInquiry.get(record.id) ?? [];
           const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
@@ -999,6 +1098,8 @@ export function InquiryRegister() {
               <td>{formatDate(record.createdAt)}</td>
               <td>{unit?.name ?? "—"}</td>
               <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
+              <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
+              <td>{numberFormatter.format(record.count)}</td>
               <td>{recordSalesTotal ? currencyFormatter.format(recordSalesTotal) : "—"}</td>
               <td className="recent-inquiries-actions">
                 {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
@@ -1102,7 +1203,13 @@ export function InquiryRegister() {
               {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
             </select>
           </label>
+          {editingRecord?.entryMode === "weekly" ? (
+            <label><span>Cantidad</span>
+              <input type="number" min="1" step="1" value={editDraft.count} onChange={(event) => setEditDraft((current) => ({ ...current, count: event.target.value }))} />
+            </label>
+          ) : null}
         </div>
+        {editingRecord?.entryMode === "weekly" ? <p className="muted">Este registro representa varias consultas de una semana ({formatDate(editingRecord.createdAt)}).</p> : null}
 
         <h3>Ventas de esta consulta</h3>
         {editingRecordSales.length > 0 ? (
@@ -1258,6 +1365,32 @@ export function InquiryRegister() {
             </div>
           </>
         ) : null}
+      </Modal>
+
+      <Modal open={weeklyInquiryOpen} title="Registrar consultas semanales" eyebrow="Consultas" onClose={() => setWeeklyInquiryOpen(false)}>
+        <div className="form-grid">
+          <label><span>Unidad de negocio</span>
+            <select value={weeklyInquiryUnitId} onChange={(event) => setWeeklyInquiryUnitId(event.target.value)}>
+              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </label>
+          <label><span>Semana (elige cualquier día)</span>
+            <input type="date" value={weeklyInquiryDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setWeeklyInquiryDate(event.target.value)} />
+          </label>
+        </div>
+        <p className="muted">Semana del {formatDate(isoWeekStart(weeklyInquiryDate))}. Indica cuántas consultas hubo de cada canal.</p>
+        <div className="weekly-sales-grid">
+          {inquiryChannelOrder.map((channel) => (
+            <div className="weekly-sales-row weekly-inquiry-row" key={channel}>
+              <strong>{inquiryChannelLabels[channel]}</strong>
+              <label><span>Cantidad</span><input type="number" min="0" step="1" placeholder="0" value={weeklyInquiryDraft[channel]} onChange={(event) => updateWeeklyInquiryDraft(channel, event.target.value)} /></label>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={() => setWeeklyInquiryOpen(false)}>Cerrar</button>
+          <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveWeeklyInquiries()}>{busy ? "Guardando…" : "Guardar consultas"}</button>
+        </div>
       </Modal>
     </div>
   );

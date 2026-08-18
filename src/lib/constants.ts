@@ -68,12 +68,13 @@ export const campaignStatusLabels: Record<CampaignStatus, string> = {
   archived: "Archivada",
 };
 
-export const saleTypeOrder: SaleType[] = ["oferta", "seguimiento", "pedido"];
+export const saleTypeOrder: SaleType[] = ["oferta", "seguimiento", "pedido", "perdido"];
 
 export const saleTypeLabels: Record<SaleType, string> = {
   oferta: "Oferta",
   seguimiento: "Seguimiento",
   pedido: "Pedido",
+  perdido: "Perdido",
 };
 
 export const socialNetworkOrder: SocialNetwork[] = ["facebook", "instagram", "linkedin"];

@@ -108,6 +108,7 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 
 .weekly-sales-grid { display: flex; flex-direction: column; gap: 12px; }
 .weekly-sales-row { display: grid; grid-template-columns: 110px 1fr 1fr; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.weekly-inquiry-row { grid-template-columns: 140px 1fr; }
 @media (max-width: 560px) {
   .weekly-sales-row { grid-template-columns: 1fr; }
 }
