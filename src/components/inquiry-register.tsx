@@ -9,6 +9,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
@@ -715,6 +716,28 @@ export function InquiryRegister() {
     }
   }
 
+  function exportInquiriesCsv() {
+    const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
+    downloadCsv(`consultas_${periodLabel}.csv`, filtered, [
+      { header: "Fecha", value: (record) => formatDate(record.createdAt) },
+      { header: "Unidad", value: (record) => units.find((unit) => unit.id === record.businessUnitId)?.name ?? "" },
+      { header: "Canal", value: (record) => inquiryChannelLabels[record.inquiryType] },
+      { header: "Venta asociada (€)", value: (record) => (salesByInquiry.get(record.id) ?? []).reduce((sum, entry) => sum + entry.value, 0) },
+    ]);
+  }
+
+  function exportSalesCsv() {
+    const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
+    downloadCsv(`ventas_${periodLabel}.csv`, filteredSales, [
+      { header: "Fecha", value: (entry) => formatDate(entry.occurredOn) },
+      { header: "Unidad", value: (entry) => units.find((unit) => unit.id === entry.businessUnitId)?.name ?? "" },
+      { header: "Tipo", value: (entry) => saleTypeLabels[entry.saleType] },
+      { header: "Origen", value: (entry) => entry.entryMode === "inquiry" ? "Consulta" : "Semanal" },
+      { header: "Cantidad", value: (entry) => entry.count },
+      { header: "Valor (€)", value: (entry) => entry.value },
+    ]);
+  }
+
   function changeSort(column: ChannelTableColumn) {
     if (column === sortColumn) setSortDirection((current) => current === "asc" ? "desc" : "asc");
     else {
@@ -914,7 +937,13 @@ export function InquiryRegister() {
       </section>
 
       <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div><span className="muted">Corrige un error editando el registro (unidad, canal o ventas asociadas), o elimínalo si no debía existir</span></div>
+        <div className="panel-heading">
+          <div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div>
+          <div className="panel-heading-trailing">
+            <span className="muted">Corrige un error editando el registro (unidad, canal o ventas asociadas), o elimínalo si no debía existir</span>
+            <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
+          </div>
+        </div>
         <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Ventas</th><th></th></tr></thead><tbody>{recentInquiries.slice(0, inquiriesExpanded ? recentInquiries.length : 5).map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
           const recordSales = salesByInquiry.get(record.id) ?? [];
@@ -942,7 +971,13 @@ export function InquiryRegister() {
       </section>
 
       <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading"><div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div><span className="muted">Incluye ventas por consulta y bloques semanales. Corrige un error editando la venta, o elimínala si no debía existir</span></div>
+        <div className="panel-heading">
+          <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
+          <div className="panel-heading-trailing">
+            <span className="muted">Incluye ventas por consulta y bloques semanales. Corrige un error editando la venta, o elimínala si no debía existir</span>
+            <button type="button" className="button button-compact button-secondary" onClick={exportSalesCsv}>Exportar CSV</button>
+          </div>
+        </div>
         <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.slice(0, salesExpanded ? recentSales.length : 5).map((entry) => {
           const unit = units.find((item) => item.id === entry.businessUnitId);
           return (

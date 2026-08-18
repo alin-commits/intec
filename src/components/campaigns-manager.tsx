@@ -5,6 +5,7 @@ import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { CAMPAIGNS_ROLES, hasAnyRole, campaignStatusLabels } from "@/lib/constants";
+import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
@@ -247,6 +248,24 @@ export function CampaignsManager() {
     }
   }
 
+  function exportCampaignsCsv() {
+    downloadCsv(`campanas_${new Date().toISOString().slice(0, 10)}.csv`, visibleCampaigns, [
+      { header: "Unidad", value: (campaign) => units.find((unit) => unit.id === campaign.businessUnitId)?.name ?? "" },
+      { header: "Nombre", value: (campaign) => campaign.name },
+      { header: "Canal", value: (campaign) => campaign.channel ?? "" },
+      { header: "Estado", value: (campaign) => campaignStatusLabels[campaign.status] },
+      { header: "Fecha inicio", value: (campaign) => campaign.startDate ? formatDate(campaign.startDate) : "" },
+      { header: "Fecha fin", value: (campaign) => campaign.endDate ? formatDate(campaign.endDate) : "" },
+      { header: "Presupuesto (€)", value: (campaign) => campaign.budget ?? "" },
+      { header: "Leads", value: (campaign) => statsFor(campaign, leads).total },
+      { header: "Ganados", value: (campaign) => statsFor(campaign, leads).won },
+      { header: "Conversión (%)", value: (campaign) => statsFor(campaign, leads).conversion.toFixed(1).replace(".", ",") },
+      { header: "Valor total (€)", value: (campaign) => statsFor(campaign, leads).value },
+      { header: "Gasto Meta Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).spend },
+      { header: "Ingresos Meta Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).revenue },
+    ]);
+  }
+
   if (access === "checking") return <div className="page-stack" />;
 
   if (access === "denied") {
@@ -264,7 +283,10 @@ export function CampaignsManager() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Captación</span><h2>Campañas</h2><p>Crea campañas, sigue sus leads y su conversión, y archívalas cuando terminen (nunca se eliminan).</p></div>
-        {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva campaña</button> : null}
+        <div className="panel-heading-trailing">
+          <button type="button" className="button button-compact button-secondary" onClick={exportCampaignsCsv}>Exportar CSV</button>
+          {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva campaña</button> : null}
+        </div>
       </section>
 
       {message ? <div className="form-message" role="status">{message}</div> : null}

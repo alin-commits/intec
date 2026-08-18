@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
+import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate } from "@/lib/format";
@@ -275,6 +276,24 @@ export function LeadsTable() {
 
   const activeUnitLabel = unitId === "all" ? "Todas las unidades" : units.find((unit) => unit.id === unitId)?.name ?? "Leads";
 
+  function exportLeadsCsv() {
+    downloadCsv(`leads_${new Date().toISOString().slice(0, 10)}.csv`, visibleRows, [
+      { header: "Fecha", value: (lead) => formatDate(lead.createdAt) },
+      { header: "Unidad", value: (lead) => units.find((unit) => unit.id === lead.businessUnitId)?.name ?? "" },
+      { header: "Contacto", value: (lead) => lead.contactName },
+      { header: "Empresa", value: (lead) => lead.clientCompanyName },
+      { header: "Email", value: (lead) => lead.email },
+      { header: "Teléfono", value: (lead) => lead.phone },
+      { header: "Campaña", value: (lead) => lead.campaign || "General" },
+      { header: "Estado", value: (lead) => leadStatusLabels[lead.status] },
+      { header: "Tipo", value: (lead) => lead.type },
+      { header: "Interés", value: (lead) => lead.productInterest },
+      { header: "Fuente", value: (lead) => lead.source },
+      { header: "Valor (€)", value: (lead) => lead.saleValue ?? "" },
+      { header: "Notas", value: (lead) => lead.notes ?? "" },
+    ]);
+  }
+
   if (access === "checking") return <div className="page-stack" />;
 
   if (access === "denied") {
@@ -292,7 +311,10 @@ export function LeadsTable() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Base comercial</span><h2>Leads · {activeUnitLabel}</h2><p>Cada marca tiene sus propios leads: elige una arriba antes de crear o editar registros para no mezclarlos.</p></div>
-        {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nuevo lead</button> : null}
+        <div className="panel-heading-trailing">
+          <button type="button" className="button button-compact button-secondary" onClick={exportLeadsCsv}>Exportar CSV</button>
+          {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nuevo lead</button> : null}
+        </div>
       </section>
 
       <section className="brand-picker">

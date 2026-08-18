@@ -124,6 +124,7 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(320px, .85fr); gap: 22px; }
 .chart-panel, .table-panel { padding: 21px; }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.panel-heading-trailing { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .panel-heading h2, .section-heading h2, .intro-grid h2 { margin: 5px 0 0; font-size: 20px; letter-spacing: -0.025em; }
 .muted { color: var(--muted); font-size: 12px; }
 .chart-wrap { width: 100%; overflow: hidden; position: relative; }
