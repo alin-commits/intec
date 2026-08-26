@@ -938,6 +938,7 @@ export function InquiryRegister() {
                   <button type="button" className="button button-secondary" onClick={openWeeklyInquiry}>+ Consultas semanales</button>
                 </div>
               </div>
+              <p className="muted">&quot;Registrar venta&quot; añade una consulta u oferta concreta con su valor. &quot;Consultas semanales&quot; suma varias consultas de golpe (por ejemplo, las de una semana entera) sin detallarlas una a una.</p>
             </article>
           ) : (
             <div className="notice"><strong>Elige una marca</strong><span>Selecciona una de las marcas de arriba para registrar una consulta.</span></div>

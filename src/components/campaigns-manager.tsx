@@ -317,6 +317,8 @@ export function CampaignsManager() {
         </div>
       </section>
 
+      {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar las campañas, pero no crear ni editar registros.</span></div> : null}
+
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
       <CollapsibleFilters

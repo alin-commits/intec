@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
 import { campaignStatusLabels } from "@/lib/constants";
 import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
+import { downloadCsv } from "@/lib/csv-export";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -301,6 +302,21 @@ export function DashboardClient() {
     return { unit, summed, inquiries: summed.web + summed.phone, conversion: summed.leads ? (summed.won / summed.leads) * 100 : 0, inquiryValue };
   });
 
+  function exportUnitComparisonCsv() {
+    const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
+    downloadCsv(`comparativa_unidades_${periodLabel}.csv`, unitRows, [
+      { header: "Unidad", value: (row) => row.unit.name },
+      { header: "Web", value: (row) => row.summed.web },
+      { header: "Teléfono", value: (row) => row.summed.phone },
+      { header: "Total", value: (row) => row.inquiries },
+      { header: "Leads", value: (row) => row.summed.leads },
+      { header: "Ganados", value: (row) => row.summed.won },
+      { header: "Conversión (%)", value: (row) => row.conversion.toFixed(1).replace(".", ",") },
+      { header: "Valor (€)", value: (row) => row.summed.saleValue },
+      { header: "Ingresos consultas (€)", value: (row) => row.inquiryValue },
+    ]);
+  }
+
   return (
     <div className="page-stack">
       {message ? <div className="form-message" role="status">{message}</div> : null}
@@ -422,7 +438,7 @@ export function DashboardClient() {
       <section className="panel table-panel">
         <div className="panel-heading">
           <div><span className="eyebrow">Rendimiento</span><h2>Comparativa por unidad</h2></div>
-          <button className="button button-secondary">Exportar CSV</button>
+          <button type="button" className="button button-secondary" onClick={exportUnitComparisonCsv}>Exportar CSV</button>
         </div>
         <div className="table-scroll">
           <table>

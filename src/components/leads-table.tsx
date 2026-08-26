@@ -355,6 +355,8 @@ export function LeadsTable() {
         </button>
       </section>
 
+      {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar los leads, pero no crear ni editar registros.</span></div> : null}
+
       {message ? <div className="form-message" role="status">{message}</div> : null}
       <CollapsibleFilters
         hasActiveFilters={query !== "" || status !== "all" || dateFrom !== "" || dateTo !== ""}

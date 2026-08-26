@@ -307,6 +307,8 @@ export function RrssManager() {
         <div><span className="eyebrow">Marketing</span><h2>RRSS y métricas de marketing</h2><p>Redes sociales, Meta Ads y campañas de email, registradas manualmente por marca y periodo.</p></div>
       </section>
 
+      {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar las métricas, pero no registrar ni editar datos.</span></div> : null}
+
       {message ? <div className="form-message" role="status">{message}</div> : null}
 
       <div className="view-tabs" role="tablist">
@@ -538,13 +540,20 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   return (
     <>
       <section className="section-heading">
-        <div><span className="eyebrow">{monthLabel(latestMonth)}</span><h2>Redes sociales</h2></div>
+        <div><span className="eyebrow">Datos de {monthLabel(latestMonth)}</span><h2>Redes sociales</h2></div>
         <div className="panel-heading-trailing">
           <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button className="button button-primary" onClick={openNew}>+ Registrar mes</button> : null}
         </div>
       </section>
 
+      {stats.length === 0 ? (
+        <div className="notice">
+          <strong>Todavía no hay datos de redes sociales</strong>
+          <span>Pulsa &quot;+ Registrar mes&quot; para añadir el primer mes de una marca y empezar a ver aquí sus estadísticas.</span>
+        </div>
+      ) : (
+        <>
       <div className="brand-chip-row" role="tablist" aria-label="Filtrar por marca">
         <button type="button" className={unitFilter === "all" ? "brand-chip active" : "brand-chip"} onClick={() => setUnitFilter("all")}>Todas las marcas</button>
         {units.map((unit) => (
@@ -676,6 +685,8 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           </div>
         ) : null}
       </section>
+        </>
+      )}
 
       <Modal open={editorOpen} title="Registrar mes" eyebrow="Redes sociales" onClose={() => setEditorOpen(false)}>
         <form className="lead-editor-form" onSubmit={saveEntry}>
