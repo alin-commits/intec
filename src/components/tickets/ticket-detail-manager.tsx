@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -214,7 +215,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
         </div>
       </section>
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <div className="ticket-detail-layout">
         <section className="ticket-detail-pane">

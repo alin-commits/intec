@@ -10,6 +10,7 @@ import { formatDate } from "@/lib/format";
 import type { Ticket } from "@/lib/tickets/types";
 import { TicketDashboardCards } from "@/components/tickets/ticket-dashboard-cards";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
+import { Toast } from "@/components/ui/toast";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import { EmptyState } from "@/components/tickets/empty-state";
 
@@ -46,7 +47,7 @@ export function TicketsDashboardView() {
         <Link href="/tickets" className="button button-primary">Ver todos los tickets</Link>
       </section>
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <TicketDashboardCards counts={counts} />
 

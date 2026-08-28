@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TrendChart } from "@/components/charts/trend-chart";
+import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { monthShortLabel } from "@/lib/dates";
@@ -241,7 +242,7 @@ export function TicketsManager() {
         <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
       </section>
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <div ref={reportRef}>
       <TicketDashboardCards counts={counts} />

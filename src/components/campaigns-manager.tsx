@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { CAMPAIGNS_ROLES, hasAnyRole, campaignStatusLabels } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
@@ -319,7 +320,7 @@ export function CampaignsManager() {
 
       {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar las campañas, pero no crear ni editar registros.</span></div> : null}
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <CollapsibleFilters
         hasActiveFilters={query !== "" || unitId !== "all" || status !== "all" || dateFrom !== "" || dateTo !== ""}

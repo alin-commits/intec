@@ -12,6 +12,7 @@ import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 
@@ -357,7 +358,7 @@ export function LeadsTable() {
 
       {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar los leads, pero no crear ni editar registros.</span></div> : null}
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
       <CollapsibleFilters
         hasActiveFilters={query !== "" || status !== "all" || dateFrom !== "" || dateTo !== ""}
         onClear={() => { setQuery(""); setStatus("all"); setDateFrom(""); setDateTo(""); }}

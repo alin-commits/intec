@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { Toast } from "@/components/ui/toast";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { hasAnyRole } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
@@ -308,7 +309,7 @@ export function UnitsManager() {
         {isAdmin ? <button type="button" className="button button-primary" onClick={openNew}>+ Nueva unidad</button> : null}
       </section>
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <section className="units-grid">
         {[...units].sort((a, b) => a.sortOrder - b.sortOrder).map((unit, index, sorted) => {

@@ -6,6 +6,7 @@ import { demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { Toast } from "@/components/ui/toast";
 import type { AppRole, Profile } from "@/lib/types";
 
 const STORAGE_KEY = "intec-demo-users";
@@ -231,7 +232,7 @@ export function UsersManager() {
             <button className="button button-primary" disabled={busy}>{busy ? "Enviando…" : "Invitar usuario"}</button>
           </div>
         </form>
-        {message ? <div className="form-message" role="status">{message}</div> : null}
+        <Toast message={message} onDismiss={() => setMessage(null)} />
       </section>
 
       <section className="panel table-panel">

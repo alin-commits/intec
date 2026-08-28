@@ -8,6 +8,7 @@ import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format"
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { KpiCard } from "@/components/kpi-card";
+import { Toast } from "@/components/ui/toast";
 import type { BusinessUnit, CampaignStatus, LeadStatus } from "@/lib/types";
 
 type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus; directSalesCount: number; directSaleValue: number };
@@ -107,7 +108,7 @@ export function MarketingDashboardView() {
         <div><span className="eyebrow">Marketing</span><h2>Resumen de leads y campañas</h2><p>Vista general de captación. Para gestionar registros, entra en Leads o Campañas.</p></div>
       </section>
 
-      {message ? <div className="form-message" role="status">{message}</div> : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <section className="kpi-grid">
         <KpiCard label="Leads" value={String(totalLeads)} delta="Sin comparación" helper="total actual" />

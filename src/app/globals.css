@@ -322,7 +322,9 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .sidebar-logout { margin-left: auto; border: 0; background: transparent; color: #94a3b8; font-size: 11px; font-weight: 700; }
 .sidebar-logout:hover { color: white; }
 .form-error { padding: 10px 12px; border-radius: 9px; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; font-size: 13px; }
-.form-message { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 200; max-width: min(520px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 10px; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; font-size: 13px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18); animation: form-message-in .18s ease-out; }
+.form-message { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 200; display: flex; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 10px; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; font-size: 13px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18); animation: form-message-in .18s ease-out; }
+.toast-close { flex-shrink: 0; border: 0; background: transparent; color: inherit; opacity: .6; font-size: 16px; line-height: 1; cursor: pointer; padding: 0; }
+.toast-close:hover { opacity: 1; }
 
 @keyframes form-message-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .button-danger { background: #b91c1c; color: white; }
