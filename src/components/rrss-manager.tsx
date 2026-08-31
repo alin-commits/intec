@@ -27,7 +27,7 @@ import {
   demoSocialMediaStats,
 } from "@/lib/demo-data";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { monthKey, monthLabel, monthShortLabel } from "@/lib/dates";
+import { monthKey, monthLabel, monthShortLabel, yearOfMonth } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { exportElementToPdf } from "@/lib/pdf-export";
@@ -47,6 +47,7 @@ const ADS_STORAGE_KEY = "intec-demo-meta-ads-entries";
 const MAILING_STORAGE_KEY = "intec-demo-mailing-campaigns";
 
 type Tab = "social" | "ads" | "mailing";
+type ViewMode = "month" | "year";
 
 type SocialDraft = Omit<SocialMediaStat, "id" | "createdAt" | "createdBy">;
 type AdsDraft = Omit<MetaAdsEntry, "id" | "createdAt" | "createdBy">;
@@ -59,6 +60,20 @@ const NETWORK_COLORS: Record<SocialNetwork, string> = { facebook: "#1877F2", ins
 
 function ratio(numerator: number, denominator: number): number {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;
+}
+
+function monthsOfYear(year: number): string[] {
+  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
+}
+
+function latestFollowersSnapshot(rows: SocialMediaStat[]): SocialMediaStat[] {
+  const latestByKey = new Map<string, SocialMediaStat>();
+  for (const row of rows) {
+    const key = `${row.businessUnitId}|${row.network}`;
+    const existing = latestByKey.get(key);
+    if (!existing || row.periodMonth > existing.periodMonth) latestByKey.set(key, row);
+  }
+  return Array.from(latestByKey.values());
 }
 
 function safeDiv(numerator: number, denominator: number): number {
@@ -356,51 +371,60 @@ type SharedTabProps<T> = {
 };
 
 function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<SocialMediaStat> & { stats: SocialMediaStat[] }) {
+  const currentMonthKey = monthKey();
   const [unitFilter, setUnitFilter] = useState("all");
   const [networkFilter, setNetworkFilter] = useState("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("year");
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
+  const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
   const [monthFrom, setMonthFrom] = useState("");
   const [monthTo, setMonthTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [rowsExpanded, setRowsExpanded] = useState(false);
   const [sortAsc, setSortAsc] = useState(false);
-  const [networkChartPeriod, setNetworkChartPeriod] = useState<"month" | "total">("month");
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
   const [pdfBusy, setPdfBusy] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
-  const latestMonth = useMemo(() => stats.reduce((max, row) => (row.periodMonth > max ? row.periodMonth : max), stats[0]?.periodMonth ?? monthKey()), [stats]);
-  const latestRows = useMemo(() => stats.filter((row) => row.periodMonth === latestMonth), [stats, latestMonth]);
-  const filteredLatestRows = useMemo(() => (unitFilter === "all" ? latestRows : latestRows.filter((row) => row.businessUnitId === unitFilter)), [latestRows, unitFilter]);
+  const periodMonths = useMemo(() => (viewMode === "month" ? [selectedMonth] : monthsOfYear(selectedYear)), [viewMode, selectedMonth, selectedYear]);
+  const periodRows = useMemo(() => stats.filter((row) => periodMonths.includes(row.periodMonth)), [stats, periodMonths]);
+  const filteredPeriodRows = useMemo(() => (unitFilter === "all" ? periodRows : periodRows.filter((row) => row.businessUnitId === unitFilter)), [periodRows, unitFilter]);
+  const periodLabel = viewMode === "month" ? monthLabel(selectedMonth) : `año ${selectedYear}`;
 
-  const totals = useMemo(() => filteredLatestRows.reduce((acc, row) => ({
-    followers: acc.followers + row.followersEnd,
-    newFollowers: acc.newFollowers + row.newFollowers,
-    interactions: acc.interactions + row.interactions,
-    reach: acc.reach + row.reach,
-  }), { followers: 0, newFollowers: 0, interactions: 0, reach: 0 }), [filteredLatestRows]);
+  const totals = useMemo(() => {
+    const followers = latestFollowersSnapshot(filteredPeriodRows).reduce((sum, row) => sum + row.followersEnd, 0);
+    return filteredPeriodRows.reduce((acc, row) => ({
+      followers,
+      newFollowers: acc.newFollowers + row.newFollowers,
+      interactions: acc.interactions + row.interactions,
+      reach: acc.reach + row.reach,
+    }), { followers, newFollowers: 0, interactions: 0, reach: 0 });
+  }, [filteredPeriodRows]);
 
   const unitSummaries = useMemo(() => units.map((unit) => {
-    const rows = latestRows.filter((row) => row.businessUnitId === unit.id);
+    const rows = periodRows.filter((row) => row.businessUnitId === unit.id);
+    const followers = latestFollowersSnapshot(rows).reduce((sum, row) => sum + row.followersEnd, 0);
     return {
       unit,
-      followers: rows.reduce((sum, row) => sum + row.followersEnd, 0),
+      followers,
       newFollowers: rows.reduce((sum, row) => sum + row.newFollowers, 0),
       interactions: rows.reduce((sum, row) => sum + row.interactions, 0),
     };
-  }), [units, latestRows]);
+  }), [units, periodRows]);
 
+  const trendYear = viewMode === "month" ? yearOfMonth(selectedMonth) : selectedYear;
   const monthlyTrend = useMemo(() => {
-    const byMonth = new Map<string, { newFollowers: number; interactions: number; reach: number }>();
+    const byMonth = new Map<string, { newFollowers: number; interactions: number; reach: number }>(monthsOfYear(trendYear).map((m) => [m, { newFollowers: 0, interactions: 0, reach: 0 }]));
     for (const row of stats) {
       if (unitFilter !== "all" && row.businessUnitId !== unitFilter) continue;
-      const entry = byMonth.get(row.periodMonth) ?? { newFollowers: 0, interactions: 0, reach: 0 };
+      const entry = byMonth.get(row.periodMonth);
+      if (!entry) continue;
       entry.newFollowers += row.newFollowers;
       entry.interactions += row.interactions;
       entry.reach += row.reach;
-      byMonth.set(row.periodMonth, entry);
     }
-    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
-  }, [stats, unitFilter]);
+    return Array.from(byMonth.entries());
+  }, [stats, unitFilter, trendYear]);
 
   const monthlyTrendData = useMemo(() => monthlyTrend.map(([month, entry]) => ({
     label: monthShortLabel(month),
@@ -414,12 +438,11 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
 
   const newFollowersByNetwork = useMemo(() => {
     if (unitFilter === "all") return [];
-    const sourceRows = (networkChartPeriod === "month" ? latestRows : stats).filter((row) => row.businessUnitId === unitFilter);
     return socialNetworkOrder
-      .map((network) => ({ network, value: sourceRows.filter((row) => row.network === network).reduce((sum, row) => sum + row.newFollowers, 0) }))
+      .map((network) => ({ network, value: filteredPeriodRows.filter((row) => row.network === network).reduce((sum, row) => sum + row.newFollowers, 0) }))
       .filter((row) => row.value > 0)
       .map((row) => ({ label: socialNetworkLabels[row.network], value: row.value, color: NETWORK_COLORS[row.network] }));
-  }, [unitFilter, latestRows, stats, networkChartPeriod]);
+  }, [unitFilter, filteredPeriodRows]);
 
   const selectedUnitName = unitFilter === "all" ? "todas las marcas" : units.find((unit) => unit.id === unitFilter)?.name ?? "";
 
@@ -508,14 +531,14 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
 
   function exportReportCsv() {
     const summary: CsvSummaryItem[] = [
-      { label: "Mes de referencia", value: monthLabel(latestMonth) },
+      { label: "Periodo", value: viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}` },
       { label: "Marca", value: selectedUnitName === "todas las marcas" ? "Todas las marcas" : selectedUnitName },
       { label: "Seguidores totales", value: totals.followers },
       { label: "Nuevos seguidores", value: totals.newFollowers },
       { label: "Interacciones", value: totals.interactions },
       { label: "Alcance", value: totals.reach },
     ];
-    downloadCsvReport(`informe_rrss_${latestMonth}.csv`, summary, visibleRows, [
+    downloadCsvReport(`informe_rrss_${viewMode === "month" ? selectedMonth : selectedYear}.csv`, summary, visibleRows, [
       { header: "Mes", value: (row) => monthLabel(row.periodMonth) },
       { header: "Marca", value: (row) => units.find((unit) => unit.id === row.businessUnitId)?.name ?? "" },
       { header: "Red", value: (row) => socialNetworkLabels[row.network] },
@@ -532,7 +555,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      await exportElementToPdf(reportRef.current, `informe_rrss_${latestMonth}.pdf`);
+      await exportElementToPdf(reportRef.current, `informe_rrss_${viewMode === "month" ? selectedMonth : selectedYear}.pdf`);
     } finally {
       setPdfBusy(false);
     }
@@ -541,7 +564,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   return (
     <>
       <section className="section-heading">
-        <div><span className="eyebrow">Datos de {monthLabel(latestMonth)}</span><h2>Redes sociales</h2></div>
+        <div><span className="eyebrow">Datos de {periodLabel}</span><h2>Redes sociales</h2></div>
         <div className="panel-heading-trailing">
           <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button className="button button-primary" onClick={openNew}>+ Registrar mes</button> : null}
@@ -565,18 +588,33 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         ))}
       </div>
 
+      <div className="filter-bar" style={{ maxWidth: 420 }}>
+        <label>
+          <span>Vista</span>
+          <select value={viewMode} onChange={(event) => setViewMode(event.target.value as ViewMode)}>
+            <option value="year">Anual</option>
+            <option value="month">Mensual</option>
+          </select>
+        </label>
+        {viewMode === "month" ? (
+          <label><span>Mes</span><input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event) => setSelectedMonth(event.target.value)} /></label>
+        ) : (
+          <label><span>Año</span><input type="number" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value) || selectedYear)} /></label>
+        )}
+      </div>
+
       <div ref={reportRef}>
       <section className="kpi-grid">
-        <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} delta="Sin comparación" helper="último mes registrado" />
-        <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} delta="Sin comparación" helper="último mes registrado" />
-        <KpiCard label="Interacciones" value={numberFormatter.format(totals.interactions)} delta="Sin comparación" helper="último mes registrado" />
-        <KpiCard label="Alcance" value={numberFormatter.format(totals.reach)} delta="Sin comparación" helper="último mes registrado" />
+        <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} delta="Sin comparación" helper={`a cierre de ${periodLabel}`} />
+        <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} delta="Sin comparación" helper={periodLabel} />
+        <KpiCard label="Interacciones" value={numberFormatter.format(totals.interactions)} delta="Sin comparación" helper={periodLabel} />
+        <KpiCard label="Alcance" value={numberFormatter.format(totals.reach)} delta="Sin comparación" helper={periodLabel} />
       </section>
 
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
           <div className="panel-heading">
-            <div><span className="eyebrow">Evolución</span><h2>Últimos meses ({selectedUnitName})</h2></div>
+            <div><span className="eyebrow">Evolución</span><h2>Año {trendYear} ({selectedUnitName})</h2></div>
           </div>
           <TrendChart
             data={monthlyTrendData}
@@ -590,15 +628,9 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         <article className="panel chart-panel">
           <div className="panel-heading">
             <div><span className="eyebrow">{unitFilter === "all" ? "Por marca" : "Por red"}</span><h2>Nuevos seguidores</h2></div>
-            {unitFilter !== "all" ? (
-              <select className="panel-heading-select" value={networkChartPeriod} onChange={(event) => setNetworkChartPeriod(event.target.value as "month" | "total")}>
-                <option value="month">Mes actual</option>
-                <option value="total">Total</option>
-              </select>
-            ) : null}
           </div>
           {unitFilter === "all" ? (
-            <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca este mes" valueFormatter={(value) => numberFormatter.format(value)} />
+            <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca en el periodo" valueFormatter={(value) => numberFormatter.format(value)} />
           ) : (
             <BarChart items={newFollowersByNetwork} ariaLabel={`Nuevos seguidores por red para ${selectedUnitName}`} valueFormatter={(value) => numberFormatter.format(value)} />
           )}
@@ -606,7 +638,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       </section>
 
       <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Resumen del mes</h2></div></div>
+        <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Resumen del periodo</h2></div></div>
         <div className="table-scroll">
           <table>
             <thead><tr><th>Marca</th><th>Seguidores</th><th>Nuevos</th><th>Interacciones</th></tr></thead>

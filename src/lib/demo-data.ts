@@ -247,7 +247,7 @@ export const demoSocialMediaStats: SocialMediaStat[] = businessUnits.filter((uni
         id: `SMS-${unit.id}-${network}-${month}`,
         businessUnitId: unit.id,
         network,
-        periodMonth: `${month}-01`,
+        periodMonth: month,
         followersEnd,
         newFollowers,
         posts: 4 + monthIndex + (network === "instagram" ? 3 : 0),
