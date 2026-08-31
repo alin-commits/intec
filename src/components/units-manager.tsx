@@ -5,7 +5,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { hasAnyRole } from "@/lib/constants";
+import { hasAnyRole, UNITS_ROLES } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
 import { monthKey, monthRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
@@ -117,7 +117,7 @@ export function UnitsManager() {
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
       setIsAdmin(Boolean(profile && hasAnyRole(profile.roles, ["admin"])));
-      setAccess("allowed");
+      setAccess(profile && hasAnyRole(profile.roles, UNITS_ROLES) ? "allowed" : "denied");
     } else {
       setAccess("denied");
     }

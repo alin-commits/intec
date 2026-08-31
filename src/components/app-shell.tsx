@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
-import { CAMPAIGNS_ROLES, RRSS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CONSULTAS_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
@@ -98,12 +99,12 @@ function TicketsIcon() {
 
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
-  { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: ["admin", "commercial", "viewer", "direction"] },
-  { href: "/leads", label: "Leads", icon: LeadsIcon, roles: ["admin", "commercial", "marketing", "viewer", "direction"] },
+  { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
+  { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/campanas", label: "Campañas", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
   { href: "/rrss", label: "RRSS", icon: RrssIcon, roles: RRSS_ROLES },
-  { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: ["admin", "viewer"] },
-  { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: ["admin", "it", "direction"] },
+  { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
+  { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
 
