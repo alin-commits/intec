@@ -390,7 +390,9 @@ export function LeadsTable() {
                   <td><button type="button" className="button button-compact button-secondary" onClick={() => openEdit(lead)}>{canEdit ? "Editar" : "Ver"}</button></td>
                 </tr>
               );
-            })}</tbody>
+            })}
+            {visibleRows.length === 0 ? <tr><td colSpan={8} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
+            </tbody>
           </table>
         </div>
       </section>

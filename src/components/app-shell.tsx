@@ -184,6 +184,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
+      {mobileNavOpen ? <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} /> : null}
       <aside className={mobileNavOpen ? "sidebar mobile-open" : "sidebar"}>
         <div className="sidebar-top">
           <Link href="/dashboard" className="brand">
