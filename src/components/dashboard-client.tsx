@@ -276,14 +276,16 @@ export function DashboardClient() {
     const mailingRevenue = rrssMailingFiltered.reduce((sum, row) => sum + row.revenue, 0);
     const delivered = rrssMailingFiltered.reduce((sum, row) => sum + row.deliveredCount, 0);
     const opens = rrssMailingFiltered.reduce((sum, row) => sum + row.opens, 0);
+    const followersGained = rrssSocialFiltered.reduce((sum, row) => sum + row.newFollowers, 0);
     return {
       adsSpend: spend,
       adsLeads,
       revenue: adsRevenue + mailingRevenue,
       mailingSent: rrssMailingFiltered.reduce((sum, row) => sum + row.sentCount, 0),
       mailingOpenRate: delivered ? (opens / delivered) * 100 : 0,
+      followersGained,
     };
-  }, [rrssAdsFiltered, rrssMailingFiltered]);
+  }, [rrssAdsFiltered, rrssMailingFiltered, rrssSocialFiltered]);
 
   const rrssTrend = useMemo(() => {
     const byMonth = new Map<string, number>();
@@ -314,7 +316,7 @@ export function DashboardClient() {
       { header: "Ganados", value: (row) => row.summed.won },
       { header: "Conversión (%)", value: (row) => row.conversion.toFixed(1).replace(".", ",") },
       { header: "Valor (€)", value: (row) => row.summed.saleValue },
-      { header: "Ingresos consultas (€)", value: (row) => row.inquiryValue },
+      { header: "Valor de venta Consultas (€)", value: (row) => row.inquiryValue },
     ]);
   }
 
@@ -374,7 +376,7 @@ export function DashboardClient() {
         <KpiCard label="Consultas web" value={numberFormatter.format(current.web)} helper={comparisonHelper} {...deltaProps(webDelta)} />
         <KpiCard label="Consultas telefónicas" value={numberFormatter.format(current.phone)} helper={comparisonHelper} {...deltaProps(phoneDelta)} />
         <KpiCard label="Consultas totales" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} {...deltaProps(totalDelta)} />
-        <KpiCard label="Ingresos consultas" value={currencyFormatter.format(currentInquirySaleValue)} helper={comparisonHelper} {...deltaProps(inquirySaleValueDelta)} />
+        <KpiCard label="Valor de venta Consultas" value={currencyFormatter.format(currentInquirySaleValue)} helper={comparisonHelper} {...deltaProps(inquirySaleValueDelta)} />
       </section>
 
       <span className="eyebrow kpi-group-label">Leads, campañas y RRSS</span>
@@ -383,7 +385,8 @@ export function DashboardClient() {
         <KpiCard label="Ganados" value={numberFormatter.format(current.won)} delta={wonDelta === null ? "Sin comparación" : `${wonDelta >= 0 ? "+" : ""}${wonDelta}`} positive={wonDelta === null || wonDelta >= 0} helper={comparisonHelper} />
         <KpiCard label="Conversión" value={formatPercent(conversion)} delta={conversionDelta === null ? "Sin comparación" : `${conversionDelta >= 0 ? "+" : ""}${conversionDelta.toFixed(1).replace(".", ",")} pts`} positive={conversionDelta === null || conversionDelta >= 0} helper={comparisonHelper} />
         <KpiCard label="Valor ganado" value={currencyFormatter.format(current.saleValue)} helper={comparisonHelper} {...deltaProps(saleValueDelta)} />
-        <KpiCard label="Ingresos RRSS" value={currencyFormatter.format(rrssSummary.revenue)} delta="Sin comparación" helper="Meta Ads + mailing" />
+        <KpiCard label="Valor de venta RRSS" value={currencyFormatter.format(rrssSummary.revenue)} delta="Sin comparación" helper="Meta Ads + mailing" />
+        <KpiCard label="Seguidores ganados" value={numberFormatter.format(rrssSummary.followersGained)} delta="Sin comparación" helper="total registrado" />
         <KpiCard label="Gasto Meta Ads" value={currencyFormatter.format(rrssSummary.adsSpend)} delta="Sin comparación" helper="total registrado" />
       </section>
 
@@ -428,7 +431,7 @@ export function DashboardClient() {
           </div>
           <div className="channel-breakdown">
             <div><span>Gasto Meta Ads</span><strong>{currencyFormatter.format(rrssSummary.adsSpend)}</strong></div>
-            <div><span>Ingresos RRSS</span><strong>{currencyFormatter.format(rrssSummary.revenue)}</strong></div>
+            <div><span>Valor de venta RRSS</span><strong>{currencyFormatter.format(rrssSummary.revenue)}</strong></div>
             <div><span>Leads Meta Ads</span><strong>{numberFormatter.format(rrssSummary.adsLeads)}</strong></div>
             <div><span>Envíos de email</span><strong>{numberFormatter.format(rrssSummary.mailingSent)}</strong></div>
             <div><span>Open rate medio</span><strong>{formatPercent(rrssSummary.mailingOpenRate)}</strong></div>
@@ -443,7 +446,7 @@ export function DashboardClient() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Unidad</th><th>Web</th><th>Teléfono</th><th>Total</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Ingresos consultas</th></tr></thead>
+            <thead><tr><th>Unidad</th><th>Web</th><th>Teléfono</th><th>Total</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Valor de venta Consultas</th></tr></thead>
             <tbody>
               {unitRows.map(({ unit, summed, inquiries, conversion: unitConversion, inquiryValue }) => (
                 <tr key={unit.id}>
