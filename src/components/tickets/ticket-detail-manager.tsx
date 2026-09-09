@@ -111,15 +111,26 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       await logEvent("status_change", ticket.status, status);
       await loadTicket();
       setMessage("Estado actualizado.");
-      if (status === "resolved") {
-        fetch("/api/tickets/notify-resolved", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticketId }),
-        }).catch(() => { /* el aviso por email es un extra, no debe romper el cambio de estado */ });
-      }
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo actualizar el estado."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function notifyResolved() {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/tickets/notify-resolved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "No se pudo enviar el aviso.");
+      setMessage(payload.sent ? "Aviso enviado por email." : "No se pudo enviar el aviso. Inténtalo de nuevo.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo enviar el aviso."));
     } finally {
       setBusy(false);
     }
@@ -217,6 +228,9 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
         </div>
         <div className="ticket-detail-actions">
           <Link href="/tickets" className="button button-secondary">← Volver</Link>
+          {canManage && ticket.status === "resolved" && ticket.reporterEmail ? (
+            <button type="button" className="button button-secondary" disabled={busy} onClick={() => void notifyResolved()}>Enviar aviso</button>
+          ) : null}
           {canManage ? <button type="button" className="button button-secondary" onClick={() => setPendingArchive(true)}>Archivar</button> : null}
           {canManage ? <button type="button" className="button button-danger" onClick={() => setPendingDelete(true)}>Eliminar</button> : null}
         </div>
