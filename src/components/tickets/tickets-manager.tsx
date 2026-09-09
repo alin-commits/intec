@@ -17,6 +17,8 @@ import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./tic
 import { QuickCreateTicketButton } from "./quick-create-ticket-button";
 import { TicketDashboardCards } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
+import { TicketPriorityBadge } from "./ticket-priority-badge";
+import { TicketStatusBadge } from "./ticket-status-badge";
 import { EmptyState } from "./empty-state";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
@@ -44,7 +46,8 @@ export function TicketsManager() {
   const [pendingBulkAction, setPendingBulkAction] = useState<"archive" | "delete" | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
-  const [chartMode, setChartMode] = useState<"year" | "total">("year");
+  const [chartMode, setChartMode] = useState<"month" | "year" | "total">("year");
+  const [chartMonth, setChartMonth] = useState(() => monthKey());
   const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -121,11 +124,14 @@ export function TicketsManager() {
       const month = ticket.createdAt.slice(0, 7);
       byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
     }
+    if (chartMode === "month") {
+      return [[chartMonth, byMonth.get(chartMonth) ?? 0]] as [string, number][];
+    }
     if (chartMode === "year") {
       return monthsOfYear(chartYear).map((month): [string, number] => [month, byMonth.get(month) ?? 0]);
     }
     return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [visibleTickets, chartMode, chartYear]);
+  }, [visibleTickets, chartMode, chartMonth, chartYear]);
 
   const monthlyChartData = useMemo(() => monthlyCounts.map(([month, count]) => ({ label: monthShortLabel(month), count })), [monthlyCounts]);
 
@@ -270,26 +276,56 @@ export function TicketsManager() {
 
       <div ref={reportRef}>
       <TicketDashboardCards counts={counts} />
-      <section className="panel chart-panel chart-panel-compact">
-        <div className="panel-heading">
-          <div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div>
-          <div className="panel-heading-trailing">
-            <select className="panel-heading-select" value={chartMode} onChange={(event) => setChartMode(event.target.value as "year" | "total")}>
+      <section className="panel">
+        <div className="filter-bar">
+          <label><span>Vista del gráfico</span>
+            <select value={chartMode} onChange={(event) => setChartMode(event.target.value as "month" | "year" | "total")}>
+              <option value="month">Un mes</option>
               <option value="year">Por año</option>
               <option value="total">Todo el histórico</option>
             </select>
-            {chartMode === "year" ? (
-              <select className="panel-heading-select" value={chartYear} onChange={(event) => setChartYear(Number(event.target.value))}>
+          </label>
+          {chartMode === "month" ? (
+            <label><span>Mes</span><input type="month" value={chartMonth} max={monthKey()} onChange={(event) => setChartMonth(event.target.value)} /></label>
+          ) : null}
+          {chartMode === "year" ? (
+            <label><span>Año</span>
+              <select value={chartYear} onChange={(event) => setChartYear(Number(event.target.value))}>
                 {availableChartYears.map((year) => <option key={year} value={year}>{year}</option>)}
               </select>
-            ) : null}
-          </div>
+            </label>
+          ) : null}
         </div>
+      </section>
+      <section className="panel chart-panel chart-panel-compact">
+        <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>
         <TrendChart
           data={monthlyChartData}
           series={[{ key: "count", label: "Tickets", color: "#2563eb" }]}
           ariaLabel="Tickets creados por mes"
         />
+      </section>
+      <section className="panel table-panel">
+        <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Tickets ({visibleTickets.length})</h2></div></div>
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Nº</th><th>Departamento</th><th>Título</th><th>Categoría</th><th>Prioridad</th><th>Estado</th><th>Creado</th></tr></thead>
+            <tbody>
+              {visibleTickets.map((ticket) => (
+                <tr key={ticket.id}>
+                  <td>{ticket.ticketNumber}</td>
+                  <td>{ticket.department}</td>
+                  <td>{ticket.title}</td>
+                  <td>{ticketCategoryLabels[ticket.category]}</td>
+                  <td><TicketPriorityBadge priority={ticket.priority} /></td>
+                  <td><TicketStatusBadge status={ticket.status} /></td>
+                  <td>{formatDate(ticket.createdAt)}</td>
+                </tr>
+              ))}
+              {visibleTickets.length === 0 ? <tr><td colSpan={7} className="muted">Sin tickets que coincidan con los filtros.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
       </section>
       </div>
       <TicketFilters filters={filters} departments={departments} resultCount={visibleTickets.length} onChange={setFilters} />
