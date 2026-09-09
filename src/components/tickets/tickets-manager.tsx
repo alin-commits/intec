@@ -14,6 +14,7 @@ import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES, ticketBlockingLevelLabels, ticketCategoryLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
 import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
+import { QuickCreateTicketButton } from "./quick-create-ticket-button";
 import { TicketDashboardCards } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
 import { EmptyState } from "./empty-state";
@@ -41,6 +42,21 @@ export function TicketsManager() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
+  async function loadTickets() {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("tickets")
+      .select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, closed_at, archived_at")
+      .is("archived_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (error) {
+      setMessage(reportSafeError(error, "No se pudieron cargar los tickets."));
+      return;
+    }
+    setTickets((data ?? []).map((row) => mapTicketRow(row as Record<string, unknown>)));
+  }
+
   useEffect(() => {
     if (!configured) return;
     const supabase = createClient();
@@ -57,17 +73,7 @@ export function TicketsManager() {
       }
       setCanManage(hasAnyRole(ownProfile.roles, TICKET_MANAGER_ROLES));
       setAccess("allowed");
-      const { data, error } = await supabase
-        .from("tickets")
-        .select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, closed_at, archived_at")
-        .is("archived_at", null)
-        .order("created_at", { ascending: false })
-        .limit(1000);
-      if (error) {
-        setMessage(reportSafeError(error, "No se pudieron cargar los tickets."));
-        return;
-      }
-      setTickets((data ?? []).map((row) => mapTicketRow(row as Record<string, unknown>)));
+      await loadTickets();
     });
   }, [configured]);
 
@@ -239,7 +245,10 @@ export function TicketsManager() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Soporte interno</span><h2>Tickets informáticos</h2><p>Incidencias enviadas desde /soporte por cualquier trabajador de la empresa.</p></div>
-        <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+        <div className="panel-heading-trailing">
+          <QuickCreateTicketButton visible={canManage} onCreated={() => void loadTickets()} />
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+        </div>
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />

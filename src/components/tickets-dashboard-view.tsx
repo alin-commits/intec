@@ -13,7 +13,6 @@ import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge"
 import { Toast } from "@/components/ui/toast";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import { EmptyState } from "@/components/tickets/empty-state";
-import { QuickCreateTicketButton } from "@/components/tickets/quick-create-ticket-button";
 
 export function TicketsDashboardView() {
   const configured = isSupabaseConfigured();
@@ -45,10 +44,7 @@ export function TicketsDashboardView() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Soporte interno</span><h2>Resumen de tickets</h2><p>Vista rápida de las incidencias informáticas. Para gestionarlas, entra en Tickets.</p></div>
-        <div className="panel-heading-trailing">
-          <QuickCreateTicketButton />
-          <Link href="/tickets" className="button button-primary">Ver todos los tickets</Link>
-        </div>
+        <Link href="/tickets" className="button button-primary">Ver todos los tickets</Link>
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />

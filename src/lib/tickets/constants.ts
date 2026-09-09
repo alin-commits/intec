@@ -3,7 +3,6 @@ import type { TicketBlockingLevel, TicketCategory, TicketNoteType, TicketPriorit
 
 export const TICKET_MANAGER_ROLES: AppRole[] = ["admin", "it"];
 export const TICKET_VIEW_ROLES: AppRole[] = ["admin", "it", "direction"];
-export const TICKET_QUICK_CREATE_ROLES: AppRole[] = ["admin", "marketing", "it"];
 
 export const ticketCategoryLabels: Record<TicketCategory, string> = {
   erp_apps: "ERP y aplicaciones",

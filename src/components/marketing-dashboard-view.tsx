@@ -9,7 +9,6 @@ import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { KpiCard } from "@/components/kpi-card";
 import { Toast } from "@/components/ui/toast";
-import { QuickCreateTicketButton } from "@/components/tickets/quick-create-ticket-button";
 import type { BusinessUnit, CampaignStatus, LeadStatus } from "@/lib/types";
 
 type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus; directSalesCount: number; directSaleValue: number };
@@ -107,9 +106,6 @@ export function MarketingDashboardView() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Marketing</span><h2>Resumen de leads y campañas</h2><p>Vista general de captación. Para gestionar registros, entra en Leads o Campañas.</p></div>
-        <div className="panel-heading-trailing">
-          <QuickCreateTicketButton />
-        </div>
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />

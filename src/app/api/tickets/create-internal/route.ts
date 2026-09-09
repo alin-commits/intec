@@ -3,12 +3,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildTicketCreatedEmail } from "@/lib/tickets/email-templates";
-import { TICKET_QUICK_CREATE_ROLES } from "@/lib/tickets/constants";
+import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
 import { internalTicketSchema } from "@/lib/tickets/validation";
 import { hasAnyRole } from "@/lib/constants";
 import type { AppRole } from "@/lib/types";
 
-const DEFAULT_CATEGORY = "erp_apps";
 const DEFAULT_BLOCKING_LEVEL = "hindered";
 const DEFAULT_PRIORITY = "medium";
 
@@ -19,8 +18,8 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-  const { data: profile } = await supabase.from("profiles").select("roles, full_name, is_active").eq("id", user.id).maybeSingle();
-  if (!profile || !profile.is_active || !hasAnyRole(profile.roles as AppRole[], TICKET_QUICK_CREATE_ROLES)) {
+  const { data: profile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
+  if (!profile || !profile.is_active || !hasAnyRole(profile.roles as AppRole[], TICKET_MANAGER_ROLES)) {
     return NextResponse.json({ error: "No tienes permiso para crear tickets." }, { status: 403 });
   }
 
@@ -36,6 +35,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Revisa los datos del formulario." }, { status: 400 });
   }
   const data = parsed.data;
+  const description = data.description ?? "";
 
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ error: "El sistema no está disponible en este momento." }, { status: 503 });
@@ -48,8 +48,8 @@ export async function POST(request: Request) {
       reporter_email: null,
       department: "Interno",
       title: data.title,
-      category: DEFAULT_CATEGORY,
-      description: data.description,
+      category: data.category,
+      description,
       blocking_level: DEFAULT_BLOCKING_LEVEL,
       priority: DEFAULT_PRIORITY,
       created_at: new Date(`${data.occurredOn}T09:00:00`).toISOString(),
@@ -87,10 +87,10 @@ export async function POST(request: Request) {
           reporterPhone: "—",
           reporterEmail: null,
           department: "Interno",
-          category: DEFAULT_CATEGORY,
+          category: data.category,
           priority: DEFAULT_PRIORITY,
           blockingLevel: DEFAULT_BLOCKING_LEVEL,
-          description: data.description,
+          description: description || "(Sin descripción)",
         }),
       });
       if (!sent) console.error("No se pudo enviar el email de nuevo ticket manual vía Resend.");

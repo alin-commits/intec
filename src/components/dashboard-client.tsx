@@ -11,7 +11,6 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { KpiCard } from "@/components/kpi-card";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { Toast } from "@/components/ui/toast";
-import { QuickCreateTicketButton } from "@/components/tickets/quick-create-ticket-button";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { StatusBars } from "@/components/charts/status-bars";
 import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus, MonthlyStat } from "@/lib/types";
@@ -324,9 +323,6 @@ export function DashboardClient() {
   return (
     <div className="page-stack">
       <Toast message={message} onDismiss={() => setMessage(null)} />
-      <div className="panel-heading-trailing">
-        <QuickCreateTicketButton />
-      </div>
       <CollapsibleFilters
         hasActiveFilters={businessUnitId !== "all" || viewMode !== "year" || compareMode !== "previous"}
         onClear={() => { setBusinessUnitId("all"); setViewMode("year"); setSelectedYear(yearOfMonth(currentMonthKey)); setCompareMode("previous"); }}
