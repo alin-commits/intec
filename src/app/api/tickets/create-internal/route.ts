@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { isEmailConfigured, sendEmail } from "@/lib/email";
-import { buildTicketCreatedEmail } from "@/lib/tickets/email-templates";
 import { TICKET_MANAGER_ROLES } from "@/lib/tickets/constants";
 import { internalTicketSchema } from "@/lib/tickets/validation";
 import { hasAnyRole } from "@/lib/constants";
 import type { AppRole } from "@/lib/types";
+import type { TicketBlockingLevel, TicketPriority } from "@/lib/tickets/types";
 
-const DEFAULT_BLOCKING_LEVEL = "hindered";
-const DEFAULT_PRIORITY = "medium";
+const blockingLevelForPriority: Record<TicketPriority, TicketBlockingLevel> = {
+  high: "blocked",
+  medium: "hindered",
+  low: "not_blocked",
+};
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -36,6 +38,7 @@ export async function POST(request: Request) {
   }
   const data = parsed.data;
   const description = data.description ?? "";
+  const blockingLevel = blockingLevelForPriority[data.priority];
 
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ error: "El sistema no está disponible en este momento." }, { status: 503 });
@@ -50,8 +53,8 @@ export async function POST(request: Request) {
       title: data.title,
       category: data.category,
       description,
-      blocking_level: DEFAULT_BLOCKING_LEVEL,
-      priority: DEFAULT_PRIORITY,
+      blocking_level: blockingLevel,
+      priority: data.priority,
       created_at: new Date(`${data.occurredOn}T09:00:00`).toISOString(),
     })
     .select("id, ticket_number")
@@ -64,38 +67,7 @@ export async function POST(request: Request) {
 
   await admin.from("ticket_events").insert({ ticket_id: ticket.id, actor_id: user.id, event_type: "created", new_value: "new" });
 
-  if (isEmailConfigured()) {
-    const { data: itStaff } = await admin
-      .from("profiles")
-      .select("email")
-      .overlaps("roles", ["admin", "it"])
-      .eq("is_active", true)
-      .not("email", "is", null);
-    const recipients = new Set((itStaff ?? []).map((row) => row.email as string));
-    const adminEmail = process.env.ADMIN_EMAIL;
-    if (adminEmail) recipients.add(adminEmail);
-
-    if (recipients.size > 0) {
-      const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
-      const sent = await sendEmail({
-        to: Array.from(recipients),
-        ...buildTicketCreatedEmail({
-          ticketNumber: ticket.ticket_number,
-          ticketUrl: `${origin}/tickets/${ticket.id}`,
-          title: data.title,
-          reporterName: data.reporterName,
-          reporterPhone: "—",
-          reporterEmail: null,
-          department: "Interno",
-          category: data.category,
-          priority: DEFAULT_PRIORITY,
-          blockingLevel: DEFAULT_BLOCKING_LEVEL,
-          description: description || "(Sin descripción)",
-        }),
-      });
-      if (!sent) console.error("No se pudo enviar el email de nuevo ticket manual vía Resend.");
-    }
-  }
+  // Sin aviso por email: quien crea el ticket manualmente (admin/IT) ya sabe que existe.
 
   return NextResponse.json({ ok: true, ticketNumber: ticket.ticket_number });
 }

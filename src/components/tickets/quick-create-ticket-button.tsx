@@ -3,8 +3,8 @@
 import { useState, type FormEvent } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
-import { ticketCategoryLabels, ticketCategoryOrder } from "@/lib/tickets/constants";
-import type { TicketCategory } from "@/lib/tickets/types";
+import { ticketCategoryLabels, ticketCategoryOrder, ticketPriorityLabels, ticketPriorityOrder } from "@/lib/tickets/constants";
+import type { TicketCategory, TicketPriority } from "@/lib/tickets/types";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -18,6 +18,7 @@ export function QuickCreateTicketButton({ visible, onCreated }: { visible: boole
   const [reporterName, setReporterName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState<TicketCategory>("erp_apps");
+  const [priority, setPriority] = useState<TicketPriority>("medium");
   const [occurredOn, setOccurredOn] = useState(today);
 
   function openModal() {
@@ -25,6 +26,7 @@ export function QuickCreateTicketButton({ visible, onCreated }: { visible: boole
     setReporterName("");
     setDescription("");
     setCategory("erp_apps");
+    setPriority("medium");
     setOccurredOn(today());
     setMessage(null);
     setOpen(true);
@@ -38,7 +40,7 @@ export function QuickCreateTicketButton({ visible, onCreated }: { visible: boole
       const response = await fetch("/api/tickets/create-internal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, reporterName, description, category, occurredOn }),
+        body: JSON.stringify({ title, reporterName, description, category, priority, occurredOn }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "No se pudo crear el ticket.");
@@ -66,6 +68,11 @@ export function QuickCreateTicketButton({ visible, onCreated }: { visible: boole
             <label><span>Categoría *</span>
               <select value={category} onChange={(event) => setCategory(event.target.value as TicketCategory)}>
                 {ticketCategoryOrder.map((value) => <option key={value} value={value}>{ticketCategoryLabels[value]}</option>)}
+              </select>
+            </label>
+            <label><span>Prioridad *</span>
+              <select value={priority} onChange={(event) => setPriority(event.target.value as TicketPriority)}>
+                {ticketPriorityOrder.map((value) => <option key={value} value={value}>{ticketPriorityLabels[value]}</option>)}
               </select>
             </label>
             <label><span>Fecha</span><input type="date" value={occurredOn} max={today()} onChange={(event) => setOccurredOn(event.target.value)} /></label>

@@ -39,6 +39,7 @@ export const internalTicketSchema = z.object({
   reporterName: z.string().trim().min(2, "Indica quién lo pide.").max(120),
   description: optionalTrimmed(4000),
   category: z.enum(["erp_apps", "equipment", "accounts_access", "network"], "Selecciona una categoría."),
+  priority: z.enum(["high", "medium", "low"], "Selecciona una prioridad."),
   occurredOn: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Indica una fecha válida."),
 });
 
