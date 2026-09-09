@@ -33,3 +33,12 @@ export const ticketSubmissionSchema = z
   }));
 
 export type TicketSubmission = z.infer<typeof ticketSubmissionSchema>;
+
+export const internalTicketSchema = z.object({
+  title: z.string().trim().min(3, "Indica un título breve.").max(150),
+  reporterName: z.string().trim().min(2, "Indica quién lo pide.").max(120),
+  description: z.string().trim().min(10, "Describe el problema con un poco más de detalle.").max(4000),
+  occurredOn: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Indica una fecha válida."),
+});
+
+export type InternalTicketSubmission = z.infer<typeof internalTicketSchema>;
