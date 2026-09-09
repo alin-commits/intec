@@ -131,6 +131,8 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .muted { color: var(--muted); font-size: 12px; }
 .chart-wrap { width: 100%; overflow: hidden; position: relative; }
 .chart-svg { display: block; width: 100%; min-height: 235px; }
+.chart-panel-compact .chart-wrap { max-width: 520px; }
+.chart-panel-compact .chart-svg { min-height: 150px; }
 .chart-grid { stroke: #e2e8f0; stroke-width: 1; }
 .chart-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-label { fill: #64748b; font-size: 12px; }

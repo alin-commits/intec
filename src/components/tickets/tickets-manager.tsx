@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { monthShortLabel } from "@/lib/dates";
+import { monthKey, monthShortLabel, yearOfMonth } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { exportElementToPdf } from "@/lib/pdf-export";
@@ -24,6 +24,10 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
 const PAGE_SIZE = 5;
 
+function monthsOfYear(year: number): string[] {
+  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
+}
+
 export function TicketsManager() {
   const configured = isSupabaseConfigured();
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "denied");
@@ -40,6 +44,8 @@ export function TicketsManager() {
   const [pendingBulkAction, setPendingBulkAction] = useState<"archive" | "delete" | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [chartMode, setChartMode] = useState<"year" | "total">("year");
+  const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
   const reportRef = useRef<HTMLDivElement>(null);
 
   async function loadTickets() {
@@ -103,14 +109,23 @@ export function TicketsManager() {
   const activeTickets = useMemo(() => visibleTickets.filter((ticket) => OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
   const completedTickets = useMemo(() => visibleTickets.filter((ticket) => !OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
 
+  const availableChartYears = useMemo(() => {
+    const years = new Set(visibleTickets.map((ticket) => yearOfMonth(ticket.createdAt.slice(0, 7))));
+    years.add(yearOfMonth(monthKey()));
+    return Array.from(years).sort();
+  }, [visibleTickets]);
+
   const monthlyCounts = useMemo(() => {
     const byMonth = new Map<string, number>();
     for (const ticket of visibleTickets) {
       const month = ticket.createdAt.slice(0, 7);
       byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
     }
-    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-12);
-  }, [visibleTickets]);
+    if (chartMode === "year") {
+      return monthsOfYear(chartYear).map((month): [string, number] => [month, byMonth.get(month) ?? 0]);
+    }
+    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [visibleTickets, chartMode, chartYear]);
 
   const monthlyChartData = useMemo(() => monthlyCounts.map(([month, count]) => ({ label: monthShortLabel(month), count })), [monthlyCounts]);
 
@@ -255,8 +270,21 @@ export function TicketsManager() {
 
       <div ref={reportRef}>
       <TicketDashboardCards counts={counts} />
-      <section className="panel chart-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>
+      <section className="panel chart-panel chart-panel-compact">
+        <div className="panel-heading">
+          <div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div>
+          <div className="panel-heading-trailing">
+            <select className="panel-heading-select" value={chartMode} onChange={(event) => setChartMode(event.target.value as "year" | "total")}>
+              <option value="year">Por año</option>
+              <option value="total">Todo el histórico</option>
+            </select>
+            {chartMode === "year" ? (
+              <select className="panel-heading-select" value={chartYear} onChange={(event) => setChartYear(Number(event.target.value))}>
+                {availableChartYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            ) : null}
+          </div>
+        </div>
         <TrendChart
           data={monthlyChartData}
           series={[{ key: "count", label: "Tickets", color: "#2563eb" }]}
