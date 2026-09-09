@@ -276,8 +276,9 @@ export function TicketsManager() {
 
       <div ref={reportRef}>
       <TicketDashboardCards counts={counts} />
+      <div className="ticket-chart-row">
       <section className="panel">
-        <div className="filter-bar">
+        <div className="filter-bar ticket-chart-filter-bar">
           <label><span>Vista del gráfico</span>
             <select value={chartMode} onChange={(event) => setChartMode(event.target.value as "month" | "year" | "total")}>
               <option value="month">Un mes</option>
@@ -305,6 +306,7 @@ export function TicketsManager() {
           ariaLabel="Tickets creados por mes"
         />
       </section>
+      </div>
       <section className="panel table-panel">
         <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Tickets ({visibleTickets.length})</h2></div></div>
         <div className="table-scroll">
