@@ -277,6 +277,14 @@ export function TicketsManager() {
       <div ref={reportRef}>
       <TicketDashboardCards counts={counts} />
       <div className="ticket-chart-row">
+      <section className="panel chart-panel chart-panel-compact">
+        <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>
+        <TrendChart
+          data={monthlyChartData}
+          series={[{ key: "count", label: "Tickets", color: "#2563eb" }]}
+          ariaLabel="Tickets creados por mes"
+        />
+      </section>
       <section className="panel">
         <div className="filter-bar ticket-chart-filter-bar">
           <label><span>Vista del gráfico</span>
@@ -297,14 +305,6 @@ export function TicketsManager() {
             </label>
           ) : null}
         </div>
-      </section>
-      <section className="panel chart-panel chart-panel-compact">
-        <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>
-        <TrendChart
-          data={monthlyChartData}
-          series={[{ key: "count", label: "Tickets", color: "#2563eb" }]}
-          ariaLabel="Tickets creados por mes"
-        />
       </section>
       </div>
       <section className="panel table-panel">
