@@ -111,6 +111,13 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       await logEvent("status_change", ticket.status, status);
       await loadTicket();
       setMessage("Estado actualizado.");
+      if (status === "resolved") {
+        fetch("/api/tickets/notify-resolved", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticketId }),
+        }).catch(() => { /* el aviso por email es un extra, no debe romper el cambio de estado */ });
+      }
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo actualizar el estado."));
     } finally {
