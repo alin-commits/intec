@@ -37,6 +37,7 @@ export type TicketDashboardCounts = {
   inProgressCount: number;
   pendingCount: number;
   resolvedThisMonthCount: number;
+  resolvedTotalCount: number;
   staleOpenCount: number;
 };
 
@@ -50,6 +51,7 @@ export function computeTicketDashboardCounts(tickets: Ticket[]): TicketDashboard
     inProgressCount: tickets.filter((t) => t.status === "in_progress").length,
     pendingCount: tickets.filter((t) => t.status === "pending").length,
     resolvedThisMonthCount: tickets.filter((t) => t.status === "resolved" && t.resolvedAt && t.resolvedAt >= monthStart && t.resolvedAt < monthEnd).length,
+    resolvedTotalCount: tickets.filter((t) => t.status === "resolved").length,
     staleOpenCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status) && new Date(t.createdAt).getTime() < staleThreshold).length,
   };
 }

@@ -172,6 +172,7 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
   background-attachment: local, local, scroll, scroll;
 }
 .table-panel-footer { display: flex; justify-content: center; margin-top: 14px; }
+.table-panel-pagination { gap: 14px; align-items: center; }
 table { width: 100%; border-collapse: collapse; min-width: 850px; }
 th, td { padding: 14px; border-bottom: 1px solid #f1f4f9; text-align: left; font-size: 13px; }
 th { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; font-weight: 750; padding-bottom: 12px; }
@@ -412,7 +413,7 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .badge-ticket-priority-medium { background: #fef3c7; color: #92400e; }
 .badge-ticket-priority-low { background: #f1f5f9; color: #475569; }
 
-.ticket-kpi-grid { grid-template-columns: repeat(6, minmax(150px, 1fr)); }
+.ticket-kpi-grid { grid-template-columns: repeat(7, minmax(150px, 1fr)); }
 .ticket-filters { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
 .ticket-filters-toggle { display: flex !important; flex-direction: row-reverse; align-items: center; justify-content: flex-end; gap: 8px; }
 .ticket-filters-toggle input { width: auto !important; min-height: 0 !important; }

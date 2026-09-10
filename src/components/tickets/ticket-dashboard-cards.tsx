@@ -17,6 +17,7 @@ export function TicketDashboardCards({ counts }: { counts: TicketDashboardCounts
       <DashboardCard label="En curso" value={counts.inProgressCount} />
       <DashboardCard label="Pendientes" value={counts.pendingCount} />
       <DashboardCard label="Resueltos este mes" value={counts.resolvedThisMonthCount} />
+      <DashboardCard label="Resueltos en total" value={counts.resolvedTotalCount} />
       <DashboardCard label="Abiertos +3 días" value={counts.staleOpenCount} />
     </section>
   );

@@ -25,6 +25,8 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
 const PAGE_SIZE = 5;
+const DETAIL_PAGE_SIZE = 10;
+type DetailSortColumn = "createdAt" | "priority";
 
 function monthsOfYear(year: number): string[] {
   return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
@@ -46,9 +48,11 @@ export function TicketsManager() {
   const [pendingBulkAction, setPendingBulkAction] = useState<"archive" | "delete" | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfExportingAll, setPdfExportingAll] = useState(false);
   const [chartMode, setChartMode] = useState<"month" | "year" | "total">("year");
   const [chartMonth, setChartMonth] = useState(() => monthKey());
   const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
+  const [detailPage, setDetailPage] = useState(1);
   const reportRef = useRef<HTMLDivElement>(null);
 
   async function loadTickets() {
@@ -109,6 +113,19 @@ export function TicketsManager() {
     });
   }, [tickets, filters, sort]);
 
+  const detailTotalPages = Math.max(1, Math.ceil(visibleTickets.length / DETAIL_PAGE_SIZE));
+  const effectiveDetailPage = Math.min(detailPage, detailTotalPages);
+  const detailPageTickets = useMemo(() => {
+    if (pdfExportingAll) return visibleTickets;
+    const start = (effectiveDetailPage - 1) * DETAIL_PAGE_SIZE;
+    return visibleTickets.slice(start, start + DETAIL_PAGE_SIZE);
+  }, [visibleTickets, effectiveDetailPage, pdfExportingAll]);
+
+  function handleDetailSort(column: DetailSortColumn) {
+    setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
+    setDetailPage(1);
+  }
+
   const activeTickets = useMemo(() => visibleTickets.filter((ticket) => OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
   const completedTickets = useMemo(() => visibleTickets.filter((ticket) => !OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
 
@@ -166,15 +183,24 @@ export function TicketsManager() {
   async function exportReportPdf() {
     if (!reportRef.current) return;
     setPdfBusy(true);
+    setPdfExportingAll(true);
     try {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await exportElementToPdf(reportRef.current, `informe_tickets_${new Date().toISOString().slice(0, 10)}.pdf`);
     } finally {
+      setPdfExportingAll(false);
       setPdfBusy(false);
     }
   }
 
   function handleSort(column: TicketSortColumn) {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
+    setDetailPage(1);
+  }
+
+  function handleFiltersChange(next: TicketFilterState) {
+    setFilters(next);
+    setDetailPage(1);
   }
 
   async function handleQuickStatusChange(ticket: Ticket, status: TicketStatus) {
@@ -311,9 +337,27 @@ export function TicketsManager() {
         <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Tickets ({visibleTickets.length})</h2></div></div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Nº</th><th>Departamento</th><th>Título</th><th>Categoría</th><th>Prioridad</th><th>Estado</th><th>Creado</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Nº</th>
+                <th>Departamento</th>
+                <th>Título</th>
+                <th>Categoría</th>
+                <th>
+                  <button type="button" className="sort-button" onClick={() => handleDetailSort("priority")}>
+                    Prioridad{sort.column === "priority" ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+                  </button>
+                </th>
+                <th>Estado</th>
+                <th>
+                  <button type="button" className="sort-button" onClick={() => handleDetailSort("createdAt")}>
+                    Creado{sort.column === "createdAt" ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+                  </button>
+                </th>
+              </tr>
+            </thead>
             <tbody>
-              {visibleTickets.map((ticket) => (
+              {detailPageTickets.map((ticket) => (
                 <tr key={ticket.id}>
                   <td>{ticket.ticketNumber}</td>
                   <td>{ticket.department}</td>
@@ -328,9 +372,16 @@ export function TicketsManager() {
             </tbody>
           </table>
         </div>
+        {!pdfExportingAll && detailTotalPages > 1 ? (
+          <div className="table-panel-footer table-panel-pagination">
+            <button type="button" className="button button-secondary button-compact" disabled={effectiveDetailPage <= 1} onClick={() => setDetailPage(effectiveDetailPage - 1)}>← Anterior</button>
+            <span className="muted">Página {effectiveDetailPage} de {detailTotalPages}</span>
+            <button type="button" className="button button-secondary button-compact" disabled={effectiveDetailPage >= detailTotalPages} onClick={() => setDetailPage(effectiveDetailPage + 1)}>Siguiente →</button>
+          </div>
+        ) : null}
       </section>
       </div>
-      <TicketFilters filters={filters} departments={departments} resultCount={visibleTickets.length} onChange={setFilters} />
+      <TicketFilters filters={filters} departments={departments} resultCount={visibleTickets.length} onChange={handleFiltersChange} />
 
       {canManage && selectedIds.size > 0 ? (
         <section className="panel ticket-bulk-bar">
