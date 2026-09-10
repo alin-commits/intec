@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
@@ -43,6 +43,17 @@ function LeadsIcon() {
       <circle cx="10" cy="10" r="6.8" stroke="currentColor" strokeWidth="1.5" />
       <circle cx="10" cy="10" r="3.4" stroke="currentColor" strokeWidth="1.5" />
       <circle cx="10" cy="10" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function CrmIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="2.5" y="4.2" width="15" height="11.6" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7.4" cy="8.6" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M4.9 12.8c0-1.5 1.1-2.4 2.5-2.4s2.5.9 2.5 2.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M11.9 7.8h3M11.9 10.4h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -112,6 +123,7 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
+  { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
   { href: "/campanas", label: "Campañas", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
   { href: "/rrss", label: "RRSS", icon: RrssIcon, roles: RRSS_ROLES },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
@@ -129,6 +141,7 @@ const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
   "/consultas": "Consultas",
   "/leads": "Leads",
+  "/crm": "CRM",
   "/campanas": "Campañas",
   "/rrss": "Métricas de marketing",
   "/unidades": "Unidades de negocio",

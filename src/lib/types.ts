@@ -42,6 +42,20 @@ export type BusinessCard = {
   createdAt: string;
 };
 
+export type CrmContact = {
+  id: string;
+  businessUnitId: string;
+  fullName: string;
+  companyName: string | null;
+  phone: string | null;
+  companyPhone: string | null;
+  companyEmail: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type LeadStatusEvent = {
   id: string;
   previousStatus: LeadStatus | null;

@@ -2,6 +2,7 @@ import type {
   BusinessCard,
   BusinessUnit,
   Campaign,
+  CrmContact,
   InquiryRecord,
   InquiryType,
   Lead,
@@ -283,6 +284,13 @@ export const demoBusinessCards: BusinessCard[] = [
   { id: "CARD-001", businessUnitId: "intec", slug: "alin", fullName: "Alín Enciu", position: "Desarrollo de producto / Dirección", phone: "+34642925583", email: "alin@suministrointec.com", website: "https://www.suministrointec.com", companyAddress: "Polígono Industrial, Nave 4, 30500 Molina de Segura", instagramUrl: "https://instagram.com/suministrointec", facebookUrl: null, linkedinUrl: "https://linkedin.com/company/suministrointec", primaryColor: "#2563eb", active: true, createdBy: "demo-admin", createdAt: "2026-08-01T08:00:00Z" },
   { id: "CARD-002", businessUnitId: "blizzcool", slug: "pierre", fullName: "Pierre Dubois", position: "Informática y Marketing", phone: "+34600111222", email: "pierre@suministrointec.com", website: null, companyAddress: null, instagramUrl: "https://instagram.com/blizzcool", facebookUrl: null, linkedinUrl: null, primaryColor: "#0891b2", active: true, createdBy: "demo-admin", createdAt: "2026-08-02T08:00:00Z" },
   { id: "CARD-003", businessUnitId: "jender", slug: "raul", fullName: "Raúl Martínez", position: "Comercial", phone: "+34600333444", email: "raul@suministrointec.com", website: "https://www.jender.es", companyAddress: null, instagramUrl: null, facebookUrl: null, linkedinUrl: null, primaryColor: "#ea580c", active: true, createdBy: "demo-admin", createdAt: "2026-08-03T08:00:00Z" },
+];
+
+export const demoCrmContacts: CrmContact[] = [
+  { id: "CRM-001", businessUnitId: "intec", fullName: "Marta Sánchez", companyName: "Ferretería Sánchez S.L.", phone: "+34611222333", companyPhone: "+34968111222", companyEmail: "compras@ferreteriasanchez.es", notes: "Contactó por la consulta web sobre tornillería industrial.", createdBy: "demo-admin", createdAt: "2026-08-05T09:00:00Z", updatedAt: "2026-08-05T09:00:00Z" },
+  { id: "CRM-002", businessUnitId: "blizzcool", fullName: "Javier Torres", companyName: "Climas Torres", phone: "+34622333444", companyPhone: "+34965222333", companyEmail: "info@climastorres.es", notes: "Generado desde la campaña de verano climatización.", createdBy: "demo-admin", createdAt: "2026-08-06T10:30:00Z", updatedAt: "2026-08-06T10:30:00Z" },
+  { id: "CRM-003", businessUnitId: "jender", fullName: "Laura Gómez", companyName: null, phone: "+34633444555", companyPhone: null, companyEmail: null, notes: null, createdBy: "demo-admin", createdAt: "2026-08-07T12:00:00Z", updatedAt: "2026-08-07T12:00:00Z" },
+  { id: "CRM-004", businessUnitId: "intec", fullName: "David Ruiz", companyName: "Distribuciones Ruiz", phone: "+34644555666", companyPhone: "+34968333444", companyEmail: "david@distribucionesruiz.com", notes: "Interesado en distribución, pendiente de segunda llamada.", createdBy: "demo-admin", createdAt: "2026-08-08T09:15:00Z", updatedAt: "2026-08-08T09:15:00Z" },
 ];
 
 export const demoProfiles: Profile[] = [
