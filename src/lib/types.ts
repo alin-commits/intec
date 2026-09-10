@@ -23,6 +23,25 @@ export type BusinessUnit = {
   visibleInLeads: boolean;
 };
 
+export type BusinessCard = {
+  id: string;
+  businessUnitId: string;
+  slug: string;
+  fullName: string;
+  position: string;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  companyAddress: string | null;
+  instagramUrl: string | null;
+  facebookUrl: string | null;
+  linkedinUrl: string | null;
+  primaryColor: string;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+};
+
 export type LeadStatusEvent = {
   id: string;
   previousStatus: LeadStatus | null;

@@ -34,6 +34,7 @@ export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "view
 export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "commercial", "viewer", "direction"];
 export const RRSS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 export const UNITS_ROLES: AppRole[] = ["admin", "viewer"];
+export const CARDS_ROLES: AppRole[] = ["admin", "marketing", "it"];
 
 export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
 

@@ -1,47 +1,85 @@
 import {
   ticketBlockingLevelLabels,
   ticketCategoryLabels,
+  ticketCategoryOrder,
   ticketPriorityLabels,
   ticketPriorityOrder,
   ticketStatusLabels,
   ticketStatusOrder,
 } from "@/lib/tickets/constants";
 import { formatDate } from "@/lib/format";
-import type { Ticket, TicketPriority, TicketStatus } from "@/lib/tickets/types";
+import type { Ticket, TicketCategory, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 import { AttachmentGallery } from "./attachment-gallery";
 
 function whatsappHref(phone: string): string {
   return `https://wa.me/${phone.replace(/\D/g, "")}`;
 }
 
+export type TicketDetailsDraft = {
+  title: string;
+  reporterName: string;
+  reporterPhone: string;
+  reporterEmail: string;
+  department: string;
+  category: TicketCategory;
+  description: string;
+};
+
 type TicketDetailsProps = {
   ticket: Ticket;
   busy: boolean;
   canManage: boolean;
+  editing: boolean;
+  draft: TicketDetailsDraft;
+  onDraftChange: (draft: TicketDetailsDraft) => void;
   onStatusChange: (status: TicketStatus) => void;
   onPriorityChange: (priority: TicketPriority) => void;
 };
 
-export function TicketDetails({ ticket, busy, canManage, onStatusChange, onPriorityChange }: TicketDetailsProps) {
+export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraftChange, onStatusChange, onPriorityChange }: TicketDetailsProps) {
+  const editable = canManage && editing;
+
+  function update<K extends keyof TicketDetailsDraft>(key: K, value: TicketDetailsDraft[K]) {
+    onDraftChange({ ...draft, [key]: value });
+  }
+
   return (
     <div className="ticket-details">
-      <div className="ticket-details-grid">
-        <div><span>Trabajador</span><strong>{ticket.reporterName}</strong></div>
-        <div><span>Teléfono</span><strong>{ticket.reporterPhone}</strong></div>
-        <div><span>Correo</span><strong>{ticket.reporterEmail || "—"}</strong></div>
-        <div><span>Departamento</span><strong>{ticket.department}</strong></div>
-        <div><span>Categoría</span><strong>{ticketCategoryLabels[ticket.category]}</strong></div>
-        <div><span>Creado</span><strong>{formatDate(ticket.createdAt)}</strong></div>
-        <div><span>Última actualización</span><strong>{formatDate(ticket.updatedAt)}</strong></div>
-        <div><span>¿Desde cuándo?</span><strong>{ticket.startedAt || "—"}</strong></div>
-        <div><span>¿Reinició el equipo?</span><strong>{ticket.restarted ? "Sí" : "No"}</strong></div>
-      </div>
+      {editable ? (
+        <div className="ticket-editable-grid">
+          <label><span>Trabajador</span><input value={draft.reporterName} disabled={busy} onChange={(event) => update("reporterName", event.target.value)} /></label>
+          <label><span>Teléfono</span><input value={draft.reporterPhone} disabled={busy} onChange={(event) => update("reporterPhone", event.target.value)} /></label>
+          <label><span>Correo</span><input type="email" value={draft.reporterEmail} disabled={busy} onChange={(event) => update("reporterEmail", event.target.value)} /></label>
+          <label><span>Departamento</span><input value={draft.department} disabled={busy} onChange={(event) => update("department", event.target.value)} /></label>
+          <label><span>Categoría</span>
+            <select value={draft.category} disabled={busy} onChange={(event) => update("category", event.target.value as TicketCategory)}>
+              {ticketCategoryOrder.map((value) => <option key={value} value={value}>{ticketCategoryLabels[value]}</option>)}
+            </select>
+          </label>
+        </div>
+      ) : (
+        <div className="ticket-details-grid">
+          <div><span>Trabajador</span><strong>{ticket.reporterName}</strong></div>
+          <div><span>Teléfono</span><strong>{ticket.reporterPhone}</strong></div>
+          <div><span>Correo</span><strong>{ticket.reporterEmail || "—"}</strong></div>
+          <div><span>Departamento</span><strong>{ticket.department}</strong></div>
+          <div><span>Categoría</span><strong>{ticketCategoryLabels[ticket.category]}</strong></div>
+          <div><span>Creado</span><strong>{formatDate(ticket.createdAt)}</strong></div>
+          <div><span>Última actualización</span><strong>{formatDate(ticket.updatedAt)}</strong></div>
+          <div><span>¿Desde cuándo?</span><strong>{ticket.startedAt || "—"}</strong></div>
+          <div><span>¿Reinició el equipo?</span><strong>{ticket.restarted ? "Sí" : "No"}</strong></div>
+        </div>
+      )}
 
       <a href={whatsappHref(ticket.reporterPhone)} target="_blank" rel="noreferrer" className="button button-secondary">Abrir WhatsApp</a>
 
       <div className="ticket-details-section">
         <h3>Descripción</h3>
-        <p>{ticket.description}</p>
+        {editable ? (
+          <textarea rows={4} value={draft.description} disabled={busy} onChange={(event) => update("description", event.target.value)} />
+        ) : (
+          <p>{ticket.description}</p>
+        )}
       </div>
 
       <div className="ticket-details-section">

@@ -1,4 +1,5 @@
 import type {
+  BusinessCard,
   BusinessUnit,
   Campaign,
   InquiryRecord,
@@ -276,6 +277,12 @@ export const demoMailingCampaigns: MailingCampaign[] = [
   { id: "MAIL-002", businessUnitId: "blizzcool", campaignName: "Promoción verano climatización", campaignType: "promocion", sentDate: "2026-07-15", sentCount: 2800, deliveredCount: 2745, opens: 890, clicks: 210, leads: 26, salesCount: 5, revenue: 3400, unsubscribes: 9, notes: null, createdBy: "demo-admin", createdAt: "2026-07-15T09:00:00Z" },
   { id: "MAIL-003", businessUnitId: "sumifluid", campaignName: "Aviso mantenimiento programado", campaignType: "aviso", sentDate: "2026-07-05", sentCount: 1600, deliveredCount: 1570, opens: 610, clicks: 95, leads: 4, salesCount: 0, revenue: 0, unsubscribes: 3, notes: null, createdBy: "demo-admin", createdAt: "2026-07-05T09:00:00Z" },
   { id: "MAIL-004", businessUnitId: "jender", campaignName: "Captación distribuidores", campaignType: "captacion", sentDate: "2026-06-20", sentCount: 950, deliveredCount: 928, opens: 305, clicks: 58, leads: 9, salesCount: 1, revenue: 640, unsubscribes: 4, notes: null, createdBy: "demo-admin", createdAt: "2026-06-20T09:00:00Z" },
+];
+
+export const demoBusinessCards: BusinessCard[] = [
+  { id: "CARD-001", businessUnitId: "intec", slug: "alin", fullName: "Alín Enciu", position: "Desarrollo de producto / Dirección", phone: "+34642925583", email: "alin@suministrointec.com", website: "https://www.suministrointec.com", companyAddress: "Polígono Industrial, Nave 4, 30500 Molina de Segura", instagramUrl: "https://instagram.com/suministrointec", facebookUrl: null, linkedinUrl: "https://linkedin.com/company/suministrointec", primaryColor: "#2563eb", active: true, createdBy: "demo-admin", createdAt: "2026-08-01T08:00:00Z" },
+  { id: "CARD-002", businessUnitId: "blizzcool", slug: "pierre", fullName: "Pierre Dubois", position: "Informática y Marketing", phone: "+34600111222", email: "pierre@suministrointec.com", website: null, companyAddress: null, instagramUrl: "https://instagram.com/blizzcool", facebookUrl: null, linkedinUrl: null, primaryColor: "#0891b2", active: true, createdBy: "demo-admin", createdAt: "2026-08-02T08:00:00Z" },
+  { id: "CARD-003", businessUnitId: "jender", slug: "raul", fullName: "Raúl Martínez", position: "Comercial", phone: "+34600333444", email: "raul@suministrointec.com", website: "https://www.jender.es", companyAddress: null, instagramUrl: null, facebookUrl: null, linkedinUrl: null, primaryColor: "#ea580c", active: true, createdBy: "demo-admin", createdAt: "2026-08-03T08:00:00Z" },
 ];
 
 export const demoProfiles: Profile[] = [

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
-import { CAMPAIGNS_ROLES, CONSULTAS_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
@@ -97,6 +97,17 @@ function TicketsIcon() {
   );
 }
 
+function TarjetasIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7" cy="9" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M4.5 13.2c0-1.5 1.1-2.4 2.5-2.4s2.5.9 2.5 2.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M11.5 8.3h4M11.5 11.2h4M11.5 13.2h2.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
@@ -105,6 +116,7 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/rrss", label: "RRSS", icon: RrssIcon, roles: RRSS_ROLES },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
   { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
+  { href: "/tarjetas", label: "Tarjetas", icon: TarjetasIcon, roles: CARDS_ROLES },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
 
@@ -121,6 +133,7 @@ const pageTitles: Record<string, string> = {
   "/rrss": "Métricas de marketing",
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
+  "/tarjetas": "Tarjetas de visita",
   "/usuarios": "Usuarios",
 };
 

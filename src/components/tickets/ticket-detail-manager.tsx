@@ -12,7 +12,7 @@ import { mapTicketRow } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import type { Ticket, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 import { AddTicketNoteForm } from "./add-ticket-note-form";
-import { TicketDetails } from "./ticket-details";
+import { TicketDetails, type TicketDetailsDraft } from "./ticket-details";
 import { TicketNotes, type TicketEventItem } from "./ticket-notes";
 import { TicketPriorityBadge } from "./ticket-priority-badge";
 import { TicketStatusBadge } from "./ticket-status-badge";
@@ -55,6 +55,8 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   const [pendingArchive, setPendingArchive] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<TicketDetailsDraft>({ title: "", reporterName: "", reporterPhone: "", reporterEmail: "", department: "", category: "erp_apps", description: "" });
 
   const loadTicket = useCallback(async () => {
     const supabase = createClient();
@@ -152,6 +154,54 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     }
   }
 
+  function startEdit() {
+    if (!ticket) return;
+    setDraft({
+      title: ticket.title,
+      reporterName: ticket.reporterName,
+      reporterPhone: ticket.reporterPhone,
+      reporterEmail: ticket.reporterEmail ?? "",
+      department: ticket.department,
+      category: ticket.category,
+      description: ticket.description,
+    });
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+  }
+
+  async function saveEdits() {
+    if (!ticket) return;
+    if (!draft.title.trim() || !draft.reporterName.trim()) {
+      setMessage("El título y el trabajador no pueden quedar vacíos.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const patch = {
+        title: draft.title.trim(),
+        reporter_name: draft.reporterName.trim(),
+        reporter_phone: draft.reporterPhone.trim(),
+        reporter_email: draft.reporterEmail.trim() || null,
+        department: draft.department.trim(),
+        category: draft.category,
+        description: draft.description.trim(),
+      };
+      const { error } = await createClient().from("tickets").update(patch).eq("id", ticketId);
+      if (error) throw error;
+      await logEvent("details_edit", null, null);
+      await loadTicket();
+      setEditing(false);
+      setMessage("Ticket actualizado.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo actualizar el ticket."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addNote({ noteType, content }: { noteType: TicketNoteType; content: string }) {
     if (!currentUserId) return;
     setBusy(true);
@@ -220,7 +270,11 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       <section className="section-heading">
         <div>
           <span className="eyebrow">{ticket.department} · {ticket.reporterName}</span>
-          <h2>{ticket.ticketNumber} — {ticket.title}</h2>
+          {editing ? (
+            <input className="ticket-title-input" value={draft.title} disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
+          ) : (
+            <h2>{ticket.ticketNumber} — {ticket.title}</h2>
+          )}
           <div className="ticket-detail-badges">
             <TicketStatusBadge status={ticket.status} />
             <TicketPriorityBadge priority={ticket.priority} />
@@ -231,6 +285,13 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
           {canManage && ticket.status === "resolved" && ticket.reporterEmail ? (
             <button type="button" className="button button-secondary" disabled={busy} onClick={() => void notifyResolved()}>Enviar aviso</button>
           ) : null}
+          {canManage && editing ? (
+            <>
+              <button type="button" className="button button-secondary" disabled={busy} onClick={cancelEdit}>Cancelar</button>
+              <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveEdits()}>Guardar cambios</button>
+            </>
+          ) : null}
+          {canManage && !editing ? <button type="button" className="button button-secondary" onClick={startEdit}>Editar</button> : null}
           {canManage ? <button type="button" className="button button-secondary" onClick={() => setPendingArchive(true)}>Archivar</button> : null}
           {canManage ? <button type="button" className="button button-danger" onClick={() => setPendingDelete(true)}>Eliminar</button> : null}
         </div>
@@ -244,6 +305,9 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
             ticket={ticket}
             busy={busy}
             canManage={canManage}
+            editing={editing}
+            draft={draft}
+            onDraftChange={setDraft}
             onStatusChange={(status) => void updateStatus(status)}
             onPriorityChange={(priority) => void updatePriority(priority)}
           />

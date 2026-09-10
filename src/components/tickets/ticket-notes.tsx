@@ -25,6 +25,7 @@ function eventLabel(event: TicketEventItem): string {
   if (event.eventType === "created") return "Ticket creado desde el formulario público";
   if (event.eventType === "status_change") return `Estado: ${labelForValue("status", event.previousValue)} → ${labelForValue("status", event.newValue)}`;
   if (event.eventType === "priority_change") return `Prioridad: ${labelForValue("priority", event.previousValue)} → ${labelForValue("priority", event.newValue)}`;
+  if (event.eventType === "details_edit") return "Datos del ticket editados";
   return event.eventType;
 }
 
