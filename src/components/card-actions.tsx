@@ -65,7 +65,6 @@ export function CardActions({ card, unitName }: { card: BusinessCard; unitName: 
           <div className="business-card-qr-wrap">
             {qrDataUrl ? <img src={qrDataUrl} alt="Código QR de la tarjeta" /> : null}
           </div>
-          <p className="business-card-share-link">{publicUrl}</p>
           <div className="business-card-share-actions">
             <button type="button" className="button button-secondary" onClick={() => void copyLink()}>{copyLabel}</button>
             {canNativeShare ? <button type="button" className="button button-primary" onClick={() => void nativeShare()}>Compartir con…</button> : null}

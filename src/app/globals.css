@@ -537,7 +537,6 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .business-card-share-modal { display: grid; gap: 14px; text-align: center; }
 .business-card-qr-wrap { display: flex; justify-content: center; }
 .business-card-qr-wrap img { width: 220px; height: 220px; border-radius: 12px; border: 1px solid var(--border); }
-.business-card-share-link { font-size: 13px; color: var(--primary); word-break: break-all; }
 .business-card-share-actions { display: grid; gap: 10px; }
 @media (max-width: 480px) {
   .business-card-header { padding: 28px 20px 18px; }

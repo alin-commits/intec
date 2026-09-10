@@ -11,3 +11,4 @@ out
 
 .vercel
 .env*
+supabase/.temp
