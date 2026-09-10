@@ -154,6 +154,21 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     }
   }
 
+  async function updateResolutionTime(resolutionTime: string) {
+    if (!ticket) return;
+    setBusy(true);
+    try {
+      const { error } = await createClient().from("tickets").update({ resolution_time: resolutionTime.trim() || null }).eq("id", ticketId);
+      if (error) throw error;
+      await loadTicket();
+      setMessage("Tiempo empleado actualizado.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo actualizar el tiempo empleado."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function startEdit() {
     if (!ticket) return;
     setDraft({
@@ -310,6 +325,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
             onDraftChange={setDraft}
             onStatusChange={(status) => void updateStatus(status)}
             onPriorityChange={(priority) => void updatePriority(priority)}
+            onResolutionTimeChange={(resolutionTime) => void updateResolutionTime(resolutionTime)}
           />
         </section>
 

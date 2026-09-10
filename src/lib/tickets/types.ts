@@ -21,6 +21,7 @@ export type Ticket = {
   errorMessage: string | null;
   priority: TicketPriority;
   status: TicketStatus;
+  resolutionTime: string | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;

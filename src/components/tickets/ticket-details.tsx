@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ticketBlockingLevelLabels,
   ticketCategoryLabels,
@@ -13,6 +14,20 @@ import { AttachmentGallery } from "./attachment-gallery";
 
 function whatsappHref(phone: string): string {
   return `https://wa.me/${phone.replace(/\D/g, "")}`;
+}
+
+function ResolutionTimeInput({ ticket, busy, onCommit }: { ticket: Ticket; busy: boolean; onCommit: (value: string) => void }) {
+  const [value, setValue] = useState(ticket.resolutionTime ?? "");
+  return (
+    <input
+      key={`${ticket.id}-${ticket.updatedAt}`}
+      placeholder="ej. 00:20 o 20 min"
+      defaultValue={ticket.resolutionTime ?? ""}
+      disabled={busy}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => { if (value !== (ticket.resolutionTime ?? "")) onCommit(value); }}
+    />
+  );
 }
 
 export type TicketDetailsDraft = {
@@ -34,9 +49,10 @@ type TicketDetailsProps = {
   onDraftChange: (draft: TicketDetailsDraft) => void;
   onStatusChange: (status: TicketStatus) => void;
   onPriorityChange: (priority: TicketPriority) => void;
+  onResolutionTimeChange: (resolutionTime: string) => void;
 };
 
-export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraftChange, onStatusChange, onPriorityChange }: TicketDetailsProps) {
+export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraftChange, onStatusChange, onPriorityChange, onResolutionTimeChange }: TicketDetailsProps) {
   const editable = canManage && editing;
 
   function update<K extends keyof TicketDetailsDraft>(key: K, value: TicketDetailsDraft[K]) {
@@ -111,11 +127,15 @@ export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraft
               {ticketPriorityOrder.map((value) => <option key={value} value={value}>{ticketPriorityLabels[value]}</option>)}
             </select>
           </label>
+          <label><span>Tiempo empleado</span>
+            <ResolutionTimeInput ticket={ticket} busy={busy} onCommit={onResolutionTimeChange} />
+          </label>
         </div>
       ) : (
         <div className="ticket-details-grid">
           <div><span>Estado</span><strong>{ticketStatusLabels[ticket.status]}</strong></div>
           <div><span>Prioridad</span><strong>{ticketPriorityLabels[ticket.priority]}</strong></div>
+          <div><span>Tiempo empleado</span><strong>{ticket.resolutionTime || "—"}</strong></div>
         </div>
       )}
     </div>

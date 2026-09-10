@@ -174,6 +174,7 @@ export function TicketsManager() {
       { header: "Nivel de bloqueo", value: (ticket) => ticketBlockingLevelLabels[ticket.blockingLevel] },
       { header: "Prioridad", value: (ticket) => ticketPriorityLabels[ticket.priority] },
       { header: "Estado", value: (ticket) => ticketStatusLabels[ticket.status] },
+      { header: "Tiempo empleado", value: (ticket) => ticket.resolutionTime ?? "" },
       { header: "Resuelto", value: (ticket) => ticket.resolvedAt ? formatDate(ticket.resolvedAt) : "" },
       { header: "Cerrado", value: (ticket) => ticket.closedAt ? formatDate(ticket.closedAt) : "" },
       { header: "Descripción", value: (ticket) => ticket.description },
