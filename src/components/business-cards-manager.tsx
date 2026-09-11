@@ -164,6 +164,29 @@ export function BusinessCardsManager() {
     setMessage(null);
   }
 
+  function openDuplicate(card: BusinessCard) {
+    setEditingId(null);
+    setDraft({
+      businessUnitId: card.businessUnitId,
+      slug: `${card.slug}-copia`,
+      fullName: card.fullName,
+      position: card.position,
+      phone: card.phone ?? "",
+      email: card.email ?? "",
+      website: card.website ?? "",
+      companyAddress: card.companyAddress ?? "",
+      instagramUrl: card.instagramUrl ?? "",
+      facebookUrl: card.facebookUrl ?? "",
+      linkedinUrl: card.linkedinUrl ?? "",
+      primaryColor: card.primaryColor,
+      active: card.active,
+    });
+    setSlugTouched(true);
+    setColorTouched(true);
+    setEditorOpen(true);
+    setMessage(null);
+  }
+
   function updateFullName(fullName: string) {
     setDraft((current) => ({ ...current, fullName, slug: slugTouched ? current.slug : slugify(fullName) }));
   }
@@ -317,6 +340,7 @@ export function BusinessCardsManager() {
                 <a href={publicUrl} target="_blank" rel="noreferrer" className="button button-compact button-secondary">Ver tarjeta</a>
                 <button type="button" className="button button-compact button-secondary" onClick={() => void copyLink(card.slug)}>Copiar enlace</button>
                 <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(card)}>Editar</button>
+                <button type="button" className="button button-compact button-secondary" onClick={() => openDuplicate(card)}>Duplicar</button>
                 <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(card)}>Eliminar</button>
               </div>
             </article>
