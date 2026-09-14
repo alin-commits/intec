@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { CRM_EDIT_ROLES, CRM_ROLES, hasAnyRole } from "@/lib/constants";
+import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoCrmContacts } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
@@ -205,6 +206,21 @@ export function CrmManager() {
     }
   }
 
+  function exportContactsCsv() {
+    const unit = unitFilter === "all" ? null : units.find((item) => item.id === unitFilter);
+    const scopeSlug = unit ? unit.slug : "todas";
+    downloadCsv(`crm_contactos_${scopeSlug}_${new Date().toISOString().slice(0, 10)}.csv`, visibleContacts, [
+      { header: "Nombre", value: (contact) => contact.fullName },
+      { header: "Empresa", value: (contact) => contact.companyName ?? "" },
+      { header: "Unidad", value: (contact) => units.find((item) => item.id === contact.businessUnitId)?.name ?? "" },
+      { header: "Teléfono", value: (contact) => contact.phone ?? "" },
+      { header: "Correo", value: (contact) => contact.companyEmail ?? "" },
+      { header: "Población", value: (contact) => contact.city ?? "" },
+      { header: "Notas", value: (contact) => contact.notes ?? "" },
+      { header: "Creado", value: (contact) => formatDate(contact.createdAt) },
+    ]);
+  }
+
   if (access === "checking") return <div className="page-stack" />;
 
   if (access === "denied") {
@@ -222,7 +238,10 @@ export function CrmManager() {
     <div className="page-stack">
       <section className="section-heading">
         <div><span className="eyebrow">Base comercial</span><h2>CRM</h2><p>Contactos generados a través de campañas o consultas, organizados por empresa.</p></div>
-        {canEdit ? <button type="button" className="button button-primary" onClick={openNew}>+ Nuevo contacto</button> : null}
+        <div className="panel-heading-trailing">
+          <button type="button" className="button button-compact button-secondary" onClick={exportContactsCsv}>Exportar CSV</button>
+          {canEdit ? <button type="button" className="button button-primary" onClick={openNew}>+ Nuevo contacto</button> : null}
+        </div>
       </section>
 
       {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar los contactos, pero no crear ni editar registros.</span></div> : null}
