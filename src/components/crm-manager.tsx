@@ -17,7 +17,7 @@ type ContactDraft = {
   fullName: string;
   companyName: string;
   phone: string;
-  companyPhone: string;
+  city: string;
   companyEmail: string;
   notes: string;
 };
@@ -28,7 +28,7 @@ function blankDraft(units: BusinessUnit[]): ContactDraft {
     fullName: "",
     companyName: "",
     phone: "",
-    companyPhone: "",
+    city: "",
     companyEmail: "",
     notes: "",
   };
@@ -41,7 +41,7 @@ function mapContactRow(row: Record<string, unknown>): CrmContact {
     fullName: String(row.full_name ?? ""),
     companyName: row.company_name ? String(row.company_name) : null,
     phone: row.phone ? String(row.phone) : null,
-    companyPhone: row.company_phone ? String(row.company_phone) : null,
+    city: row.city ? String(row.city) : null,
     companyEmail: row.company_email ? String(row.company_email) : null,
     notes: row.notes ? String(row.notes) : null,
     createdBy: String(row.created_by),
@@ -65,6 +65,7 @@ export function CrmManager() {
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pendingDelete, setPendingDelete] = useState<CrmContact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [viewingContact, setViewingContact] = useState<CrmContact | null>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -75,7 +76,7 @@ export function CrmManager() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: contactData, error: contactError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-      supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, company_phone, company_email, notes, created_by, created_at, updated_at").order("created_at", { ascending: false }),
+      supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, created_by, created_at, updated_at").order("created_at", { ascending: false }),
       supabase.auth.getUser(),
     ]);
     if (unitError || contactError) {
@@ -114,7 +115,7 @@ export function CrmManager() {
       fullName: contact.fullName,
       companyName: contact.companyName ?? "",
       phone: contact.phone ?? "",
-      companyPhone: contact.companyPhone ?? "",
+      city: contact.city ?? "",
       companyEmail: contact.companyEmail ?? "",
       notes: contact.notes ?? "",
     });
@@ -143,7 +144,7 @@ export function CrmManager() {
           fullName: draft.fullName.trim(),
           companyName: draft.companyName.trim() || null,
           phone: draft.phone.trim() || null,
-          companyPhone: draft.companyPhone.trim() || null,
+          city: draft.city.trim() || null,
           companyEmail: draft.companyEmail.trim() || null,
           notes: draft.notes.trim() || null,
           createdBy: previous?.createdBy ?? "demo-admin",
@@ -162,7 +163,7 @@ export function CrmManager() {
         full_name: draft.fullName.trim(),
         company_name: draft.companyName.trim() || null,
         phone: draft.phone.trim() || null,
-        company_phone: draft.companyPhone.trim() || null,
+        city: draft.city.trim() || null,
         company_email: draft.companyEmail.trim() || null,
         notes: draft.notes.trim() || null,
       };
@@ -248,20 +249,20 @@ export function CrmManager() {
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Nombre</th><th>Empresa</th><th>Unidad</th><th>Teléfono</th><th>Teléfono de empresa</th><th>Correo de empresa</th><th>Creado</th><th></th></tr></thead>
+            <thead><tr><th>Nombre</th><th>Empresa</th><th>Unidad</th><th>Teléfono</th><th>Correo</th><th>Población</th><th>Creado</th><th></th></tr></thead>
             <tbody>
               {visibleContacts.map((contact) => {
                 const unit = units.find((item) => item.id === contact.businessUnitId);
                 return (
-                  <tr key={contact.id}>
+                  <tr key={contact.id} className="table-row-clickable" onClick={() => setViewingContact(contact)}>
                     <td><strong>{contact.fullName}</strong></td>
                     <td>{contact.companyName || "—"}</td>
                     <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
                     <td>{contact.phone || "—"}</td>
-                    <td>{contact.companyPhone || "—"}</td>
                     <td>{contact.companyEmail || "—"}</td>
+                    <td>{contact.city || "—"}</td>
                     <td>{formatDate(contact.createdAt)}</td>
-                    <td><button type="button" className="button button-compact button-secondary" onClick={() => openEdit(contact)}>{canEdit ? "Editar" : "Ver"}</button></td>
+                    <td>{canEdit ? <button type="button" className="button button-compact button-secondary" onClick={(event) => { event.stopPropagation(); openEdit(contact); }}>Editar</button> : null}</td>
                   </tr>
                 );
               })}
@@ -282,8 +283,8 @@ export function CrmManager() {
             <label><span>Nombre *</span><input value={draft.fullName} readOnly={!canEdit} onChange={(event) => updateDraft("fullName", event.target.value)} /></label>
             <label><span>Empresa</span><input value={draft.companyName} readOnly={!canEdit} onChange={(event) => updateDraft("companyName", event.target.value)} /></label>
             <label><span>Teléfono</span><input value={draft.phone} readOnly={!canEdit} onChange={(event) => updateDraft("phone", event.target.value)} /></label>
-            <label><span>Teléfono de empresa</span><input value={draft.companyPhone} readOnly={!canEdit} onChange={(event) => updateDraft("companyPhone", event.target.value)} /></label>
-            <label><span>Correo de empresa</span><input type="email" value={draft.companyEmail} readOnly={!canEdit} onChange={(event) => updateDraft("companyEmail", event.target.value)} /></label>
+            <label><span>Correo</span><input type="email" value={draft.companyEmail} readOnly={!canEdit} onChange={(event) => updateDraft("companyEmail", event.target.value)} /></label>
+            <label><span>Población</span><input value={draft.city} readOnly={!canEdit} onChange={(event) => updateDraft("city", event.target.value)} /></label>
             <label className="form-field-wide"><span>Notas</span><textarea rows={4} value={draft.notes} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           <div className="modal-actions">
@@ -292,6 +293,29 @@ export function CrmManager() {
             {canEdit ? <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Guardando…" : "Guardar contacto"}</button> : null}
           </div>
         </form>
+      </Modal>
+
+      <Modal open={Boolean(viewingContact)} title={viewingContact?.fullName ?? "Contacto"} eyebrow="CRM" onClose={() => setViewingContact(null)}>
+        {viewingContact ? (
+          <div className="ticket-details">
+            <div className="ticket-details-grid">
+              <div><span>Empresa</span><strong>{viewingContact.companyName || "—"}</strong></div>
+              <div><span>Unidad</span><strong>{units.find((unit) => unit.id === viewingContact.businessUnitId)?.name ?? "—"}</strong></div>
+              <div><span>Teléfono</span><strong>{viewingContact.phone || "—"}</strong></div>
+              <div><span>Correo</span><strong>{viewingContact.companyEmail || "—"}</strong></div>
+              <div><span>Población</span><strong>{viewingContact.city || "—"}</strong></div>
+              <div><span>Creado</span><strong>{formatDate(viewingContact.createdAt)}</strong></div>
+            </div>
+            <div className="ticket-details-section">
+              <h3>Notas</h3>
+              <p>{viewingContact.notes || "Sin notas."}</p>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setViewingContact(null)}>Cerrar</button>
+              {canEdit ? <button type="button" className="button button-primary" onClick={() => { const contact = viewingContact; setViewingContact(null); if (contact) openEdit(contact); }}>Editar</button> : null}
+            </div>
+          </div>
+        ) : null}
       </Modal>
 
       <ConfirmationDialog

@@ -178,6 +178,7 @@ th, td { padding: 14px; border-bottom: 1px solid #f1f4f9; text-align: left; font
 th { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; font-weight: 750; padding-bottom: 12px; }
 tbody tr { transition: background-color .12s ease; }
 tbody tr:hover { background: var(--surface-muted); }
+.table-row-clickable { cursor: pointer; }
 tbody tr:last-child td, tfoot tr:last-child td { border-bottom: 0; }
 td small { display: block; color: var(--muted); margin-top: 4px; }
 .unit-name { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }

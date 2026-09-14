@@ -49,7 +49,7 @@ export type CrmContact = {
   fullName: string;
   companyName: string | null;
   phone: string | null;
-  companyPhone: string | null;
+  city: string | null;
   companyEmail: string | null;
   notes: string | null;
   createdBy: string;
