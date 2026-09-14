@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
-import { campaignStatusLabels } from "@/lib/constants";
+import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoCrmContacts, demoLeads, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
+import { CRM_ROLES, campaignStatusLabels, hasAnyRole } from "@/lib/constants";
 import { monthKey, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { downloadCsv } from "@/lib/csv-export";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
+import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { KpiCard } from "@/components/kpi-card";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { Toast } from "@/components/ui/toast";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { StatusBars } from "@/components/charts/status-bars";
-import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus, MonthlyStat } from "@/lib/types";
+import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus, MonthlyStat } from "@/lib/types";
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
@@ -92,6 +96,9 @@ export function DashboardClient() {
   const [inquirySales, setInquirySales] = useState<InquirySaleStub[]>([]);
   const [adsEntries, setAdsEntries] = useState<AdsStub[]>([]);
   const [mailingRows, setMailingRows] = useState<MailingStub[]>([]);
+  const [operationalRoles, setOperationalRoles] = useState<AppRole[]>(() => configured ? [] : ["admin"]);
+  const [openTicketsCount, setOpenTicketsCount] = useState<number | null>(null);
+  const [newCrmContactsCount, setNewCrmContactsCount] = useState<number | null>(() => configured ? null : demoCrmContacts.filter((contact) => Date.now() - new Date(contact.createdAt).getTime() < SEVEN_DAYS_MS).length);
 
   const businessUnits = useMemo(() => allBusinessUnits.filter((unit) => unit.active), [allBusinessUnits]);
   const selectedMonthYear = yearOfMonth(selectedMonth);
@@ -195,6 +202,28 @@ export function DashboardClient() {
       setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0), revenue: Number(row.revenue ?? 0) })));
     })();
   }, [configured, selectedMonthYear, selectedYear]);
+
+  useEffect(() => {
+    if (!configured) return;
+    void (async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
+      const roles = (profile?.roles as AppRole[] | undefined) ?? [];
+      setOperationalRoles(roles);
+
+      if (hasAnyRole(roles, TICKET_VIEW_ROLES)) {
+        const { count } = await supabase.from("tickets").select("id", { count: "exact", head: true }).in("status", OPEN_TICKET_STATUSES).is("archived_at", null);
+        setOpenTicketsCount(count ?? 0);
+      }
+      if (hasAnyRole(roles, CRM_ROLES)) {
+        const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
+        const { count } = await supabase.from("crm_contacts").select("id", { count: "exact", head: true }).gte("created_at", since);
+        setNewCrmContactsCount(count ?? 0);
+      }
+    })();
+  }, [configured]);
 
   const availableYears = useMemo(() => {
     const years = new Set(monthlyStats.map((row) => yearOfMonth(row.month)));
@@ -389,6 +418,20 @@ export function DashboardClient() {
         <KpiCard label="Seguidores ganados" value={numberFormatter.format(rrssSummary.followersGained)} delta="Sin comparación" helper="total registrado" />
         <KpiCard label="Gasto Meta Ads" value={currencyFormatter.format(rrssSummary.adsSpend)} delta="Sin comparación" helper="total registrado" />
       </section>
+
+      {(hasAnyRole(operationalRoles, TICKET_VIEW_ROLES) && openTicketsCount !== null) || (hasAnyRole(operationalRoles, CRM_ROLES) && newCrmContactsCount !== null) ? (
+        <>
+          <span className="eyebrow kpi-group-label">Actividad interna</span>
+          <section className="kpi-grid kpi-grid-compact">
+            {hasAnyRole(operationalRoles, TICKET_VIEW_ROLES) && openTicketsCount !== null ? (
+              <KpiCard label="Tickets abiertos" value={numberFormatter.format(openTicketsCount)} delta="Sin comparación" helper="informática" />
+            ) : null}
+            {hasAnyRole(operationalRoles, CRM_ROLES) && newCrmContactsCount !== null ? (
+              <KpiCard label="Contactos CRM nuevos" value={numberFormatter.format(newCrmContactsCount)} delta="Sin comparación" helper="últimos 7 días" />
+            ) : null}
+          </section>
+        </>
+      ) : null}
 
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
