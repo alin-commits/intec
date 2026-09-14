@@ -98,6 +98,7 @@ export function DashboardClient() {
   const [mailingRows, setMailingRows] = useState<MailingStub[]>([]);
   const [operationalRoles, setOperationalRoles] = useState<AppRole[]>(() => configured ? [] : ["admin"]);
   const [openTicketsCount, setOpenTicketsCount] = useState<number | null>(null);
+  const [totalTicketsCount, setTotalTicketsCount] = useState<number | null>(null);
   const [newCrmContactsCount, setNewCrmContactsCount] = useState<number | null>(() => configured ? null : demoCrmContacts.filter((contact) => Date.now() - new Date(contact.createdAt).getTime() < SEVEN_DAYS_MS).length);
 
   const businessUnits = useMemo(() => allBusinessUnits.filter((unit) => unit.active), [allBusinessUnits]);
@@ -214,8 +215,12 @@ export function DashboardClient() {
       setOperationalRoles(roles);
 
       if (hasAnyRole(roles, TICKET_VIEW_ROLES)) {
-        const { count } = await supabase.from("tickets").select("id", { count: "exact", head: true }).in("status", OPEN_TICKET_STATUSES).is("archived_at", null);
-        setOpenTicketsCount(count ?? 0);
+        const [{ count: openCount }, { count: totalCount }] = await Promise.all([
+          supabase.from("tickets").select("id", { count: "exact", head: true }).in("status", OPEN_TICKET_STATUSES).is("archived_at", null),
+          supabase.from("tickets").select("id", { count: "exact", head: true }).is("archived_at", null),
+        ]);
+        setOpenTicketsCount(openCount ?? 0);
+        setTotalTicketsCount(totalCount ?? 0);
       }
       if (hasAnyRole(roles, CRM_ROLES)) {
         const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
@@ -425,6 +430,9 @@ export function DashboardClient() {
           <section className="kpi-grid kpi-grid-compact">
             {hasAnyRole(operationalRoles, TICKET_VIEW_ROLES) && openTicketsCount !== null ? (
               <KpiCard label="Tickets abiertos" value={numberFormatter.format(openTicketsCount)} delta="Sin comparación" helper="informática" />
+            ) : null}
+            {hasAnyRole(operationalRoles, TICKET_VIEW_ROLES) && totalTicketsCount !== null ? (
+              <KpiCard label="Tickets en total" value={numberFormatter.format(totalTicketsCount)} delta="Sin comparación" helper="informática" />
             ) : null}
             {hasAnyRole(operationalRoles, CRM_ROLES) && newCrmContactsCount !== null ? (
               <KpiCard label="Contactos CRM nuevos" value={numberFormatter.format(newCrmContactsCount)} delta="Sin comparación" helper="últimos 7 días" />
