@@ -82,7 +82,10 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
         )))}
         {data.map((row, index) => {
           if (index % labelStep !== 0 && index !== data.length - 1) return null;
-          return <text key={`label-${index}`} x={xForIndex(index, data.length)} y={height - 12} textAnchor="middle" className="chart-label" style={{ pointerEvents: "none" }}>{String(row.label)}</text>;
+          const isFirst = index === 0;
+          const isLast = index === data.length - 1;
+          const anchor = isLast && !isFirst ? "end" : isFirst && !isLast ? "start" : "middle";
+          return <text key={`label-${index}`} x={xForIndex(index, data.length)} y={height - 12} textAnchor={anchor} className="chart-label" style={{ pointerEvents: "none" }}>{String(row.label)}</text>;
         })}
         {hoverIndex !== null ? (
           <line x1={tooltipX} y1={padding.top} x2={tooltipX} y2={height - padding.bottom} className="chart-crosshair" />
