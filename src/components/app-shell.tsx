@@ -155,6 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const configured = isSupabaseConfigured();
   const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[] }>(() => ({ fullName: "Alín", roles: ["admin"] }));
+  const [hasAssignedCard, setHasAssignedCard] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [directionView, setDirectionView] = useState<DirectionDepartment | null>(() => getDirectionViewAs());
   const [lastPathname, setLastPathname] = useState(pathname);
@@ -178,11 +179,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || !active) return;
-      const { data } = await supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle();
-      if (data && active) {
+      const [{ data }, { data: assignedCard }] = await Promise.all([
+        supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle(),
+        supabase.from("business_cards").select("id").eq("assigned_user_id", user.id).limit(1).maybeSingle(),
+      ]);
+      if (!active) return;
+      if (data) {
         const rawName = data.full_name || user.email || "Usuario";
         setProfile({ fullName: rawName.includes("@") ? nameFromEmail(rawName) : rawName, roles: data.roles as AppRole[] });
       }
+      setHasAssignedCard(Boolean(assignedCard));
     }
     void loadProfile();
     return () => { active = false; };
@@ -223,7 +229,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
-          {navigation.filter((item) => !item.roles || hasAnyRole(navRoles, item.roles)).map((item) => {
+          {navigation.filter((item) => {
+            if (item.href === "/tarjetas" && hasAssignedCard) return true;
+            return !item.roles || hasAnyRole(navRoles, item.roles);
+          }).map((item) => {
             const active = pathname.startsWith(item.href);
             const Icon = item.icon;
             return (

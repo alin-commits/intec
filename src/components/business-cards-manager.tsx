@@ -4,12 +4,15 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
+import { MyBusinessCards } from "@/components/my-business-cards";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { CARDS_ROLES, hasAnyRole } from "@/lib/constants";
-import { businessUnits as demoBusinessUnits, demoBusinessCards } from "@/lib/demo-data";
+import { businessUnits as demoBusinessUnits, demoBusinessCards, demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessCard, BusinessUnit } from "@/lib/types";
+
+type ProfileOption = { id: string; fullName: string };
 
 type CardDraft = {
   businessUnitId: string;
@@ -25,6 +28,7 @@ type CardDraft = {
   linkedinUrl: string;
   primaryColor: string;
   active: boolean;
+  assignedUserId: string;
 };
 
 const DIACRITICS_PATTERN = new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, "g");
@@ -53,6 +57,7 @@ function blankDraft(defaultUnitId: string, defaultColor: string): CardDraft {
     linkedinUrl: "",
     primaryColor: defaultColor,
     active: true,
+    assignedUserId: "",
   };
 }
 
@@ -72,6 +77,7 @@ function mapCardRow(row: Record<string, unknown>): BusinessCard {
     linkedinUrl: row.linkedin_url ? String(row.linkedin_url) : null,
     primaryColor: row.primary_color ? String(row.primary_color) : "#2563eb",
     active: Boolean(row.is_active),
+    assignedUserId: row.assigned_user_id ? String(row.assigned_user_id) : null,
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
   };
@@ -81,6 +87,9 @@ export function BusinessCardsManager() {
   const configured = isSupabaseConfigured();
   const [units, setUnits] = useState<BusinessUnit[]>(() => configured ? [] : demoBusinessUnits);
   const [cards, setCards] = useState<BusinessCard[]>(() => configured ? [] : demoBusinessCards);
+  const [profiles, setProfiles] = useState<ProfileOption[]>(() => configured ? [] : demoProfiles.map((profile) => ({ id: profile.id, fullName: profile.fullName })));
+  const [currentUserId, setCurrentUserId] = useState<string | null>(configured ? null : "demo-admin");
+  const [canManage, setCanManage] = useState(!configured);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -99,9 +108,10 @@ export function BusinessCardsManager() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: cardData, error: cardError }, { data: authData }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: cardData, error: cardError }, { data: profileRows }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-      supabase.from("business_cards").select("id, business_unit_id, slug, full_name, position, phone, email, website, company_address, instagram_url, facebook_url, linkedin_url, primary_color, is_active, created_by, created_at").order("created_at", { ascending: false }),
+      supabase.from("business_cards").select("id, business_unit_id, slug, full_name, position, phone, email, website, company_address, instagram_url, facebook_url, linkedin_url, primary_color, is_active, assigned_user_id, created_by, created_at").order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id, full_name").eq("is_active", true).order("full_name"),
       supabase.auth.getUser(),
     ]);
     if (unitError || cardError) {
@@ -117,12 +127,22 @@ export function BusinessCardsManager() {
       visibleInLeads: row.visible_in_leads !== false,
     }));
     setUnits(mappedUnits);
-    setCards((cardData ?? []).map((row) => mapCardRow(row as Record<string, unknown>)));
+    const mappedCards = (cardData ?? []).map((row) => mapCardRow(row as Record<string, unknown>));
+    setCards(mappedCards);
+    setProfiles((profileRows ?? []).map((row) => ({ id: String(row.id), fullName: String(row.full_name ?? "—") })));
 
     const user = authData.user;
     if (user) {
+      setCurrentUserId(user.id);
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
-      setAccess(profile && hasAnyRole(profile.roles, CARDS_ROLES) ? "allowed" : "denied");
+      const manage = Boolean(profile && hasAnyRole(profile.roles, CARDS_ROLES));
+      setCanManage(manage);
+      if (manage) {
+        setAccess("allowed");
+      } else {
+        const hasAssignedCard = mappedCards.some((card) => card.assignedUserId === user.id);
+        setAccess(hasAssignedCard ? "allowed" : "denied");
+      }
     } else {
       setAccess("denied");
     }
@@ -157,6 +177,7 @@ export function BusinessCardsManager() {
       linkedinUrl: card.linkedinUrl ?? "",
       primaryColor: card.primaryColor,
       active: card.active,
+      assignedUserId: card.assignedUserId ?? "",
     });
     setSlugTouched(true);
     setColorTouched(true);
@@ -180,6 +201,7 @@ export function BusinessCardsManager() {
       linkedinUrl: card.linkedinUrl ?? "",
       primaryColor: card.primaryColor,
       active: card.active,
+      assignedUserId: "",
     });
     setSlugTouched(true);
     setColorTouched(true);
@@ -226,6 +248,7 @@ export function BusinessCardsManager() {
         linkedin_url: draft.linkedinUrl.trim() || null,
         primary_color: draft.primaryColor,
         is_active: draft.active,
+        assigned_user_id: draft.assignedUserId || null,
       };
 
       if (!configured) {
@@ -244,6 +267,7 @@ export function BusinessCardsManager() {
           linkedinUrl: payload.linkedin_url,
           primaryColor: payload.primary_color,
           active: payload.is_active,
+          assignedUserId: payload.assigned_user_id,
           createdBy: "demo-admin",
           createdAt: editingId ? (cards.find((card) => card.id === editingId)?.createdAt ?? new Date().toISOString()) : new Date().toISOString(),
         };
@@ -313,6 +337,10 @@ export function BusinessCardsManager() {
     );
   }
 
+  if (!canManage) {
+    return <MyBusinessCards cards={cards} units={units} currentUserId={currentUserId ?? ""} />;
+  }
+
   return (
     <div className="page-stack">
       <section className="section-heading">
@@ -336,6 +364,7 @@ export function BusinessCardsManager() {
               <h3>{card.fullName}</h3>
               <p className="muted">{card.position}</p>
               <p className="muted">{unit?.name ?? "—"} · /tarjeta/{card.slug}</p>
+              <p className="muted">{card.assignedUserId ? `Asignada a ${profiles.find((profile) => profile.id === card.assignedUserId)?.fullName ?? "—"}` : "Sin asignar"}</p>
               <div className="modal-actions unit-summary-actions">
                 <a href={publicUrl} target="_blank" rel="noreferrer" className="button button-compact button-secondary">Ver tarjeta</a>
                 <button type="button" className="button button-compact button-secondary" onClick={() => void copyLink(card.slug)}>Copiar enlace</button>
@@ -392,6 +421,12 @@ export function BusinessCardsManager() {
               <select value={draft.active ? "active" : "inactive"} onChange={(event) => setDraft((current) => ({ ...current, active: event.target.value === "active" }))}>
                 <option value="active">Activa</option>
                 <option value="inactive">Inactiva</option>
+              </select>
+            </label>
+            <label><span>Asignada a</span>
+              <select value={draft.assignedUserId} onChange={(event) => setDraft((current) => ({ ...current, assignedUserId: event.target.value }))}>
+                <option value="">Sin asignar</option>
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.fullName}</option>)}
               </select>
             </label>
           </div>

@@ -38,6 +38,7 @@ export type BusinessCard = {
   linkedinUrl: string | null;
   primaryColor: string;
   active: boolean;
+  assignedUserId: string | null;
   createdBy: string;
   createdAt: string;
 };

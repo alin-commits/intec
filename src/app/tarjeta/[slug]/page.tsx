@@ -45,6 +45,7 @@ function mapCardRow(row: Record<string, unknown>): BusinessCard {
     linkedinUrl: row.linkedin_url ? String(row.linkedin_url) : null,
     primaryColor: row.primary_color ? String(row.primary_color) : "#2563eb",
     active: Boolean(row.is_active),
+    assignedUserId: row.assigned_user_id ? String(row.assigned_user_id) : null,
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
   };
