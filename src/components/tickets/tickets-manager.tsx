@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { monthKey, monthShortLabel, yearOfMonth } from "@/lib/dates";
+import { monthKey, monthShortLabel, monthWeekBuckets, yearOfMonth } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { exportElementToPdf } from "@/lib/pdf-export";
@@ -136,21 +136,27 @@ export function TicketsManager() {
   }, [visibleTickets]);
 
   const monthlyCounts = useMemo(() => {
+    if (chartMode === "month") {
+      return monthWeekBuckets(chartMonth).map((bucket) => ({
+        key: bucket.key,
+        label: `Semana ${bucket.label}`,
+        count: visibleTickets.filter((ticket) => ticket.createdAt >= bucket.start && ticket.createdAt < bucket.end).length,
+      }));
+    }
     const byMonth = new Map<string, number>();
     for (const ticket of visibleTickets) {
       const month = ticket.createdAt.slice(0, 7);
       byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
     }
-    if (chartMode === "month") {
-      return [[chartMonth, byMonth.get(chartMonth) ?? 0]] as [string, number][];
-    }
     if (chartMode === "year") {
-      return monthsOfYear(chartYear).map((month): [string, number] => [month, byMonth.get(month) ?? 0]);
+      return monthsOfYear(chartYear).map((month) => ({ key: month, label: monthShortLabel(month), count: byMonth.get(month) ?? 0 }));
     }
-    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b));
+    return Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, count]) => ({ key: month, label: monthShortLabel(month), count }));
   }, [visibleTickets, chartMode, chartMonth, chartYear]);
 
-  const monthlyChartData = useMemo(() => monthlyCounts.map(([month, count]) => ({ label: monthShortLabel(month), count })), [monthlyCounts]);
+  const monthlyChartData = useMemo(() => monthlyCounts.map(({ label, count }) => ({ label, count })), [monthlyCounts]);
 
   function exportReportCsv() {
     const summary: CsvSummaryItem[] = [
@@ -161,7 +167,7 @@ export function TicketsManager() {
       { label: "Pendientes", value: counts.pendingCount },
       { label: "Resueltos este mes", value: counts.resolvedThisMonthCount },
       { label: "Abiertos +3 días", value: counts.staleOpenCount },
-      ...monthlyCounts.map(([month, count]) => ({ label: `Tickets en ${monthShortLabel(month)}`, value: count })),
+      ...monthlyCounts.map(({ label, count }) => ({ label: `Tickets en ${label}`, value: count })),
     ];
     downloadCsvReport(`informe_tickets_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleTickets, [
       { header: "Ticket", value: (ticket) => ticket.ticketNumber },
