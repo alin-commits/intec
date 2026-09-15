@@ -171,6 +171,10 @@ export function UnitsManager() {
       setMessage("Indica un nombre y un identificador (slug) para la unidad.");
       return;
     }
+    if (!/^#[0-9A-Fa-f]{6}$/.test(draft.accent)) {
+      setMessage("El color de marca debe ser un hexadecimal válido, por ejemplo #2563EB.");
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -343,7 +347,26 @@ export function UnitsManager() {
           <div className="form-grid">
             <label><span>Nombre *</span><input value={draft.name} onChange={(event) => updateName(event.target.value)} required /></label>
             <label><span>Identificador (slug) *</span><input value={draft.slug} onChange={(event) => { setSlugTouched(true); setDraft((current) => ({ ...current, slug: event.target.value })); }} required /></label>
-            <label><span>Color de marca</span><input type="color" value={draft.accent} onChange={(event) => setDraft((current) => ({ ...current, accent: event.target.value }))} /></label>
+            <label><span>Color de marca</span>
+              <div className="color-input-pair">
+                <input
+                  type="color"
+                  value={/^#[0-9A-Fa-f]{6}$/.test(draft.accent) ? draft.accent : "#2563eb"}
+                  onChange={(event) => setDraft((current) => ({ ...current, accent: event.target.value }))}
+                />
+                <input
+                  type="text"
+                  value={draft.accent}
+                  maxLength={7}
+                  placeholder="#2563eb"
+                  onChange={(event) => {
+                    let value = event.target.value.trim();
+                    if (value && !value.startsWith("#")) value = `#${value}`;
+                    setDraft((current) => ({ ...current, accent: value }));
+                  }}
+                />
+              </div>
+            </label>
             <label><span>Estado</span>
               <select value={draft.active ? "active" : "inactive"} onChange={(event) => setDraft((current) => ({ ...current, active: event.target.value === "active" }))}>
                 <option value="active">Activa</option>
