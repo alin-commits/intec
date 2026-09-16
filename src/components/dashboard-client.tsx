@@ -97,11 +97,16 @@ export function DashboardClient() {
   const [adsEntries, setAdsEntries] = useState<AdsStub[]>([]);
   const [mailingRows, setMailingRows] = useState<MailingStub[]>([]);
   const [operationalRoles, setOperationalRoles] = useState<AppRole[]>(() => configured ? [] : ["admin"]);
+  const [assignedUnitIds, setAssignedUnitIds] = useState<string[] | null>(null);
   const [openTicketsCount, setOpenTicketsCount] = useState<number | null>(null);
   const [totalTicketsCount, setTotalTicketsCount] = useState<number | null>(null);
   const [newCrmContactsCount, setNewCrmContactsCount] = useState<number | null>(() => configured ? null : demoCrmContacts.filter((contact) => Date.now() - new Date(contact.createdAt).getTime() < SEVEN_DAYS_MS).length);
 
-  const businessUnits = useMemo(() => allBusinessUnits.filter((unit) => unit.active), [allBusinessUnits]);
+  // Un comercial sin roles de supervisión (admin/viewer) solo ve sus marcas asignadas.
+  const businessUnits = useMemo(
+    () => allBusinessUnits.filter((unit) => unit.active && (assignedUnitIds === null || assignedUnitIds.includes(unit.id))),
+    [allBusinessUnits, assignedUnitIds],
+  );
   const selectedMonthYear = yearOfMonth(selectedMonth);
 
   useEffect(() => {
@@ -213,6 +218,14 @@ export function DashboardClient() {
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
       const roles = (profile?.roles as AppRole[] | undefined) ?? [];
       setOperationalRoles(roles);
+
+      const unitScoped = hasAnyRole(roles, ["commercial"]) && !hasAnyRole(roles, ["admin", "viewer"]);
+      if (unitScoped) {
+        const { data: assignments } = await supabase.from("profile_business_units").select("business_unit_id").eq("profile_id", user.id);
+        setAssignedUnitIds((assignments ?? []).map((row) => String(row.business_unit_id)));
+      } else {
+        setAssignedUnitIds(null);
+      }
 
       if (hasAnyRole(roles, TICKET_VIEW_ROLES)) {
         const [{ count: openCount }, { count: totalCount }] = await Promise.all([

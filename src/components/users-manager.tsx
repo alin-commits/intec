@@ -28,15 +28,7 @@ function initialDemoProfiles(configured: boolean): Profile[] {
   return saved ? (JSON.parse(saved) as Profile[]) : demoProfiles;
 }
 
-/** Dirección is a read-only department-preview mode, not a real permission —
- * it can never combine with another role, matching the DB constraint. */
 function toggleRole(current: AppRole[], role: AppRole): AppRole[] {
-  if (role === "direction") {
-    return current.includes("direction") ? [] : ["direction"];
-  }
-  if (current.includes("direction")) {
-    return [role];
-  }
   return current.includes(role) ? current.filter((item) => item !== role) : [...current, role];
 }
 
@@ -58,6 +50,31 @@ function RoleChips({ value, onChange, disabled }: { value: AppRole[]; onChange: 
   );
 }
 
+type UnitOption = { id: string; name: string };
+
+function toggleUnit(current: string[], unitId: string): string[] {
+  return current.includes(unitId) ? current.filter((item) => item !== unitId) : [...current, unitId];
+}
+
+function UnitChips({ options, value, onChange, disabled }: { options: UnitOption[]; value: string[]; onChange: (next: string[]) => void; disabled?: boolean }) {
+  if (options.length === 0) return <span className="muted">Sin marcas</span>;
+  return (
+    <div className="role-chip-group">
+      {options.map((unit) => (
+        <button
+          key={unit.id}
+          type="button"
+          disabled={disabled}
+          className={value.includes(unit.id) ? "role-chip active" : "role-chip"}
+          onClick={() => onChange(toggleUnit(value, unit.id))}
+        >
+          {unit.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function UsersManager() {
   const configured = isSupabaseConfigured();
   const [profiles, setProfiles] = useState<Profile[]>(() => initialDemoProfiles(configured));
@@ -70,6 +87,8 @@ export function UsersManager() {
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [businessUnits, setBusinessUnits] = useState<UnitOption[]>([]);
+  const [unitAssignments, setUnitAssignments] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (!configured) return;
@@ -86,7 +105,7 @@ export function UsersManager() {
         return;
       }
       setAccess("allowed");
-      await loadProfiles();
+      await Promise.all([loadProfiles(), loadUnitData()]);
     });
   }, [configured]);
 
@@ -100,6 +119,51 @@ export function UsersManager() {
       return;
     }
     setProfiles((data ?? []).map((row) => mapProfile(row as Record<string, unknown>)));
+  }
+
+  async function loadUnitData() {
+    if (!configured) return;
+    const supabase = createClient();
+    const [{ data: units, error: unitsError }, { data: assignments, error: assignmentsError }] = await Promise.all([
+      supabase.from("business_units").select("id, name").order("sort_order"),
+      supabase.from("profile_business_units").select("profile_id, business_unit_id"),
+    ]);
+    if (unitsError || assignmentsError) {
+      setMessage(reportSafeError(unitsError ?? assignmentsError, "No se pudieron cargar las marcas."));
+      return;
+    }
+    setBusinessUnits((units ?? []).map((row) => ({ id: String(row.id), name: String(row.name) })));
+    const grouped: Record<string, string[]> = {};
+    for (const row of assignments ?? []) {
+      const profileId = String(row.profile_id);
+      (grouped[profileId] ??= []).push(String(row.business_unit_id));
+    }
+    setUnitAssignments(grouped);
+  }
+
+  async function updateUnitAssignment(profileId: string, nextUnitIds: string[]) {
+    setMessage(null);
+    if (!configured) {
+      setUnitAssignments((current) => ({ ...current, [profileId]: nextUnitIds }));
+      return;
+    }
+    const supabase = createClient();
+    const { error: deleteError } = await supabase.from("profile_business_units").delete().eq("profile_id", profileId);
+    if (deleteError) {
+      setMessage(reportSafeError(deleteError, "No se pudieron actualizar las marcas asignadas."));
+      return;
+    }
+    if (nextUnitIds.length > 0) {
+      const { error: insertError } = await supabase
+        .from("profile_business_units")
+        .insert(nextUnitIds.map((businessUnitId) => ({ profile_id: profileId, business_unit_id: businessUnitId })));
+      if (insertError) {
+        setMessage(reportSafeError(insertError, "No se pudieron actualizar las marcas asignadas."));
+        return;
+      }
+    }
+    setUnitAssignments((current) => ({ ...current, [profileId]: nextUnitIds }));
+    setMessage("Marcas asignadas actualizadas.");
   }
 
   function persistDemo(next: Profile[]) {
@@ -218,7 +282,7 @@ export function UsersManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Acceso y permisos</span><h2>Usuarios</h2><p>Gestiona quién puede entrar en la plataforma y qué acciones puede realizar. Un usuario puede tener varios roles a la vez (excepto Dirección, que es exclusivo).</p></div>
+        <div><span className="eyebrow">Acceso y permisos</span><h2>Usuarios</h2><p>Gestiona quién puede entrar en la plataforma y qué acciones puede realizar. Un usuario puede tener varios roles a la vez.</p></div>
         <div className="summary-pill"><strong>{activeCount}</strong><span>usuarios activos</span></div>
       </section>
 
@@ -239,12 +303,19 @@ export function UsersManager() {
         <div className="panel-heading"><div><span className="eyebrow">Equipo</span><h2>Usuarios registrados</h2></div></div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Usuario</th><th>Email</th><th>Roles</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Email</th><th>Roles</th><th>Marcas asignadas</th><th>Estado</th><th></th></tr></thead>
             <tbody>{profiles.map((profile) => (
               <tr key={profile.id}>
                 <td><strong>{profile.fullName}</strong></td>
                 <td>{profile.email || "—"}</td>
                 <td><RoleChips value={profile.roles} onChange={(next) => void updateProfile(profile.id, { roles: next })} /></td>
+                <td>
+                  <UnitChips
+                    options={businessUnits}
+                    value={unitAssignments[profile.id] ?? []}
+                    onChange={(next) => void updateUnitAssignment(profile.id, next)}
+                  />
+                </td>
                 <td><button type="button" className={profile.isActive ? "status-toggle active" : "status-toggle"} onClick={() => void updateProfile(profile.id, { isActive: !profile.isActive })}>{profile.isActive ? "Activo" : "Desactivado"}</button></td>
                 <td>{profile.id !== currentUserId ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}</td>
               </tr>

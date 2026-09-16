@@ -17,7 +17,7 @@ import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange,
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import type { BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
+import type { AppRole, BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
 
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
@@ -107,6 +107,7 @@ export function InquiryRegister() {
   const [canRegister, setCanRegister] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [assignedUnitIds, setAssignedUnitIds] = useState<string[] | null>(null);
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
   const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; count: string }>({ businessUnitId: "", inquiryType: "phone", count: "1" });
@@ -135,10 +136,16 @@ export function InquiryRegister() {
   const reportRef = useRef<HTMLDivElement>(null);
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
+  // Un comercial sin roles de supervisión (admin/viewer) solo puede elegir
+  // entre sus marcas asignadas; el resto de roles sigue viendo todas.
+  const selectableUnits = useMemo(
+    () => (assignedUnitIds === null ? units : units.filter((unit) => assignedUnitIds.includes(unit.id))),
+    [units, assignedUnitIds],
+  );
   // Solo el selector de "nueva consulta" respeta visibleInConsultas; el resto de
   // la página usa `units` sin filtrar para no perder nombre/color de marcas
   // con registros históricos que se hayan ocultado después.
-  const registrableUnits = useMemo(() => units.filter((unit) => unit.visibleInConsultas), [units]);
+  const registrableUnits = useMemo(() => selectableUnits.filter((unit) => unit.visibleInConsultas), [selectableUnits]);
 
   const selectedMonthYear = yearOfMonth(selectedMonth);
   const monthRangeValue = useMemo(() => monthRange(selectedMonth), [selectedMonth]);
@@ -178,9 +185,17 @@ export function InquiryRegister() {
       if (authData.user) {
         setCurrentUserId(authData.user.id);
         const { data: profile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
-        setCanRegister(Boolean(profile && hasAnyRole(profile.roles, ["admin", "commercial"])));
-        setIsAdmin(Boolean(profile?.roles.includes("admin")));
-        setAccess(profile && hasAnyRole(profile.roles, CONSULTAS_ROLES) ? "allowed" : "denied");
+        const roles = (profile?.roles ?? []) as AppRole[];
+        setCanRegister(Boolean(profile && hasAnyRole(roles, ["admin", "commercial"])));
+        setIsAdmin(roles.includes("admin"));
+        setAccess(profile && hasAnyRole(roles, CONSULTAS_ROLES) ? "allowed" : "denied");
+        const unitScoped = hasAnyRole(roles, ["commercial"]) && !hasAnyRole(roles, ["admin", "viewer"]);
+        if (unitScoped) {
+          const { data: assignments } = await supabase.from("profile_business_units").select("business_unit_id").eq("profile_id", authData.user.id);
+          setAssignedUnitIds((assignments ?? []).map((row) => String(row.business_unit_id)));
+        } else {
+          setAssignedUnitIds(null);
+        }
       } else {
         setAccess("denied");
       }
@@ -190,7 +205,7 @@ export function InquiryRegister() {
   if (!saleUrlChecked && access === "allowed" && typeof window !== "undefined") {
     setSaleUrlChecked(true);
     if (new URLSearchParams(window.location.search).get("openSale") === "1") {
-      const defaultUnitId = registrationUnitId ?? units[0]?.id ?? "";
+      const defaultUnitId = registrationUnitId ?? selectableUnits[0]?.id ?? "";
       setSaleChooserMode("menu");
       setQuickSaleUnitId(defaultUnitId);
       setQuickSaleInquiryId("");
@@ -619,7 +634,7 @@ export function InquiryRegister() {
   }
 
   function openSaleChooser() {
-    const defaultUnitId = registrationUnitId ?? units[0]?.id ?? "";
+    const defaultUnitId = registrationUnitId ?? selectableUnits[0]?.id ?? "";
     setSaleChooserMode("menu");
     setQuickSaleUnitId(defaultUnitId);
     setQuickSaleInquiryId("");
@@ -751,7 +766,7 @@ export function InquiryRegister() {
   }
 
   function openWeeklyInquiry() {
-    const defaultUnitId = registrationUnitId ?? units[0]?.id ?? "";
+    const defaultUnitId = registrationUnitId ?? selectableUnits[0]?.id ?? "";
     setWeeklyInquiryUnitId(defaultUnitId);
     setWeeklyInquiryDate(new Date().toISOString().slice(0, 10));
     setWeeklyInquiryDraft(blankWeeklyInquiryDraft());
@@ -968,7 +983,7 @@ export function InquiryRegister() {
             <span>Unidad de negocio</span>
             <select value={selectedUnit} onChange={(event) => setSelectedUnit(event.target.value)}>
               <option value="all">Todas las unidades</option>
-              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select>
           </label>
           <label>
@@ -1196,7 +1211,7 @@ export function InquiryRegister() {
         <div className="form-grid">
           <label><span>Unidad de negocio</span>
             <select value={editDraft.businessUnitId} onChange={(event) => setEditDraft((current) => ({ ...current, businessUnitId: event.target.value }))}>
-              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select>
           </label>
           <label><span>Canal</span>
@@ -1262,7 +1277,7 @@ export function InquiryRegister() {
         <div className="form-grid">
           <label><span>Unidad de negocio</span>
             <select value={saleEditDraft.businessUnitId} onChange={(event) => setSaleEditDraft((current) => ({ ...current, businessUnitId: event.target.value }))}>
-              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select>
           </label>
           <label><span>Tipo de venta</span>
@@ -1310,7 +1325,7 @@ export function InquiryRegister() {
             <div className="form-grid">
               <label><span>Unidad de negocio</span>
                 <select value={quickSaleUnitId} onChange={(event) => { setQuickSaleUnitId(event.target.value); setQuickSaleInquiryId(""); }}>
-                  {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                  {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
                 </select>
               </label>
               <label><span>Consulta</span>
@@ -1343,7 +1358,7 @@ export function InquiryRegister() {
             <div className="form-grid">
               <label><span>Unidad de negocio</span>
                 <select value={weeklyUnitId} onChange={(event) => setWeeklyUnitId(event.target.value)}>
-                  {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                  {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
                 </select>
               </label>
               <label><span>Semana (elige cualquier día)</span>
@@ -1372,7 +1387,7 @@ export function InquiryRegister() {
         <div className="form-grid">
           <label><span>Unidad de negocio</span>
             <select value={weeklyInquiryUnitId} onChange={(event) => setWeeklyInquiryUnitId(event.target.value)}>
-              {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select>
           </label>
           <label><span>Semana (elige cualquier día)</span>
