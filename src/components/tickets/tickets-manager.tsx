@@ -44,7 +44,7 @@ export function TicketsManager() {
   const [canManage, setCanManage] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeExpanded, setActiveExpanded] = useState(false);
-  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [completedPage, setCompletedPage] = useState(1);
   const [pendingBulkAction, setPendingBulkAction] = useState<"archive" | "delete" | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -124,10 +124,18 @@ export function TicketsManager() {
   function handleDetailSort(column: DetailSortColumn) {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
     setDetailPage(1);
+    setCompletedPage(1);
   }
 
   const activeTickets = useMemo(() => visibleTickets.filter((ticket) => OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
   const completedTickets = useMemo(() => visibleTickets.filter((ticket) => !OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
+
+  const completedTotalPages = Math.max(1, Math.ceil(completedTickets.length / DETAIL_PAGE_SIZE));
+  const effectiveCompletedPage = Math.min(completedPage, completedTotalPages);
+  const completedPageTickets = useMemo(() => {
+    const start = (effectiveCompletedPage - 1) * DETAIL_PAGE_SIZE;
+    return completedTickets.slice(start, start + DETAIL_PAGE_SIZE);
+  }, [completedTickets, effectiveCompletedPage]);
 
   const availableChartYears = useMemo(() => {
     const years = new Set(visibleTickets.map((ticket) => yearOfMonth(ticket.createdAt.slice(0, 7))));
@@ -203,11 +211,13 @@ export function TicketsManager() {
   function handleSort(column: TicketSortColumn) {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
     setDetailPage(1);
+    setCompletedPage(1);
   }
 
   function handleFiltersChange(next: TicketFilterState) {
     setFilters(next);
     setDetailPage(1);
+    setCompletedPage(1);
   }
 
   async function handleQuickStatusChange(ticket: Ticket, status: TicketStatus) {
@@ -442,7 +452,7 @@ export function TicketsManager() {
         ) : (
           <>
             <TicketTable
-              tickets={completedTickets.slice(0, completedExpanded ? completedTickets.length : PAGE_SIZE)}
+              tickets={completedPageTickets}
               sort={sort}
               onSort={handleSort}
               onQuickStatusChange={(ticket, status) => void handleQuickStatusChange(ticket, status)}
@@ -450,13 +460,13 @@ export function TicketsManager() {
               canManage={canManage}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
-              onToggleSelectAll={() => toggleSelectAll(completedTickets.slice(0, completedExpanded ? completedTickets.length : PAGE_SIZE).map((t) => t.id))}
+              onToggleSelectAll={() => toggleSelectAll(completedPageTickets.map((t) => t.id))}
             />
-            {completedTickets.length > PAGE_SIZE ? (
-              <div className="table-panel-footer">
-                <button type="button" className="button button-secondary button-compact" onClick={() => setCompletedExpanded((current) => !current)}>
-                  {completedExpanded ? "Mostrar menos" : `Mostrar más (${completedTickets.length - PAGE_SIZE} más)`}
-                </button>
+            {completedTotalPages > 1 ? (
+              <div className="table-panel-footer table-panel-pagination">
+                <button type="button" className="button button-secondary button-compact" disabled={effectiveCompletedPage <= 1} onClick={() => setCompletedPage(effectiveCompletedPage - 1)}>← Anterior</button>
+                <span className="muted">Página {effectiveCompletedPage} de {completedTotalPages}</span>
+                <button type="button" className="button button-secondary button-compact" disabled={effectiveCompletedPage >= completedTotalPages} onClick={() => setCompletedPage(effectiveCompletedPage + 1)}>Siguiente →</button>
               </div>
             ) : null}
           </>
