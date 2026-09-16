@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { monthKey, monthShortLabel, monthWeekBuckets, yearOfMonth } from "@/lib/dates";
+import { monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, yearOfMonth, yearRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { exportElementToPdf } from "@/lib/pdf-export";
@@ -91,7 +91,6 @@ export function TicketsManager() {
   }, [configured]);
 
   const departments = useMemo(() => Array.from(new Set(tickets.map((t) => t.department))).sort((a, b) => a.localeCompare(b)), [tickets]);
-  const counts = useMemo(() => computeTicketDashboardCounts(tickets), [tickets]);
 
   const visibleTickets = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -112,6 +111,16 @@ export function TicketsManager() {
       return a[sort.column].localeCompare(b[sort.column]) * direction;
     });
   }, [tickets, filters, sort]);
+
+  // Las tarjetas de resumen usan el mismo periodo que el selector del gráfico
+  // ("Vista del gráfico" / "Mes" / "Año"), para que cambiarlo también las actualice.
+  const period = useMemo(() => {
+    if (chartMode === "month") return monthRange(chartMonth);
+    if (chartMode === "year") return yearRange(chartYear);
+    return undefined;
+  }, [chartMode, chartMonth, chartYear]);
+  const periodLabel = chartMode === "month" ? monthLabel(chartMonth) : chartMode === "year" ? String(chartYear) : "todo el histórico";
+  const counts = useMemo(() => computeTicketDashboardCounts(visibleTickets, period, tickets), [visibleTickets, period, tickets]);
 
   const detailTotalPages = Math.max(1, Math.ceil(visibleTickets.length / DETAIL_PAGE_SIZE));
   const effectiveDetailPage = Math.min(detailPage, detailTotalPages);
@@ -169,12 +178,16 @@ export function TicketsManager() {
   function exportReportCsv() {
     const summary: CsvSummaryItem[] = [
       { label: "Tickets en la vista actual", value: visibleTickets.length },
-      { label: "Tickets nuevos", value: counts.newCount },
-      { label: "Tickets abiertos", value: counts.openCount },
-      { label: "En curso", value: counts.inProgressCount },
-      { label: "Pendientes", value: counts.pendingCount },
-      { label: "Resueltos este mes", value: counts.resolvedThisMonthCount },
-      { label: "Abiertos +3 días", value: counts.staleOpenCount },
+      { label: `Tickets nuevos (${periodLabel})`, value: counts.newCount },
+      { label: `Tickets abiertos (${periodLabel})`, value: counts.openCount },
+      { label: `En curso (${periodLabel})`, value: counts.inProgressCount },
+      { label: `Pendientes (${periodLabel})`, value: counts.pendingCount },
+      { label: `Resueltos (${periodLabel})`, value: counts.resolvedPeriodCount },
+      { label: "Resueltos en total", value: counts.resolvedTotalCount },
+      { label: `Tardaron +3 días (${periodLabel})`, value: counts.staleCount },
+      { label: `Prioridad alta (${periodLabel})`, value: counts.highPriorityCount },
+      { label: `Prioridad media (${periodLabel})`, value: counts.mediumPriorityCount },
+      { label: `Prioridad baja (${periodLabel})`, value: counts.lowPriorityCount },
       ...monthlyCounts.map(({ label, count }) => ({ label: `Tickets en ${label}`, value: count })),
     ];
     downloadCsvReport(`informe_tickets_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleTickets, [
@@ -318,7 +331,7 @@ export function TicketsManager() {
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <div ref={reportRef}>
-      <TicketDashboardCards counts={counts} />
+      <TicketDashboardCards counts={counts} periodLabel={periodLabel} />
       <div className="ticket-chart-row">
       <section className="panel chart-panel chart-panel-compact">
         <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>

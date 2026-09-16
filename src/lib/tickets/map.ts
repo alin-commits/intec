@@ -1,4 +1,3 @@
-import { monthKey, monthRange } from "@/lib/dates";
 import type { Ticket, TicketBlockingLevel, TicketCategory, TicketPriority, TicketStatus } from "./types";
 
 export function mapTicketRow(row: Record<string, unknown>): Ticket {
@@ -37,22 +36,41 @@ export type TicketDashboardCounts = {
   openCount: number;
   inProgressCount: number;
   pendingCount: number;
-  resolvedThisMonthCount: number;
+  resolvedPeriodCount: number;
   resolvedTotalCount: number;
-  staleOpenCount: number;
+  staleCount: number;
+  highPriorityCount: number;
+  mediumPriorityCount: number;
+  lowPriorityCount: number;
 };
 
-export function computeTicketDashboardCounts(tickets: Ticket[]): TicketDashboardCounts {
-  const now = Date.now();
-  const staleThreshold = now - STALE_DAYS * 24 * 60 * 60 * 1000;
-  const { start: monthStart, end: monthEnd } = monthRange(monthKey());
+function tookTooLong(ticket: Ticket): boolean {
+  const staleMs = STALE_DAYS * 24 * 60 * 60 * 1000;
+  const createdMs = new Date(ticket.createdAt).getTime();
+  if (ticket.resolvedAt) return new Date(ticket.resolvedAt).getTime() - createdMs > staleMs;
+  if (OPEN_TICKET_STATUSES.includes(ticket.status)) return Date.now() - createdMs > staleMs;
+  return false;
+}
+
+/**
+ * `scopedTickets` (already narrowed by the page's own filters) is further
+ * narrowed by `period` (by `createdAt`) when given. `resolvedTotalCount` is
+ * the one fixed lifetime figure, always computed from `lifetimeTickets`
+ * (the fully unfiltered set), on purpose ignoring both the period and any
+ * other filter.
+ */
+export function computeTicketDashboardCounts(scopedTickets: Ticket[], period: { start: string; end: string } | undefined, lifetimeTickets: Ticket[]): TicketDashboardCounts {
+  const periodTickets = period ? scopedTickets.filter((t) => t.createdAt >= period.start && t.createdAt < period.end) : scopedTickets;
   return {
-    newCount: tickets.filter((t) => t.status === "new").length,
-    openCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status)).length,
-    inProgressCount: tickets.filter((t) => t.status === "in_progress").length,
-    pendingCount: tickets.filter((t) => t.status === "pending").length,
-    resolvedThisMonthCount: tickets.filter((t) => t.status === "resolved" && t.resolvedAt && t.resolvedAt >= monthStart && t.resolvedAt < monthEnd).length,
-    resolvedTotalCount: tickets.filter((t) => t.status === "resolved").length,
-    staleOpenCount: tickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status) && new Date(t.createdAt).getTime() < staleThreshold).length,
+    newCount: periodTickets.filter((t) => t.status === "new").length,
+    openCount: periodTickets.filter((t) => OPEN_TICKET_STATUSES.includes(t.status)).length,
+    inProgressCount: periodTickets.filter((t) => t.status === "in_progress").length,
+    pendingCount: periodTickets.filter((t) => t.status === "pending").length,
+    resolvedPeriodCount: periodTickets.filter((t) => t.status === "resolved").length,
+    resolvedTotalCount: lifetimeTickets.filter((t) => t.status === "resolved").length,
+    staleCount: periodTickets.filter(tookTooLong).length,
+    highPriorityCount: periodTickets.filter((t) => t.priority === "high").length,
+    mediumPriorityCount: periodTickets.filter((t) => t.priority === "medium").length,
+    lowPriorityCount: periodTickets.filter((t) => t.priority === "low").length,
   };
 }

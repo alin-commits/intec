@@ -37,7 +37,7 @@ export function TicketsDashboardView() {
     })();
   }, [configured]);
 
-  const counts = useMemo(() => computeTicketDashboardCounts(tickets), [tickets]);
+  const counts = useMemo(() => computeTicketDashboardCounts(tickets, undefined, tickets), [tickets]);
   const recentTickets = useMemo(() => tickets.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8), [tickets]);
 
   return (
@@ -49,7 +49,7 @@ export function TicketsDashboardView() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
-      <TicketDashboardCards counts={counts} />
+      <TicketDashboardCards counts={counts} periodLabel="todo el histórico" />
 
       <section className="panel table-panel">
         <div className="panel-heading"><div><span className="eyebrow">Actividad reciente</span><h2>Últimos tickets actualizados</h2></div></div>
