@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
-import { exportElementToPdf } from "@/lib/pdf-export";
+import { exportLeadReportPdf } from "@/lib/lead-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
@@ -114,7 +114,6 @@ export function LeadsTable() {
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pdfBusy, setPdfBusy] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
   // Nuevos leads solo ofrecen unidades marcadas visibleInLeads; al editar uno
   // existente se mantienen todas para no perder su marca si se ocultó después.
   const registrableUnits = useMemo(() => units.filter((unit) => unit.visibleInLeads), [units]);
@@ -313,10 +312,21 @@ export function LeadsTable() {
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      await exportElementToPdf(reportRef.current, `informe_leads_${new Date().toISOString().slice(0, 10)}.pdf`);
+      const won = visibleRows.filter((lead) => lead.status === "won");
+      const totalValue = won.reduce((sum, lead) => sum + (lead.saleValue ?? 0), 0);
+      await exportLeadReportPdf({
+        activeUnitLabel,
+        totalLeads: visibleRows.length,
+        wonCount: won.length,
+        conversionLabel: visibleRows.length ? formatPercent((won.length / visibleRows.length) * 100) : "0,0 %",
+        wonValue: totalValue,
+        leads: visibleRows,
+        units,
+      });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
@@ -372,7 +382,7 @@ export function LeadsTable() {
           <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
-      <section className="panel table-panel" ref={reportRef}>
+      <section className="panel table-panel">
         <div className="table-scroll">
           <table>
             <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>

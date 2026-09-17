@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -11,7 +11,7 @@ import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
 import { reportSafeError } from "@/lib/errors";
-import { exportElementToPdf } from "@/lib/pdf-export";
+import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 
@@ -115,7 +115,6 @@ export function CampaignsManager() {
   const [pendingArchive, setPendingArchive] = useState<Campaign | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pdfBusy, setPdfBusy] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -286,10 +285,37 @@ export function CampaignsManager() {
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      await exportElementToPdf(reportRef.current, `informe_campanas_${new Date().toISOString().slice(0, 10)}.pdf`);
+      const rows: CampaignReportRow[] = visibleCampaigns.map((campaign) => {
+        const stats = statsFor(campaign, leads);
+        const adsStats = adsStatsFor(campaign, ads);
+        return {
+          unitName: units.find((unit) => unit.id === campaign.businessUnitId)?.name ?? "—",
+          name: campaign.name,
+          channel: campaign.channel,
+          status: campaign.status,
+          startDate: campaign.startDate,
+          endDate: campaign.endDate,
+          budget: campaign.budget,
+          leadsTotal: stats.total,
+          leadsWon: stats.won,
+          conversion: stats.conversion,
+          value: stats.value,
+          adsSpend: adsStats.spend,
+          adsRevenue: adsStats.revenue,
+        };
+      });
+      await exportCampaignReportPdf({
+        totalLeads: rows.reduce((sum, row) => sum + row.leadsTotal, 0),
+        totalWon: rows.reduce((sum, row) => sum + row.leadsWon, 0),
+        totalValue: rows.reduce((sum, row) => sum + row.value, 0),
+        totalAdsSpend: rows.reduce((sum, row) => sum + row.adsSpend, 0),
+        totalAdsRevenue: rows.reduce((sum, row) => sum + row.adsRevenue, 0),
+        rows,
+      });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
@@ -343,7 +369,7 @@ export function CampaignsManager() {
         </div>
       </CollapsibleFilters>
 
-      <section className="campaigns-grid" ref={reportRef}>
+      <section className="campaigns-grid">
         {visibleCampaigns.map((campaign) => {
           const unit = units.find((item) => item.id === campaign.businessUnitId);
           const stats = statsFor(campaign, leads);

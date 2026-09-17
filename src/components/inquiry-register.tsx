@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { KpiCard } from "@/components/kpi-card";
@@ -15,7 +15,7 @@ import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } f
 import { reportSafeError } from "@/lib/errors";
 import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
-import { exportElementToPdf } from "@/lib/pdf-export";
+import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { AppRole, BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
 
@@ -133,7 +133,6 @@ export function InquiryRegister() {
   const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pdfBusy, setPdfBusy] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
   // Un comercial sin roles de supervisión (admin/viewer) solo puede elegir
@@ -829,6 +828,17 @@ export function InquiryRegister() {
     }
   }
 
+  const unitReportRows: UnitReportRow[] = useMemo(() => units
+    .filter((unit) => selectedUnit === "all" || unit.id === selectedUnit)
+    .map((unit) => {
+      const unitCurrent = currentRecords.filter((record) => record.businessUnitId === unit.id);
+      const unitPrevious = previousRecords.filter((record) => record.businessUnitId === unit.id);
+      const unitCurrentTotal = totalCount(unitCurrent);
+      const unitPreviousTotal = totalCount(unitPrevious);
+      const unitVariation = unitPreviousTotal ? ((unitCurrentTotal - unitPreviousTotal) / unitPreviousTotal) * 100 : null;
+      return { name: unit.name, total: unitCurrentTotal, variation: unitVariation, counts: countsByChannel(unitCurrent) };
+    }), [units, selectedUnit, currentRecords, previousRecords]);
+
   function exportReportCsv() {
     const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
     const summary: CsvSummaryItem[] = [
@@ -841,16 +851,6 @@ export function InquiryRegister() {
       { label: "Seguimientos (valor)", value: currencyFormatter.format(salesSummary.seguimiento.value) },
       { label: "Pedidos (valor)", value: currencyFormatter.format(salesSummary.pedido.value) },
     ];
-    const unitReportRows = units
-      .filter((unit) => selectedUnit === "all" || unit.id === selectedUnit)
-      .map((unit) => {
-        const unitCurrent = currentRecords.filter((record) => record.businessUnitId === unit.id);
-        const unitPrevious = previousRecords.filter((record) => record.businessUnitId === unit.id);
-        const unitCurrentTotal = totalCount(unitCurrent);
-        const unitPreviousTotal = totalCount(unitPrevious);
-        const unitVariation = unitPreviousTotal ? ((unitCurrentTotal - unitPreviousTotal) / unitPreviousTotal) * 100 : null;
-        return { name: unit.name, total: unitCurrentTotal, variation: unitVariation, counts: countsByChannel(unitCurrent) };
-      });
     downloadCsvReport(`informe_consultas_${periodLabel}.csv`, summary, unitReportRows, [
       { header: "Unidad", value: (row) => row.name },
       { header: "Total", value: (row) => row.total },
@@ -860,11 +860,21 @@ export function InquiryRegister() {
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      const periodLabel = viewMode === "month" ? selectedMonth : String(selectedYear);
-      await exportElementToPdf(reportRef.current, `informe_consultas_${periodLabel}.pdf`);
+      const periodLabel = viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}`;
+      await exportInquiryReportPdf({
+        periodLabel,
+        totalInquiries: total,
+        averageLabel: viewMode === "month" ? "Media diaria" : "Media mensual",
+        averageValue: (viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ","),
+        topChannelLabel: topChannel ? `${inquiryChannelLabels[topChannel.channel]} (${topChannel.count})` : "—",
+        topUnitLabel: topUnit ? `${topUnit.unit.name} (${topUnit.count})` : "—",
+        salesSummary,
+        unitRows: unitReportRows,
+      });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
@@ -1028,7 +1038,6 @@ export function InquiryRegister() {
         </div>
       </CollapsibleFilters>
 
-      <div ref={reportRef}>
       <section className="kpi-grid inquiry-kpi-grid">
         <KpiCard label="Consultas totales" value={numberFormatter.format(total)} delta={variation === null ? "Sin comparación" : formatPercent(Math.abs(variation))} positive={variation === null || variation >= 0} helper={comparisonHelper} />
         <KpiCard label={viewMode === "month" ? "Media diaria" : "Media mensual"} value={(viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ",")} delta={viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`} helper="" />
@@ -1095,7 +1104,6 @@ export function InquiryRegister() {
           sort={{ activeColumn: sortColumn, direction: sortDirection, onSort: changeSort }}
         />
       </section>
-      </div>
 
       <section className="panel table-panel recent-inquiries">
         <div className="panel-heading">

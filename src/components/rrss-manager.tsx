@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { BarChart } from "@/components/charts/bar-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
@@ -30,7 +30,7 @@ import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { monthKey, monthLabel, monthShortLabel, yearOfMonth } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
-import { exportElementToPdf } from "@/lib/pdf-export";
+import { exportAdsReportPdf, exportMailingReportPdf, exportSocialReportPdf } from "@/lib/rrss-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
   AdCampaignStatus,
@@ -384,7 +384,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
   const [pdfBusy, setPdfBusy] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
 
   const periodMonths = useMemo(() => (viewMode === "month" ? [selectedMonth] : monthsOfYear(selectedYear)), [viewMode, selectedMonth, selectedYear]);
   const periodRows = useMemo(() => stats.filter((row) => periodMonths.includes(row.periodMonth)), [stats, periodMonths]);
@@ -552,10 +551,16 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      await exportElementToPdf(reportRef.current, `informe_rrss_${viewMode === "month" ? selectedMonth : selectedYear}.pdf`);
+      await exportSocialReportPdf({
+        periodLabel: viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}`,
+        totals,
+        rows: visibleRows,
+        units,
+      });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
@@ -603,7 +608,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         )}
       </div>
 
-      <div ref={reportRef}>
       <section className="kpi-grid">
         <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} delta="Sin comparación" helper={`a cierre de ${periodLabel}`} />
         <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} delta="Sin comparación" helper={periodLabel} />
@@ -653,7 +657,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           </table>
         </div>
       </section>
-      </div>
 
       <CollapsibleFilters
         hasActiveFilters={networkFilter !== "all" || monthFrom !== "" || monthTo !== ""}
@@ -755,7 +758,6 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<AdsDraft>(() => blankAdsDraft(units));
   const [pdfBusy, setPdfBusy] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
 
   const visibleEntries = useMemo(() => entries
     .filter((entry) => {
@@ -901,10 +903,17 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      await exportElementToPdf(reportRef.current, `informe_meta_ads_${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportAdsReportPdf({
+        totals,
+        cplLabel: `${safeDiv(totals.spend, totals.leads).toFixed(2).replace(".", ",")} €`,
+        roasLabel: `${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`,
+        rows: visibleEntries,
+        units,
+      });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
@@ -920,7 +929,6 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
         </div>
       </section>
 
-      <div ref={reportRef}>
       <section className="kpi-grid">
         <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
@@ -940,7 +948,6 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
           <BarChart items={revenueByUnit} ariaLabel="Ingresos de Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
         </article>
       </section>
-      </div>
 
       <CollapsibleFilters
         hasActiveFilters={query !== "" || unitFilter !== "all" || statusFilter !== "all" || dateFrom !== "" || dateTo !== ""}
@@ -1059,7 +1066,6 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<MailingDraft>(() => blankMailingDraft(units));
   const [pdfBusy, setPdfBusy] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
 
   const visibleCampaigns = useMemo(() => campaigns
     .filter((campaign) => {
@@ -1189,10 +1195,16 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
     try {
-      await exportElementToPdf(reportRef.current, `informe_mailing_${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportMailingReportPdf({
+        totals,
+        openRateLabel: formatPercent(ratio(totals.opens, totals.delivered)),
+        rows: visibleCampaigns,
+        units,
+      });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
@@ -1208,7 +1220,6 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
         </div>
       </section>
 
-      <div ref={reportRef}>
       <section className="kpi-grid">
         <KpiCard label="Enviados" value={numberFormatter.format(totals.sent)} delta="Sin comparación" helper="según filtros" />
         <KpiCard label="Entregados" value={numberFormatter.format(totals.delivered)} delta="Sin comparación" helper="según filtros" />
@@ -1220,7 +1231,6 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
         <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Open rate</h2></div></div>
         <BarChart items={openRateByUnit} ariaLabel="Open rate por marca" valueFormatter={(value) => formatPercent(value)} />
       </section>
-      </div>
 
       <CollapsibleFilters
         hasActiveFilters={query !== "" || unitFilter !== "all" || typeFilter !== "all" || dateFrom !== "" || dateTo !== ""}
