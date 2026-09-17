@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
@@ -8,10 +8,10 @@ import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, yearOfMonth, yearRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
-import { exportElementToPdf } from "@/lib/pdf-export";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES, ticketBlockingLevelLabels, ticketCategoryLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
+import { exportTicketReportPdf } from "@/lib/tickets/ticket-report-pdf";
 import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
 import { QuickCreateTicketButton } from "./quick-create-ticket-button";
@@ -48,12 +48,10 @@ export function TicketsManager() {
   const [pendingBulkAction, setPendingBulkAction] = useState<"archive" | "delete" | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
-  const [pdfExportingAll, setPdfExportingAll] = useState(false);
   const [chartMode, setChartMode] = useState<"month" | "year" | "total">("year");
   const [chartMonth, setChartMonth] = useState(() => monthKey());
   const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
   const [detailPage, setDetailPage] = useState(1);
-  const reportRef = useRef<HTMLDivElement>(null);
 
   async function loadTickets() {
     const supabase = createClient();
@@ -121,14 +119,19 @@ export function TicketsManager() {
   }, [chartMode, chartMonth, chartYear]);
   const periodLabel = chartMode === "month" ? monthLabel(chartMonth) : chartMode === "year" ? String(chartYear) : "todo el histórico";
   const counts = useMemo(() => computeTicketDashboardCounts(visibleTickets, period, tickets), [visibleTickets, period, tickets]);
+  // Lo que se exporta (CSV/PDF) sigue el mismo periodo elegido arriba: "Todo
+  // el histórico" exporta todo, un mes/año concreto exporta solo ese tramo.
+  const exportTickets = useMemo(
+    () => (period ? visibleTickets.filter((t) => t.createdAt >= period.start && t.createdAt < period.end) : visibleTickets),
+    [visibleTickets, period],
+  );
 
   const detailTotalPages = Math.max(1, Math.ceil(visibleTickets.length / DETAIL_PAGE_SIZE));
   const effectiveDetailPage = Math.min(detailPage, detailTotalPages);
   const detailPageTickets = useMemo(() => {
-    if (pdfExportingAll) return visibleTickets;
     const start = (effectiveDetailPage - 1) * DETAIL_PAGE_SIZE;
     return visibleTickets.slice(start, start + DETAIL_PAGE_SIZE);
-  }, [visibleTickets, effectiveDetailPage, pdfExportingAll]);
+  }, [visibleTickets, effectiveDetailPage]);
 
   function handleDetailSort(column: DetailSortColumn) {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
@@ -177,7 +180,7 @@ export function TicketsManager() {
 
   function exportReportCsv() {
     const summary: CsvSummaryItem[] = [
-      { label: "Tickets en la vista actual", value: visibleTickets.length },
+      { label: `Tickets exportados (${periodLabel})`, value: exportTickets.length },
       { label: `Tickets nuevos (${periodLabel})`, value: counts.newCount },
       { label: `Tickets abiertos (${periodLabel})`, value: counts.openCount },
       { label: `En curso (${periodLabel})`, value: counts.inProgressCount },
@@ -190,7 +193,7 @@ export function TicketsManager() {
       { label: `Prioridad baja (${periodLabel})`, value: counts.lowPriorityCount },
       ...monthlyCounts.map(({ label, count }) => ({ label: `Tickets en ${label}`, value: count })),
     ];
-    downloadCsvReport(`informe_tickets_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleTickets, [
+    downloadCsvReport(`informe_tickets_${new Date().toISOString().slice(0, 10)}.csv`, summary, exportTickets, [
       { header: "Ticket", value: (ticket) => ticket.ticketNumber },
       { header: "Fecha", value: (ticket) => formatDate(ticket.createdAt) },
       { header: "Solicitante", value: (ticket) => ticket.reporterName },
@@ -209,14 +212,12 @@ export function TicketsManager() {
   }
 
   async function exportReportPdf() {
-    if (!reportRef.current) return;
     setPdfBusy(true);
-    setPdfExportingAll(true);
     try {
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      await exportElementToPdf(reportRef.current, `informe_tickets_${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportTicketReportPdf({ periodLabel, counts, tickets: exportTickets });
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
-      setPdfExportingAll(false);
       setPdfBusy(false);
     }
   }
@@ -330,7 +331,6 @@ export function TicketsManager() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
-      <div ref={reportRef}>
       <TicketDashboardCards counts={counts} periodLabel={periodLabel} />
       <div className="ticket-chart-row">
       <section className="panel chart-panel chart-panel-compact">
@@ -402,7 +402,7 @@ export function TicketsManager() {
             </tbody>
           </table>
         </div>
-        {!pdfExportingAll && detailTotalPages > 1 ? (
+        {detailTotalPages > 1 ? (
           <div className="table-panel-footer table-panel-pagination">
             <button type="button" className="button button-secondary button-compact" disabled={effectiveDetailPage <= 1} onClick={() => setDetailPage(effectiveDetailPage - 1)}>← Anterior</button>
             <span className="muted">Página {effectiveDetailPage} de {detailTotalPages}</span>
@@ -410,7 +410,6 @@ export function TicketsManager() {
           </div>
         ) : null}
       </section>
-      </div>
       <TicketFilters filters={filters} departments={departments} resultCount={visibleTickets.length} onChange={handleFiltersChange} />
 
       {canManage && selectedIds.size > 0 ? (
