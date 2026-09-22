@@ -721,3 +721,8 @@ tr.row-muted td { opacity: .6; }
 .popover-alert .popover-item { flex: 1; min-width: 0; }
 .popover-alert .notice-dismiss { margin: 0; }
 .popover-alert:hover .notice-dismiss { opacity: 1; }
+.invoice-dropzone { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 18px 21px; border: 2px dashed var(--border); transition: border-color .15s ease, background-color .15s ease; }
+.invoice-dropzone p { margin: 4px 0 0; font-size: 13px; }
+.invoice-dropzone.dragging { border-color: var(--primary); background: var(--primary-soft); }
+.invoice-ai-note { min-width: 0; margin-bottom: 14px; }
+.invoice-hint { margin: 10px 0 0; font-size: 12.5px; }

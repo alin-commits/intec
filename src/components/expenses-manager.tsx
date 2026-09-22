@@ -8,6 +8,7 @@ import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
+import { InvoicesPanel, mapInvoiceRow } from "@/components/invoices-panel";
 import { CalendarIcon, EuroIcon, RefreshIcon, WalletIcon } from "@/components/icons";
 import { EXPENSES_EDIT_ROLES, EXPENSES_ROLES, hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
@@ -30,6 +31,7 @@ import {
   type ExpenseKind,
   type MarketingExpense,
 } from "@/lib/expenses";
+import { invoiceSpend, type MarketingInvoice } from "@/lib/invoices";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
 
@@ -136,6 +138,9 @@ export function ExpensesManager() {
   const [kind, setKind] = useState("all");
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState<SortState>(null);
+  const [tab, setTab] = useState<"expenses" | "invoices">("expenses");
+  const [invoices, setInvoices] = useState<MarketingInvoice[]>([]);
+  const [invoicesAvailable, setInvoicesAvailable] = useState(false);
   const [year, setYear] = useState(currentYear);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -163,11 +168,15 @@ export function ExpensesManager() {
       return;
     }
     setCanEdit(hasAnyRole(profile.roles, EXPENSES_EDIT_ROLES));
-    const [{ data: unitData, error: unitError }, { data: expenseData, error: expenseError }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: expenseData, error: expenseError }, { data: invoiceData, error: invoiceError }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("marketing_expenses").select(EXPENSE_COLUMNS).order("start_date", { ascending: false }),
+      supabase.from("marketing_invoices").select("*").order("invoice_date", { ascending: false }),
     ]);
     setAccess("allowed");
+    // Invoices are optional: until their table exists the rest of the page still works.
+    setInvoicesAvailable(!invoiceError);
+    if (!invoiceError) setInvoices((invoiceData ?? []).map((row) => mapInvoiceRow(row as Record<string, unknown>)));
     if (unitError || expenseError) {
       setMessage(reportSafeError(unitError ?? expenseError, "No se pudieron cargar los gastos."));
       return;
@@ -235,10 +244,23 @@ export function ExpensesManager() {
     });
   }
 
+  // Invoices share the search, category and unit filters; they are always "one-off", never cancelled.
+  const filteredInvoices = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return invoices.filter((invoice) => {
+      const matchesQuery = !needle || [invoice.supplier, invoice.concept, invoice.invoiceNumber].some((value) => (value ?? "").toLowerCase().includes(needle));
+      const matchesUnit = unitId === "all" || (unitId === "general" ? invoice.businessUnitId === null : invoice.businessUnitId === unitId);
+      return matchesQuery && matchesUnit && (category === "all" || invoice.category === category);
+    });
+  }, [invoices, query, unitId, category]);
+  const yearInvoices = useMemo(() => filteredInvoices.filter((invoice) => invoice.invoiceDate >= yearStart && invoice.invoiceDate <= yearEnd), [filteredInvoices, yearStart, yearEnd]);
+  const countedInvoices = useMemo(() => (kind === "subscription" || status === "cancelled" ? [] : yearInvoices), [kind, status, yearInvoices]);
+
   const summary = useMemo(() => {
     const monthly = visibleExpenses.reduce((sum, expense) => sum + monthlyCost(expense), 0);
-    const spent = visibleExpenses.reduce((sum, expense) => sum + spentBetween(expense, yearStart, spentUntil), 0);
-    const projected = visibleExpenses.reduce((sum, expense) => sum + spentBetween(expense, yearStart, yearEnd), 0);
+    const invoicesSpent = countedInvoices.filter((invoice) => invoice.invoiceDate <= spentUntil).reduce((sum, invoice) => sum + invoiceSpend(invoice), 0);
+    const spent = visibleExpenses.reduce((sum, expense) => sum + spentBetween(expense, yearStart, spentUntil), 0) + invoicesSpent;
+    const projected = visibleExpenses.reduce((sum, expense) => sum + spentBetween(expense, yearStart, yearEnd), 0) + countedInvoices.reduce((sum, invoice) => sum + invoiceSpend(invoice), 0);
     const renewals = visibleExpenses
       .map((expense) => ({ expense, date: nextRenewal(expense, today) }))
       .filter((item): item is { expense: MarketingExpense; date: string } => item.date !== null && daysBetween(today, item.date) <= RENEWAL_WINDOW_DAYS)
@@ -248,16 +270,21 @@ export function ExpensesManager() {
       const value = spentBetween(expense, yearStart, spentUntil);
       if (value > 0) byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + value);
     }
+    for (const invoice of countedInvoices) {
+      const value = invoice.invoiceDate <= spentUntil ? invoiceSpend(invoice) : 0;
+      if (value > 0) byCategory.set(invoice.category, (byCategory.get(invoice.category) ?? 0) + value);
+    }
     const categoryItems: DonutItem[] = Array.from(byCategory, ([key, value]) => ({ label: expenseCategoryLabels[key], value, color: expenseCategoryColors[key] })).sort((a, b) => b.value - a.value);
     const activeSubscriptions = visibleExpenses.filter((expense) => monthlyCost(expense) > 0).length;
     return { monthly, spent, projected, renewals, categoryItems, activeSubscriptions };
-  }, [visibleExpenses, yearStart, yearEnd, spentUntil, today]);
+  }, [visibleExpenses, countedInvoices, yearStart, yearEnd, spentUntil, today]);
 
   const yearOptions = useMemo(() => {
     const years = new Set<number>([currentYear, currentYear - 1]);
     for (const expense of expenses) years.add(Number(expense.startDate.slice(0, 4)));
+    for (const invoice of invoices) years.add(Number(invoice.invoiceDate.slice(0, 4)));
     return Array.from(years).filter((value) => value <= currentYear).sort((a, b) => b - a);
-  }, [expenses, currentYear]);
+  }, [expenses, invoices, currentYear]);
 
   function openNew() {
     setEditingId(null);
@@ -484,7 +511,7 @@ export function ExpensesManager() {
       <section className="kpi-grid">
         <KpiCard label="Coste mensual" value={currencyFormatter.format(summary.monthly)} delta="Sin comparación" helper={`${summary.activeSubscriptions} suscripcion${summary.activeSubscriptions === 1 ? "" : "es"} activa${summary.activeSubscriptions === 1 ? "" : "s"}`} icon={<WalletIcon />} tone="indigo" />
         <KpiCard label="Coste anual" value={currencyFormatter.format(summary.monthly * 12)} delta="Sin comparación" helper="suscripciones activas × 12" icon={<RefreshIcon />} tone="sky" />
-        <KpiCard label={`Gastado en ${year}`} value={currencyFormatter.format(summary.spent)} delta="Sin comparación" helper={year === currentYear ? `hasta hoy · previsto ${currencyFormatter.format(summary.projected)}` : "suscripciones + puntuales"} icon={<EuroIcon />} tone="amber" />
+        <KpiCard label={`Gastado en ${year}`} value={currencyFormatter.format(summary.spent)} delta="Sin comparación" helper={year === currentYear ? `hasta hoy · previsto ${currencyFormatter.format(summary.projected)}` : "suscripciones, puntuales y facturas"} icon={<EuroIcon />} tone="amber" />
         <KpiCard label="Renovaciones próximas" value={String(summary.renewals.length)} delta="Sin comparación" helper={nextRenewalItem ? `${nextRenewalItem.expense.name} ${renewalLabel(daysBetween(today, nextRenewalItem.date))}` : `ninguna en ${RENEWAL_WINDOW_DAYS} días`} icon={<CalendarIcon />} tone={summary.renewals.some((item) => daysBetween(today, item.date) <= 7) ? "rose" : "emerald"} />
       </section>
 
@@ -513,6 +540,20 @@ export function ExpensesManager() {
         </article>
       </section>
 
+      {configured ? (
+        <div className="view-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === "expenses"} className={tab === "expenses" ? "view-tab active" : "view-tab"} onClick={() => setTab("expenses")}>Suscripciones y gastos</button>
+          <button type="button" role="tab" aria-selected={tab === "invoices"} className={tab === "invoices" ? "view-tab active" : "view-tab"} onClick={() => setTab("invoices")}>Facturas{yearInvoices.length ? ` (${yearInvoices.length})` : ""}</button>
+        </div>
+      ) : null}
+
+      {tab === "invoices" ? (
+        invoicesAvailable ? (
+          <InvoicesPanel invoices={yearInvoices} allInvoices={invoices} expenses={expenses} units={units} canEdit={canEdit} year={year} onChanged={loadRealData} onMessage={setMessage} />
+        ) : (
+          <div className="notice"><strong>Facturas no disponibles todavía</strong><span>Falta crear la tabla de facturas en Supabase (migración 202609240001_marketing_invoices.sql).</span></div>
+        )
+      ) : (
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
@@ -561,6 +602,7 @@ export function ExpensesManager() {
           </table>
         </div>
       </section>
+      )}
 
       <ConfirmationDialog open={Boolean(pendingCancel)} title="¿Dar de baja la suscripción?" confirmLabel="Dar de baja" busy={busy} onCancel={() => setPendingCancel(null)} onConfirm={() => void confirmCancel()}>
         {pendingCancel ? <div className="confirmation-summary"><span>Suscripción</span><strong>{pendingCancel.name}</strong><span>Efecto</span><strong>Deja de contar en el coste mensual desde hoy. Lo ya pagado se mantiene en el historial.</strong></div> : null}
