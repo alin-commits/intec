@@ -10,7 +10,7 @@ import { formatEuroForPdf, generatePdfReport } from "@/lib/pdf-report";
 import { reportSafeError } from "@/lib/errors";
 import { todayKey } from "@/lib/dates";
 import { billingPeriodLabels, expenseCategoryColors, expenseCategoryLabels, type BillingPeriod, type ExpenseCategory, type MarketingExpense } from "@/lib/expenses";
-import { INVOICE_BUCKET, INVOICE_MAX_BYTES, invoiceSpend, matchSubscription, type InvoiceExtraction, type MarketingInvoice } from "@/lib/invoices";
+import { INVOICE_BUCKET, INVOICE_MAX_BYTES, matchSubscription, type InvoiceExtraction, type MarketingInvoice } from "@/lib/invoices";
 import { createClient } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
 
@@ -168,7 +168,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
         // A recurring fee from a supplier we don't track yet: propose creating the subscription.
         setNewSubscription(!match && extraction.recurrence ? extraction.recurrence : null);
         note = match
-          ? `Datos leídos con IA. Parece una factura de la suscripción «${match.name}»: queda asociada y no sumará dos veces. Revisa y guarda.`
+          ? `Datos leídos con IA. Parece una factura de la suscripción «${match.name}»: queda asociada y cuenta como el cargo real de ese periodo (sustituye a la estimación). Revisa y guarda.`
           : extraction.recurrence
             ? `Datos leídos con IA. Parece una cuota ${billingPeriodLabels[extraction.recurrence].toLowerCase()} que aún no está en Suscripciones: al guardar se creará la suscripción «${extraction.supplier}» y la factura quedará asociada. Si no la quieres, cámbialo en «¿Es de una suscripción?».`
             : "Datos leídos con IA. Revísalos antes de guardar.";
@@ -301,7 +301,6 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
     base: invoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0),
     vat: invoices.reduce((sum, invoice) => sum + invoice.vatAmount, 0),
     total: invoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0),
-    counted: invoices.reduce((sum, invoice) => sum + invoiceSpend(invoice), 0),
   };
 
   function exportCsv() {
@@ -310,7 +309,6 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
       { label: "Base imponible (€)", value: round2(totals.base) },
       { label: "IVA (€)", value: round2(totals.vat) },
       { label: "Total (€)", value: round2(totals.total) },
-      { label: "Suma en gasto del departamento (€)", value: round2(totals.counted) },
     ], invoices, [
       { header: "Fecha", value: (invoice) => formatDate(invoice.invoiceDate) },
       { header: "Proveedor", value: (invoice) => invoice.supplier },
@@ -338,7 +336,6 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
           { label: "Base imponible", value: formatEuroForPdf(totals.base) },
           { label: "IVA", value: formatEuroForPdf(totals.vat) },
           { label: "Total", value: formatEuroForPdf(totals.total) },
-          { label: "Suma en gasto", value: formatEuroForPdf(totals.counted) },
         ],
         sectionTitle: "Detalle de facturas",
         columns: [
@@ -393,7 +390,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th>Unidad</th><th>Base</th><th>IVA</th><th>Total</th><th>En totales</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th>Unidad</th><th>Base</th><th>IVA</th><th>Total</th><th>Tipo</th><th>Acciones</th></tr></thead>
             <tbody>
               {invoices.map((invoice) => (
                 <tr key={invoice.id}>
@@ -405,7 +402,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <td>{currencyFormatter.format(invoice.baseAmount)}</td>
                   <td>{currencyFormatter.format(invoice.vatAmount)}</td>
                   <td><strong>{currencyFormatter.format(invoice.totalAmount)}</strong></td>
-                  <td>{invoice.expenseId ? <span className="badge" title="Ya cuenta como suscripción">Suscripción · {expenseName(invoice.expenseId)}</span> : <span className="badge badge-active">Suma</span>}</td>
+                  <td>{invoice.expenseId ? <span className="badge" title="Cuenta como el cargo real de esta suscripción en su periodo">Suscripción · {expenseName(invoice.expenseId)}</span> : <span className="badge badge-active">Gasto suelto</span>}</td>
                   <td>
                     <div className="table-actions">
                       {invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => void viewPdf(invoice.filePath as string)}>PDF</button> : null}
@@ -418,7 +415,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
             </tbody>
             {invoices.length ? (
               <tfoot>
-                <tr className="channel-table-footer-row"><td colSpan={5}><strong>Total {year}</strong></td><td>{currencyFormatter.format(totals.base)}</td><td>{currencyFormatter.format(totals.vat)}</td><td><strong>{currencyFormatter.format(totals.total)}</strong></td><td colSpan={2} className="muted">Suma en gasto: {currencyFormatter.format(totals.counted)}</td></tr>
+                <tr className="channel-table-footer-row"><td colSpan={5}><strong>Total {year}</strong></td><td>{currencyFormatter.format(totals.base)}</td><td>{currencyFormatter.format(totals.vat)}</td><td><strong>{currencyFormatter.format(totals.total)}</strong></td><td colSpan={2} /></tr>
               </tfoot>
             ) : null}
           </table>
@@ -462,7 +459,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                 }
               }}
             >
-              <option value="">No, suma como gasto</option>
+              <option value="">No, es un gasto suelto</option>
               {subscriptions.map((expense) => <option key={expense.id} value={expense.id}>Sí: {expense.name}{expense.status === "cancelled" ? " (de baja)" : ""}</option>)}
               {!editingId || !draft.expenseId ? (
                 <optgroup label="Crear suscripción nueva">
@@ -473,7 +470,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
             <label className="form-field-wide"><span>Notas</span><textarea rows={2} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           {newSubscription ? <p className="muted invoice-hint">Al guardar se crea en Suscripciones «{draft.supplier || "este proveedor"}» ({billingPeriodLabels[newSubscription].toLowerCase()}, {currencyFormatter.format(draft.baseAmount)} sin IVA, desde el {draft.invoiceDate ? formatDate(draft.invoiceDate) : "—"}) y esta factura queda como su justificante. Si ya pagabas antes, ajusta luego la fecha del primer cargo en la suscripción.</p> : null}
-          {draft.expenseId ? <p className="muted invoice-hint">Asociada a una suscripción: se guarda como justificante, pero no suma otra vez en los totales (la suscripción ya cuenta ese cargo).</p> : null}
+          {draft.expenseId ? <p className="muted invoice-hint">Asociada a una suscripción: cuenta como el cargo real de ese periodo y sustituye a la estimación de la suscripción, así que no se suma dos veces.</p> : null}
           {Math.abs(round2(draft.baseAmount + draft.vatAmount) - round2(draft.totalAmount)) > 0.01 ? <p className="muted invoice-hint">Ojo: base + IVA ({currencyFormatter.format(draft.baseAmount + draft.vatAmount)}) no coincide con el total. Puede haber retenciones o recargos; revísalo.</p> : null}
           <div className="modal-actions">
             {canEdit && editingId ? <button type="button" className="button button-secondary expenses-delete" onClick={() => setPendingDelete(allInvoices.find((invoice) => invoice.id === editingId) ?? null)}>Eliminar</button> : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -9,7 +9,7 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
 import { InvoicesPanel, mapInvoiceRow } from "@/components/invoices-panel";
-import { CalendarIcon, EuroIcon, RefreshIcon, WalletIcon } from "@/components/icons";
+import { CalendarIcon, DocumentIcon, EuroIcon, WalletIcon } from "@/components/icons";
 import { EXPENSES_EDIT_ROLES, EXPENSES_ROLES, hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits } from "@/lib/demo-data";
@@ -25,13 +25,13 @@ import {
   expenseKindLabel,
   monthlyCost,
   nextRenewal,
-  spentBetween,
+  subscriptionSpend,
   type BillingPeriod,
   type ExpenseCategory,
   type ExpenseKind,
   type MarketingExpense,
 } from "@/lib/expenses";
-import { invoiceSpend, type MarketingInvoice } from "@/lib/invoices";
+import type { MarketingInvoice } from "@/lib/invoices";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
 
@@ -254,30 +254,48 @@ export function ExpensesManager() {
     });
   }, [invoices, query, unitId, category]);
   const yearInvoices = useMemo(() => filteredInvoices.filter((invoice) => invoice.invoiceDate >= yearStart && invoice.invoiceDate <= yearEnd), [filteredInvoices, yearStart, yearEnd]);
-  const countedInvoices = useMemo(() => (kind === "subscription" || status === "cancelled" ? [] : yearInvoices), [kind, status, yearInvoices]);
+  // Invoices not tied to a subscription add their base on their own; tied ones are counted inside their subscription.
+  const standaloneInvoices = useMemo(() => (kind === "subscription" || status === "cancelled" ? [] : yearInvoices.filter((invoice) => !invoice.expenseId)), [kind, status, yearInvoices]);
+
+  /** A row's spend in the selected year so far: real invoices plus the estimate for charges still without one. */
+  const expenseSpend = useCallback((expense: MarketingExpense, to: string) => subscriptionSpend(expense, invoices, yearStart, to), [invoices, yearStart]);
 
   const summary = useMemo(() => {
     const monthly = visibleExpenses.reduce((sum, expense) => sum + monthlyCost(expense), 0);
-    const invoicesSpent = countedInvoices.filter((invoice) => invoice.invoiceDate <= spentUntil).reduce((sum, invoice) => sum + invoiceSpend(invoice), 0);
-    const spent = visibleExpenses.reduce((sum, expense) => sum + spentBetween(expense, yearStart, spentUntil), 0) + invoicesSpent;
-    const projected = visibleExpenses.reduce((sum, expense) => sum + spentBetween(expense, yearStart, yearEnd), 0) + countedInvoices.reduce((sum, invoice) => sum + invoiceSpend(invoice), 0);
+    const standaloneSpent = standaloneInvoices.filter((invoice) => invoice.invoiceDate <= spentUntil).reduce((sum, invoice) => sum + invoice.baseAmount, 0);
+    let invoiced = standaloneSpent;
+    let estimated = 0;
+    for (const expense of visibleExpenses) {
+      const part = expenseSpend(expense, spentUntil);
+      invoiced += part.actual;
+      estimated += part.estimated;
+    }
+    const spent = invoiced + estimated;
+    const projected = visibleExpenses.reduce((sum, expense) => { const part = expenseSpend(expense, yearEnd); return sum + part.actual + part.estimated; }, 0)
+      + standaloneInvoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0);
+    const invoiceTotals = {
+      count: yearInvoices.length,
+      base: yearInvoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0),
+      total: yearInvoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0),
+    };
     const renewals = visibleExpenses
       .map((expense) => ({ expense, date: nextRenewal(expense, today) }))
       .filter((item): item is { expense: MarketingExpense; date: string } => item.date !== null && daysBetween(today, item.date) <= RENEWAL_WINDOW_DAYS)
       .sort((a, b) => a.date.localeCompare(b.date));
     const byCategory = new Map<ExpenseCategory, number>();
     for (const expense of visibleExpenses) {
-      const value = spentBetween(expense, yearStart, spentUntil);
+      const part = expenseSpend(expense, spentUntil);
+      const value = part.actual + part.estimated;
       if (value > 0) byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + value);
     }
-    for (const invoice of countedInvoices) {
-      const value = invoice.invoiceDate <= spentUntil ? invoiceSpend(invoice) : 0;
+    for (const invoice of standaloneInvoices) {
+      const value = invoice.invoiceDate <= spentUntil ? invoice.baseAmount : 0;
       if (value > 0) byCategory.set(invoice.category, (byCategory.get(invoice.category) ?? 0) + value);
     }
     const categoryItems: DonutItem[] = Array.from(byCategory, ([key, value]) => ({ label: expenseCategoryLabels[key], value, color: expenseCategoryColors[key] })).sort((a, b) => b.value - a.value);
     const activeSubscriptions = visibleExpenses.filter((expense) => monthlyCost(expense) > 0).length;
-    return { monthly, spent, projected, renewals, categoryItems, activeSubscriptions };
-  }, [visibleExpenses, countedInvoices, yearStart, yearEnd, spentUntil, today]);
+    return { monthly, spent, invoiced, estimated, projected, invoiceTotals, renewals, categoryItems, activeSubscriptions };
+  }, [visibleExpenses, standaloneInvoices, yearInvoices, expenseSpend, yearEnd, spentUntil, today]);
 
   const yearOptions = useMemo(() => {
     const years = new Set<number>([currentYear, currentYear - 1]);
@@ -398,10 +416,12 @@ export function ExpensesManager() {
 
   function summaryStats(): { label: string; value: string }[] {
     return [
-      { label: "Coste mensual (suscripciones)", value: currencyFormatter.format(summary.monthly) },
-      { label: "Coste anual (suscripciones)", value: currencyFormatter.format(summary.monthly * 12) },
-      { label: year === currentYear ? `Gastado en ${year} (hasta hoy)` : `Gastado en ${year}`, value: currencyFormatter.format(summary.spent) },
+      { label: year === currentYear ? `Gasto ${year} (hasta hoy)` : `Gasto ${year}`, value: currencyFormatter.format(summary.spent) },
+      { label: "De ello, facturado", value: currencyFormatter.format(summary.invoiced) },
+      { label: "De ello, estimado (suscripciones sin factura)", value: currencyFormatter.format(summary.estimated) },
       { label: `Previsto ${year} completo`, value: currencyFormatter.format(summary.projected) },
+      { label: `Facturas ${year} (base)`, value: currencyFormatter.format(summary.invoiceTotals.base) },
+      { label: "Coste mensual (suscripciones)", value: currencyFormatter.format(summary.monthly) },
       { label: "Suscripciones activas", value: String(summary.activeSubscriptions) },
     ];
   }
@@ -416,7 +436,7 @@ export function ExpensesManager() {
       { header: "Tipo", value: (expense) => expenseKindLabel(expense) },
       { header: "Importe (€)", value: (expense) => expense.amount },
       { header: "Coste mensual (€)", value: (expense) => Math.round(monthlyCost(expense) * 100) / 100 },
-      { header: `Gastado ${year} (€)`, value: (expense) => spentBetween(expense, yearStart, spentUntil) },
+      { header: `Gastado ${year} (€)`, value: (expense) => { const part = expenseSpend(expense, spentUntil); return Math.round((part.actual + part.estimated) * 100) / 100; } },
       { header: "Fecha inicio / gasto", value: (expense) => formatDate(expense.startDate) },
       { header: "Próxima renovación", value: (expense) => { const date = nextRenewal(expense, today); return date ? formatDate(date) : ""; } },
       { header: "Estado", value: (expense) => (expense.status === "active" ? "Activo" : "De baja") },
@@ -436,7 +456,7 @@ export function ExpensesManager() {
         kindLabel: expenseKindLabel(expense),
         amount: expense.amount,
         monthlyCost: monthlyCost(expense),
-        spentInYear: spentBetween(expense, yearStart, spentUntil),
+        spentInYear: (() => { const part = expenseSpend(expense, spentUntil); return part.actual + part.estimated; })(),
         nextDate: expense.kind === "one_off" ? expense.startDate : nextRenewal(expense, today),
         active: expense.status === "active",
       }));
@@ -509,15 +529,15 @@ export function ExpensesManager() {
       </CollapsibleFilters>
 
       <section className="kpi-grid">
-        <KpiCard label="Coste mensual" value={currencyFormatter.format(summary.monthly)} delta="Sin comparación" helper={`${summary.activeSubscriptions} suscripcion${summary.activeSubscriptions === 1 ? "" : "es"} activa${summary.activeSubscriptions === 1 ? "" : "s"}`} icon={<WalletIcon />} tone="indigo" />
-        <KpiCard label="Coste anual" value={currencyFormatter.format(summary.monthly * 12)} delta="Sin comparación" helper="suscripciones activas × 12" icon={<RefreshIcon />} tone="sky" />
-        <KpiCard label={`Gastado en ${year}`} value={currencyFormatter.format(summary.spent)} delta="Sin comparación" helper={year === currentYear ? `hasta hoy · previsto ${currencyFormatter.format(summary.projected)}` : "suscripciones, puntuales y facturas"} icon={<EuroIcon />} tone="amber" />
+        <KpiCard label={year === currentYear ? `Gasto ${year} hasta hoy` : `Gasto ${year}`} value={currencyFormatter.format(summary.spent)} delta="Sin comparación" helper={`${currencyFormatter.format(summary.invoiced)} facturado + ${currencyFormatter.format(summary.estimated)} estimado`} icon={<EuroIcon />} tone="amber" />
+        <KpiCard label={`Facturas ${year}`} value={currencyFormatter.format(summary.invoiceTotals.base)} delta="Sin comparación" helper={`${summary.invoiceTotals.count} factura${summary.invoiceTotals.count === 1 ? "" : "s"} · ${currencyFormatter.format(summary.invoiceTotals.total)} con IVA`} icon={<DocumentIcon />} tone="sky" />
+        <KpiCard label="Coste mensual" value={currencyFormatter.format(summary.monthly)} delta="Sin comparación" helper={`${currencyFormatter.format(summary.monthly * 12)}/año · ${summary.activeSubscriptions} suscripcion${summary.activeSubscriptions === 1 ? "" : "es"} activa${summary.activeSubscriptions === 1 ? "" : "s"}`} icon={<WalletIcon />} tone="indigo" />
         <KpiCard label="Renovaciones próximas" value={String(summary.renewals.length)} delta="Sin comparación" helper={nextRenewalItem ? `${nextRenewalItem.expense.name} ${renewalLabel(daysBetween(today, nextRenewalItem.date))}` : `ninguna en ${RENEWAL_WINDOW_DAYS} días`} icon={<CalendarIcon />} tone={summary.renewals.some((item) => daysBetween(today, item.date) <= 7) ? "rose" : "emerald"} />
       </section>
 
       <section className="expenses-grid">
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><h2>Gasto por categoría</h2><p className="panel-subtitle">{year === currentYear ? `En ${year}, hasta hoy` : `En ${year}`}</p></div></div>
+          <div className="panel-heading"><div><h2>Gasto por categoría</h2><p className="panel-subtitle">{year === currentYear ? `En ${year}, hasta hoy · previsto año completo ${currencyFormatter.format(summary.projected)}` : `En ${year}`}</p></div></div>
           <DonutChart items={summary.categoryItems} centerLabel={`gastado ${year}`} ariaLabel="Gasto del año por categoría" emptyMessage="Sin gastos en este año." valueFormatter={(value) => currencyFormatter.format(value)} />
         </article>
         <article className="panel chart-panel">

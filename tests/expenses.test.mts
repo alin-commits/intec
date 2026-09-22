@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addMonthsToKey, chargeDates, monthlyCost, nextRenewal, spentBetween, type MarketingExpense } from "../src/lib/expenses.ts";
+import { addMonthsToKey, chargeDates, monthlyCost, nextRenewal, spentBetween, subscriptionSpend, type MarketingExpense } from "../src/lib/expenses.ts";
 
 function expense(overrides: Partial<MarketingExpense>): MarketingExpense {
   return {
@@ -51,4 +51,30 @@ test("chargeDates stops at the cancellation date and handles one-off expenses", 
   assert.equal(spentBetween(oneOff, "2026-01-01", "2026-12-31"), 900);
   assert.equal(spentBetween(oneOff, "2027-01-01", "2027-12-31"), 0);
   assert.equal(spentBetween(expense({ startDate: "2026-01-15", amount: 10 }), "2026-01-01", "2026-06-30"), 60);
+});
+
+test("subscriptionSpend replaces each estimated charge with its real invoice", () => {
+  // Monthly 109 € from 10 Jan; by 30 Jun there are 6 charges (Jan–Jun).
+  const arsys = expense({ id: "arsys", startDate: "2026-01-10", amount: 109 });
+  const invoices = [
+    { expenseId: "arsys", invoiceDate: "2026-01-11", baseAmount: 90.08 },
+    { expenseId: "arsys", invoiceDate: "2026-02-09", baseAmount: 90.08 },
+    { expenseId: "other", invoiceDate: "2026-03-10", baseAmount: 500 },
+  ];
+  const result = subscriptionSpend(arsys, invoices, "2026-01-01", "2026-06-30");
+  assert.equal(Math.round(result.actual * 100) / 100, 180.16);
+  assert.equal(result.estimated, 4 * 109);
+  // Without invoices it is just the estimate.
+  assert.deepEqual(subscriptionSpend(arsys, [], "2026-01-01", "2026-06-30"), { actual: 0, estimated: 6 * 109 });
+});
+
+test("an extra invoice still counts but never cancels two charges", () => {
+  const arsys = expense({ id: "arsys", startDate: "2026-01-10", amount: 100 });
+  const invoices = [
+    { expenseId: "arsys", invoiceDate: "2026-01-10", baseAmount: 100 },
+    { expenseId: "arsys", invoiceDate: "2026-01-20", baseAmount: 30 },
+  ];
+  const result = subscriptionSpend(arsys, invoices, "2026-01-01", "2026-02-28");
+  assert.equal(result.actual, 130);
+  assert.equal(result.estimated, 100);
 });

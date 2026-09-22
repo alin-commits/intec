@@ -18,7 +18,7 @@ export type MarketingInvoice = {
   totalAmount: number;
   category: ExpenseCategory;
   businessUnitId: string | null;
-  /** Set when the invoice belongs to a tracked subscription: it is then not added to totals again. */
+  /** Set when the invoice belongs to a tracked subscription: it then stands in for that period's estimated charge. */
   expenseId: string | null;
   filePath: string | null;
   fileName: string | null;
@@ -38,11 +38,6 @@ export type InvoiceExtraction = {
   /** Billing period if the invoice looks like a recurring fee (subscription), otherwise null. */
   recurrence: BillingPeriod | null;
 };
-
-/** Amount an invoice adds to the department's spending (base, without VAT). Subscription invoices add nothing extra. */
-export function invoiceSpend(invoice: MarketingInvoice): number {
-  return invoice.expenseId ? 0 : invoice.baseAmount;
-}
 
 function normalise(value: string): string {
   return value

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { INVOICE_PATH_PATTERN, invoiceSpend, matchSubscription, type MarketingInvoice } from "../src/lib/invoices.ts";
+import { INVOICE_PATH_PATTERN, matchSubscription } from "../src/lib/invoices.ts";
 
 const subscriptions = [
   { id: "a", name: "Arsys", provider: "Arsys", kind: "subscription", status: "active" },
@@ -15,12 +15,6 @@ test("matchSubscription recognises the supplier despite legal suffixes and accen
   // One-off expenses are never treated as subscriptions.
   assert.equal(matchSubscription("IFEMA", subscriptions), null);
   assert.equal(matchSubscription("SL", subscriptions), null);
-});
-
-test("invoiceSpend counts the base amount unless the invoice belongs to a subscription", () => {
-  const invoice = { baseAmount: 100, vatAmount: 21, totalAmount: 121, expenseId: null } as MarketingInvoice;
-  assert.equal(invoiceSpend(invoice), 100);
-  assert.equal(invoiceSpend({ ...invoice, expenseId: "a" }), 0);
 });
 
 test("only app-generated storage paths are accepted", () => {

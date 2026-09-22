@@ -97,6 +97,39 @@ export function spentBetween(expense: MarketingExpense, from: string, to: string
   return chargeDates(expense, from, to).length * expense.amount;
 }
 
+/** Minimal invoice data needed to reconcile it with a subscription's charges. */
+export type InvoiceCharge = { expenseId: string | null; invoiceDate: string; baseAmount: number };
+
+// How far an invoice date may be from a charge date and still be "that month's/quarter's/year's" invoice.
+const MATCH_TOLERANCE_DAYS: Record<BillingPeriod, number> = { monthly: 16, quarterly: 46, yearly: 183 };
+
+/**
+ * What a subscription cost between two dates: real invoices linked to it count
+ * at their base amount, and each charge with no invoice nearby is estimated at
+ * the subscription's amount. So an invoice replaces its estimate instead of
+ * being added on top of it (or ignored).
+ */
+export function subscriptionSpend(expense: MarketingExpense, invoices: InvoiceCharge[], from: string, to: string): { actual: number; estimated: number } {
+  const linked = invoices.filter((invoice) => invoice.expenseId === expense.id && invoice.invoiceDate >= from && invoice.invoiceDate <= to);
+  const actual = linked.reduce((sum, invoice) => sum + invoice.baseAmount, 0);
+  if (expense.kind !== "subscription" || !expense.billingPeriod) {
+    return { actual, estimated: linked.length ? 0 : spentBetween(expense, from, to) };
+  }
+  const tolerance = MATCH_TOLERANCE_DAYS[expense.billingPeriod];
+  const unused = linked.map((invoice) => invoice.invoiceDate);
+  let uncovered = 0;
+  for (const charge of chargeDates(expense, from, to)) {
+    let best = -1;
+    for (let index = 0; index < unused.length; index++) {
+      const distance = Math.abs(daysBetween(charge, unused[index]));
+      if (distance <= tolerance && (best === -1 || distance < Math.abs(daysBetween(charge, unused[best])))) best = index;
+    }
+    if (best === -1) uncovered++;
+    else unused.splice(best, 1);
+  }
+  return { actual, estimated: uncovered * expense.amount };
+}
+
 /** Next charge date on or after `today` for an active subscription; null otherwise. */
 export function nextRenewal(expense: MarketingExpense, today: string): string | null {
   if (expense.kind !== "subscription" || expense.status !== "active" || !expense.billingPeriod) return null;
