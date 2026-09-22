@@ -5,28 +5,26 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, yearOfMonth, yearRange } from "@/lib/dates";
+import { inDateKeyRange, monthKey, monthKeyInMadrid, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, yearOfMonth, yearRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES, ticketBlockingLevelLabels, ticketCategoryLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
 import { exportTicketReportPdf } from "@/lib/tickets/ticket-report-pdf";
 import type { Ticket, TicketStatus } from "@/lib/tickets/types";
 import { blankTicketFilters, TicketFilters, type TicketFilterState } from "./ticket-filters";
 import { QuickCreateTicketButton } from "./quick-create-ticket-button";
-import { TicketDashboardCards } from "./ticket-dashboard-cards";
+import { TicketDashboardCards, TicketPriorityPanel } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
-import { TicketPriorityBadge } from "./ticket-priority-badge";
-import { TicketStatusBadge } from "./ticket-status-badge";
 import { EmptyState } from "./empty-state";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
 const PAGE_SIZE = 5;
-const DETAIL_PAGE_SIZE = 10;
-type DetailSortColumn = "createdAt" | "priority";
+const COMPLETED_PAGE_SIZE = 10;
 
 function monthsOfYear(year: number): string[] {
   return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
@@ -51,16 +49,10 @@ export function TicketsManager() {
   const [chartMode, setChartMode] = useState<"month" | "year" | "total">("year");
   const [chartMonth, setChartMonth] = useState(() => monthKey());
   const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
-  const [detailPage, setDetailPage] = useState(1);
 
   async function loadTickets() {
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("tickets")
-      .select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, closed_at, archived_at")
-      .is("archived_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1000);
+    const { data, error } = await fetchAllPages((from, to) => supabase.from("tickets").select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, closed_at, archived_at").is("archived_at", null).order("created_at", { ascending: false }).order("id").range(from, to));
     if (error) {
       setMessage(reportSafeError(error, "No se pudieron cargar los tickets."));
       return;
@@ -98,10 +90,9 @@ export function TicketsManager() {
       const matchesPriority = filters.priority === "all" || ticket.priority === filters.priority;
       const matchesCategory = filters.category === "all" || ticket.category === filters.category;
       const matchesDepartment = filters.department === "all" || ticket.department === filters.department;
-      const matchesFrom = !filters.dateFrom || ticket.createdAt >= filters.dateFrom;
-      const matchesTo = !filters.dateTo || ticket.createdAt <= `${filters.dateTo}T23:59:59`;
+      const matchesDates = inDateKeyRange(ticket.createdAt, filters.dateFrom, filters.dateTo);
       const matchesOpen = !filters.onlyOpen || OPEN_TICKET_STATUSES.includes(ticket.status);
-      return matchesQuery && matchesStatus && matchesPriority && matchesCategory && matchesDepartment && matchesFrom && matchesTo && matchesOpen;
+      return matchesQuery && matchesStatus && matchesPriority && matchesCategory && matchesDepartment && matchesDates && matchesOpen;
     });
     const direction = sort.direction === "asc" ? 1 : -1;
     return filtered.sort((a, b) => {
@@ -110,8 +101,7 @@ export function TicketsManager() {
     });
   }, [tickets, filters, sort]);
 
-  // Las tarjetas de resumen usan el mismo periodo que el selector del gráfico
-  // ("Vista del gráfico" / "Mes" / "Año"), para que cambiarlo también las actualice.
+  // Un único selector de "Periodo" gobierna tarjetas, gráficos y exportación.
   const period = useMemo(() => {
     if (chartMode === "month") return monthRange(chartMonth);
     if (chartMode === "year") return yearRange(chartYear);
@@ -126,31 +116,19 @@ export function TicketsManager() {
     [visibleTickets, period],
   );
 
-  const detailTotalPages = Math.max(1, Math.ceil(visibleTickets.length / DETAIL_PAGE_SIZE));
-  const effectiveDetailPage = Math.min(detailPage, detailTotalPages);
-  const detailPageTickets = useMemo(() => {
-    const start = (effectiveDetailPage - 1) * DETAIL_PAGE_SIZE;
-    return visibleTickets.slice(start, start + DETAIL_PAGE_SIZE);
-  }, [visibleTickets, effectiveDetailPage]);
-
-  function handleDetailSort(column: DetailSortColumn) {
-    setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
-    setDetailPage(1);
-    setCompletedPage(1);
-  }
 
   const activeTickets = useMemo(() => visibleTickets.filter((ticket) => OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
   const completedTickets = useMemo(() => visibleTickets.filter((ticket) => !OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
 
-  const completedTotalPages = Math.max(1, Math.ceil(completedTickets.length / DETAIL_PAGE_SIZE));
+  const completedTotalPages = Math.max(1, Math.ceil(completedTickets.length / COMPLETED_PAGE_SIZE));
   const effectiveCompletedPage = Math.min(completedPage, completedTotalPages);
   const completedPageTickets = useMemo(() => {
-    const start = (effectiveCompletedPage - 1) * DETAIL_PAGE_SIZE;
-    return completedTickets.slice(start, start + DETAIL_PAGE_SIZE);
+    const start = (effectiveCompletedPage - 1) * COMPLETED_PAGE_SIZE;
+    return completedTickets.slice(start, start + COMPLETED_PAGE_SIZE);
   }, [completedTickets, effectiveCompletedPage]);
 
   const availableChartYears = useMemo(() => {
-    const years = new Set(visibleTickets.map((ticket) => yearOfMonth(ticket.createdAt.slice(0, 7))));
+    const years = new Set(visibleTickets.map((ticket) => yearOfMonth(monthKeyInMadrid(ticket.createdAt))));
     years.add(yearOfMonth(monthKey()));
     return Array.from(years).sort();
   }, [visibleTickets]);
@@ -165,7 +143,7 @@ export function TicketsManager() {
     }
     const byMonth = new Map<string, number>();
     for (const ticket of visibleTickets) {
-      const month = ticket.createdAt.slice(0, 7);
+      const month = monthKeyInMadrid(ticket.createdAt);
       byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
     }
     if (chartMode === "year") {
@@ -224,13 +202,11 @@ export function TicketsManager() {
 
   function handleSort(column: TicketSortColumn) {
     setSort((current) => current.column === column ? { column, direction: current.direction === "asc" ? "desc" : "asc" } : { column, direction: "desc" });
-    setDetailPage(1);
     setCompletedPage(1);
   }
 
   function handleFiltersChange(next: TicketFilterState) {
     setFilters(next);
-    setDetailPage(1);
     setCompletedPage(1);
   }
 
@@ -322,7 +298,7 @@ export function TicketsManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Soporte interno</span><h2>Tickets informáticos</h2><p>Incidencias enviadas desde /soporte por cualquier trabajador de la empresa.</p></div>
+        <div><p>Incidencias enviadas desde /soporte por cualquier trabajador de la empresa.</p></div>
         <div className="panel-heading-trailing">
           <QuickCreateTicketButton visible={canManage} onCreated={() => void loadTickets()} />
           <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
@@ -331,85 +307,41 @@ export function TicketsManager() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
-      <TicketDashboardCards counts={counts} periodLabel={periodLabel} />
-      <div className="ticket-chart-row">
-      <section className="panel chart-panel chart-panel-compact">
-        <div className="panel-heading"><div><span className="eyebrow">Volumen</span><h2>Tickets por mes</h2></div></div>
-        <TrendChart
-          data={monthlyChartData}
-          series={[{ key: "count", label: "Tickets", color: "#2563eb" }]}
-          ariaLabel="Tickets creados por mes"
-        />
-      </section>
-      <section className="panel">
-        <div className="filter-bar ticket-chart-filter-bar">
-          <label><span>Vista del gráfico</span>
-            <select value={chartMode} onChange={(event) => setChartMode(event.target.value as "month" | "year" | "total")}>
-              <option value="month">Un mes</option>
-              <option value="year">Por año</option>
-              <option value="total">Todo el histórico</option>
+      <section className="panel period-bar">
+        <label><span>Periodo</span>
+          <select value={chartMode} onChange={(event) => setChartMode(event.target.value as "month" | "year" | "total")}>
+            <option value="month">Un mes</option>
+            <option value="year">Por año</option>
+            <option value="total">Todo el histórico</option>
+          </select>
+        </label>
+        {chartMode === "month" ? (
+          <label><span>Mes</span><input type="month" value={chartMonth} max={monthKey()} onChange={(event) => setChartMonth(event.target.value)} /></label>
+        ) : null}
+        {chartMode === "year" ? (
+          <label><span>Año</span>
+            <select value={chartYear} onChange={(event) => setChartYear(Number(event.target.value))}>
+              {availableChartYears.map((year) => <option key={year} value={year}>{year}</option>)}
             </select>
           </label>
-          {chartMode === "month" ? (
-            <label><span>Mes</span><input type="month" value={chartMonth} max={monthKey()} onChange={(event) => setChartMonth(event.target.value)} /></label>
-          ) : null}
-          {chartMode === "year" ? (
-            <label><span>Año</span>
-              <select value={chartYear} onChange={(event) => setChartYear(Number(event.target.value))}>
-                {availableChartYears.map((year) => <option key={year} value={year}>{year}</option>)}
-              </select>
-            </label>
-          ) : null}
-        </div>
-      </section>
-      </div>
-      <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Detalle</span><h2>Tickets ({visibleTickets.length})</h2></div></div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Nº</th>
-                <th>Departamento</th>
-                <th>Título</th>
-                <th>Categoría</th>
-                <th>
-                  <button type="button" className="sort-button" onClick={() => handleDetailSort("priority")}>
-                    Prioridad{sort.column === "priority" ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
-                  </button>
-                </th>
-                <th>Estado</th>
-                <th>
-                  <button type="button" className="sort-button" onClick={() => handleDetailSort("createdAt")}>
-                    Creado{sort.column === "createdAt" ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
-                  </button>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {detailPageTickets.map((ticket) => (
-                <tr key={ticket.id}>
-                  <td>{ticket.ticketNumber}</td>
-                  <td>{ticket.department}</td>
-                  <td>{ticket.title}</td>
-                  <td>{ticketCategoryLabels[ticket.category]}</td>
-                  <td><TicketPriorityBadge priority={ticket.priority} /></td>
-                  <td><TicketStatusBadge status={ticket.status} /></td>
-                  <td>{formatDate(ticket.createdAt)}</td>
-                </tr>
-              ))}
-              {visibleTickets.length === 0 ? <tr><td colSpan={7} className="muted">Sin tickets que coincidan con los filtros.</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-        {detailTotalPages > 1 ? (
-          <div className="table-panel-footer table-panel-pagination">
-            <button type="button" className="button button-secondary button-compact" disabled={effectiveDetailPage <= 1} onClick={() => setDetailPage(effectiveDetailPage - 1)}>← Anterior</button>
-            <span className="muted">Página {effectiveDetailPage} de {detailTotalPages}</span>
-            <button type="button" className="button button-secondary button-compact" disabled={effectiveDetailPage >= detailTotalPages} onClick={() => setDetailPage(effectiveDetailPage + 1)}>Siguiente →</button>
-          </div>
         ) : null}
+        <p className="muted">Afecta a las tarjetas, los gráficos y a lo que se exporta en CSV y PDF.</p>
       </section>
+
+      <TicketDashboardCards counts={counts} periodLabel={periodLabel} />
+
+      <section className="dashboard-grid">
+        <article className="panel chart-panel">
+          <div className="panel-heading"><div><h2>Tickets creados</h2><p className="panel-subtitle">{chartMode === "month" ? `Por semana · ${periodLabel}` : chartMode === "year" ? `Por mes · ${periodLabel}` : "Por mes · todo el histórico"}</p></div></div>
+          <TrendChart
+            data={monthlyChartData}
+            series={[{ key: "count", label: "Tickets", color: "#4f46e5" }]}
+            ariaLabel="Tickets creados en el periodo"
+          />
+        </article>
+        <TicketPriorityPanel counts={counts} periodLabel={periodLabel} />
+      </section>
+
       <TicketFilters filters={filters} departments={departments} resultCount={visibleTickets.length} onChange={handleFiltersChange} />
 
       {canManage && selectedIds.size > 0 ? (

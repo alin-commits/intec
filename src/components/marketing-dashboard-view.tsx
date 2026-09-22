@@ -5,9 +5,11 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { campaignStatusLabels } from "@/lib/constants";
 import { monthKey, monthShortLabel } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
-import { reportSafeError } from "@/lib/errors";
+import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { KpiCard } from "@/components/kpi-card";
+import { ConversionIcon, EuroIcon, LeadsIcon, TrophyIcon } from "@/components/icons";
 import { Toast } from "@/components/ui/toast";
 import type { BusinessUnit, CampaignStatus, LeadStatus } from "@/lib/types";
 
@@ -49,13 +51,13 @@ export function MarketingDashboardView() {
         { data: unitData, error: unitError },
         { data: leadData, error: leadError },
         { data: campaignData, error: campaignError },
-        { data: socialData },
-        { data: adsData },
-        { data: mailingData },
-        { data: socialTrendData },
+        { data: socialData, error: socialError },
+        { data: adsData, error: adsError },
+        { data: mailingData, error: mailingError },
+        { data: socialTrendData, error: socialTrendError },
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-        supabase.from("leads").select("business_unit_id, campaign_id, status, sale_value").limit(2000),
+        fetchAllPages((from, to) => supabase.from("leads").select("business_unit_id, campaign_id, status, sale_value").order("id").range(from, to)),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         supabase.from("social_media_stats").select("new_followers").eq("period_month", currentMonth),
         supabase.from("meta_ads_entries").select("campaign_id, amount_spent, leads, revenue"),
@@ -66,6 +68,7 @@ export function MarketingDashboardView() {
         setMessage(reportSafeError(unitError ?? leadError ?? campaignError, "No se pudieron cargar los datos de marketing."));
         return;
       }
+      if (socialError || adsError || mailingError || socialTrendError) setMessage(PARTIAL_LOAD_MESSAGE);
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
       setLeads((leadData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) })));
       setCampaigns((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
@@ -111,10 +114,10 @@ export function MarketingDashboardView() {
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <section className="kpi-grid">
-        <KpiCard label="Leads" value={String(totalLeads)} delta="Sin comparación" helper="total actual" />
-        <KpiCard label="Ganados" value={String(totalWon)} delta="Sin comparación" helper="total actual" />
-        <KpiCard label="Conversión" value={formatPercent(conversion)} delta="Sin comparación" helper="total actual" />
-        <KpiCard label="Valor ganado" value={currencyFormatter.format(totalValue)} delta="Sin comparación" helper="total actual" />
+        <KpiCard label="Leads" value={String(totalLeads)} delta="Sin comparación" helper="total actual" icon={<LeadsIcon />} tone="sky" />
+        <KpiCard label="Ganados" value={String(totalWon)} delta="Sin comparación" helper="total actual" icon={<TrophyIcon />} tone="indigo" />
+        <KpiCard label="Conversión" value={formatPercent(conversion)} delta="Sin comparación" helper="leads ganados sobre el total" icon={<ConversionIcon />} tone="emerald" />
+        <KpiCard label="Valor ganado" value={currencyFormatter.format(totalValue)} delta="Sin comparación" helper="total actual" icon={<EuroIcon />} tone="amber" />
       </section>
 
       <section className="panel table-panel">
@@ -185,7 +188,7 @@ export function MarketingDashboardView() {
         </div>
         <TrendChart
           data={rrssTrend}
-          series={[{ key: "newFollowers", label: "Nuevos seguidores", color: "#2563eb" }]}
+          series={[{ key: "newFollowers", label: "Nuevos seguidores", color: "#4f46e5" }]}
           ariaLabel="Evolución mensual de nuevos seguidores"
         />
       </section>

@@ -1,4 +1,4 @@
-import { emailButton, emailShell } from "@/lib/email-templates";
+import { emailButton, emailShell, escapeHtml } from "@/lib/email-templates";
 import { ticketBlockingLevelLabels, ticketCategoryLabels, ticketPriorityLabels } from "./constants";
 import type { TicketBlockingLevel, TicketCategory, TicketPriority } from "./types";
 
@@ -15,15 +15,6 @@ type TicketCreatedEmailInput = {
   blockingLevel: TicketBlockingLevel;
   description: string;
 };
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function row(label: string, value: string): string {
   return `<tr><td style="padding:4px 0;color:#64748b;font-size:12px;font-weight:700;width:150px;vertical-align:top;">${label}</td><td style="padding:4px 0;font-size:13px;">${escapeHtml(value)}</td></tr>`;

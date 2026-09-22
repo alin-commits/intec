@@ -1,5 +1,5 @@
 import { formatDate } from "@/lib/format";
-import { generatePdfReport, type ReportBadge, type ReportColumn, type ReportStat } from "@/lib/pdf-report";
+import { generatePdfReport, renderPdfReport, type ReportBadge, type ReportColumn, type ReportOptions, type ReportStat } from "@/lib/pdf-report";
 import { ticketCategoryLabels, ticketPriorityLabels, ticketStatusLabels } from "./constants";
 import type { TicketDashboardCounts } from "./map";
 import type { Ticket } from "./types";
@@ -37,7 +37,7 @@ type TicketReportOptions = {
   tickets: Ticket[];
 };
 
-export async function exportTicketReportPdf({ periodLabel, counts, tickets }: TicketReportOptions) {
+function ticketReportOptions({ periodLabel, counts, tickets }: TicketReportOptions): ReportOptions<Ticket> {
   const stats: ReportStat[] = [
     { label: "Nuevos", value: String(counts.newCount) },
     { label: "Abiertos", value: String(counts.openCount) },
@@ -52,7 +52,7 @@ export async function exportTicketReportPdf({ periodLabel, counts, tickets }: Ti
   ];
   const generatedAt = new Intl.DateTimeFormat("es-ES", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Madrid" }).format(new Date());
 
-  await generatePdfReport({
+  return {
     title: "Informe de tickets informáticos",
     subtitle: `Periodo: ${periodLabel}  ·  Generado el ${generatedAt}  ·  ${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`,
     stats,
@@ -60,5 +60,13 @@ export async function exportTicketReportPdf({ periodLabel, counts, tickets }: Ti
     columns: COLUMNS,
     rows: tickets,
     filename: `informe_tickets_${new Date().toISOString().slice(0, 10)}.pdf`,
-  });
+  };
+}
+
+export async function exportTicketReportPdf(options: TicketReportOptions) {
+  await generatePdfReport(ticketReportOptions(options));
+}
+
+export async function renderTicketReportPdf(options: TicketReportOptions): Promise<ArrayBuffer> {
+  return renderPdfReport(ticketReportOptions(options));
 }

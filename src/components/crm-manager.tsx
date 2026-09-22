@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { CRM_EDIT_ROLES, CRM_ROLES, hasAnyRole } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv-export";
@@ -7,11 +8,14 @@ import { businessUnits as demoBusinessUnits, demoCrmContacts } from "@/lib/demo-
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit, CrmContact } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
+import { KpiCard } from "@/components/kpi-card";
+import { CrmIcon, PlusCircleIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 
 type ContactDraft = {
   businessUnitId: string;
@@ -57,6 +61,13 @@ export function CrmManager() {
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
+  const urlQuery = useSearchParams().get("q") ?? "";
+  const [appliedUrlQuery, setAppliedUrlQuery] = useState("");
+  if (urlQuery && urlQuery !== appliedUrlQuery) {
+    setAppliedUrlQuery(urlQuery);
+    setQuery(urlQuery);
+    setUnitFilter("all");
+  }
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ContactDraft>(() => blankDraft(demoBusinessUnits.filter((unit) => unit.active)));
@@ -77,7 +88,7 @@ export function CrmManager() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: contactData, error: contactError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-      supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, created_by, created_at, updated_at").order("created_at", { ascending: false }),
+      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
     ]);
     if (unitError || contactError) {
@@ -101,6 +112,18 @@ export function CrmManager() {
     const matchesQuery = `${contact.fullName} ${contact.companyName ?? ""}`.toLowerCase().includes(query.toLowerCase());
     return matchesQuery && (unitFilter === "all" || contact.businessUnitId === unitFilter);
   }), [contacts, query, unitFilter]);
+
+  const crmSummary = useMemo(() => {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const companies = new Set(visibleContacts.map((contact) => contact.companyName?.trim().toLowerCase()).filter(Boolean));
+    const unitIds = new Set(visibleContacts.map((contact) => contact.businessUnitId));
+    return {
+      total: visibleContacts.length,
+      recent: visibleContacts.filter((contact) => contact.createdAt >= weekAgo).length,
+      companies: companies.size,
+      units: unitIds.size,
+    };
+  }, [visibleContacts]);
 
   function openNew() {
     setEditingId(null);
@@ -237,7 +260,7 @@ export function CrmManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Base comercial</span><h2>CRM</h2><p>Contactos generados a través de campañas o consultas, organizados por empresa.</p></div>
+        <div><p>Contactos generados a través de campañas o consultas, organizados por empresa.</p></div>
         <div className="panel-heading-trailing">
           <button type="button" className="button button-compact button-secondary" onClick={exportContactsCsv}>Exportar CSV</button>
           {canEdit ? <button type="button" className="button button-primary" onClick={openNew}>+ Nuevo contacto</button> : null}
@@ -264,6 +287,13 @@ export function CrmManager() {
           </label>
         </div>
       </CollapsibleFilters>
+
+      <section className="kpi-grid">
+        <KpiCard label="Contactos" value={String(crmSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<CrmIcon />} tone="indigo" />
+        <KpiCard label="Nuevos esta semana" value={String(crmSummary.recent)} delta="Sin comparación" helper="últimos 7 días" icon={<PlusCircleIcon />} tone="emerald" />
+        <KpiCard label="Empresas" value={String(crmSummary.companies)} delta="Sin comparación" helper="distintas" icon={<UsuariosIcon />} tone="sky" />
+        <KpiCard label="Marcas" value={String(crmSummary.units)} delta="Sin comparación" helper="con contactos" icon={<UnidadesIcon />} tone="amber" />
+      </section>
 
       <section className="panel table-panel">
         <div className="table-scroll">

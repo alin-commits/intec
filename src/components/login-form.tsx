@@ -24,8 +24,14 @@ export function LoginForm() {
     setBusy(true);
     try {
       const supabase = createClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError) throw signInError;
+      const { data: profile } = await supabase.from("profiles").select("is_active").eq("id", signInData.user.id).maybeSingle();
+      if (!profile?.is_active) {
+        await supabase.auth.signOut();
+        setError("Tu cuenta está desactivada. Pide a un administrador que la vuelva a activar.");
+        return;
+      }
       router.replace("/dashboard");
       router.refresh();
     } catch (cause) {

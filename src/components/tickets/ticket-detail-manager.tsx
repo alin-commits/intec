@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
-import { reportSafeError } from "@/lib/errors";
+import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { mapTicketRow } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
@@ -60,16 +60,21 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
 
   const loadTicket = useCallback(async () => {
     const supabase = createClient();
-    const [{ data: ticketRow, error: ticketError }, { data: noteRows }, { data: eventRows }, { data: profileRows }] = await Promise.all([
+    const [{ data: ticketRow, error: ticketError }, { data: noteRows, error: notesError }, { data: eventRows, error: eventsError }, { data: profileRows }] = await Promise.all([
       supabase.from("tickets").select("*").eq("id", ticketId).maybeSingle(),
       supabase.from("ticket_notes").select("*").eq("ticket_id", ticketId),
       supabase.from("ticket_events").select("*").eq("ticket_id", ticketId),
       supabase.from("profiles").select("id, full_name"),
     ]);
-    if (ticketError || !ticketRow) {
+    if (ticketError) {
+      setMessage(reportSafeError(ticketError, "No se pudo cargar el ticket. Recarga la página para reintentarlo."));
+      return;
+    }
+    if (!ticketRow) {
       setAccess("not_found");
       return;
     }
+    if (notesError || eventsError) setMessage(PARTIAL_LOAD_MESSAGE);
     setTicket(mapTicketRow(ticketRow as Record<string, unknown>));
     setNotes((noteRows ?? []).map((row) => mapNoteRow(row as Record<string, unknown>)));
     setEvents((eventRows ?? []).map((row) => mapEventRow(row as Record<string, unknown>)));
@@ -255,7 +260,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <div className="page-stack"><Toast message={message} onDismiss={() => setMessage(null)} /></div>;
 
   if (access === "denied") {
     return (

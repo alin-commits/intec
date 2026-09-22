@@ -36,6 +36,8 @@ export const RRSS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction
 export const UNITS_ROLES: AppRole[] = ["admin", "viewer"];
 export const CARDS_ROLES: AppRole[] = ["admin", "marketing", "it"];
 export const CRM_ROLES: AppRole[] = ["admin", "marketing", "commercial", "direction"];
+/** Who can send internal notices (avisos) to other users. */
+export const ANNOUNCEMENT_SENDER_ROLES: AppRole[] = ["admin", "direction", "marketing", "it"];
 export const CRM_EDIT_ROLES: AppRole[] = ["admin", "marketing", "commercial"];
 
 export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
@@ -63,6 +65,14 @@ export const inquiryChannelLabels: Record<InquiryType, string> = {
   email_form: "Email/Formulario",
   whatsapp: "Whatsapp",
   portal_rrss: "Portales/RRSS",
+};
+
+export const inquiryChannelColors: Record<InquiryType, string> = {
+  phone: "#0e7490",
+  chat: "#6d28d9",
+  email_form: "#1d4ed8",
+  whatsapp: "#15803d",
+  portal_rrss: "#c2410c",
 };
 
 export const campaignStatusLabels: Record<CampaignStatus, string> = {

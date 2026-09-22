@@ -1,24 +1,31 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
-import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
+import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { exportLeadReportPdf } from "@/lib/lead-report-pdf";
+import { inDateKeyRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import type { BusinessUnit, Lead, LeadStatus } from "@/lib/types";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
+import type { AppRole, BusinessUnit, Lead, LeadStatus } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
+import { KpiCard } from "@/components/kpi-card";
+import { ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/components/icons";
 
 const STORAGE_KEY = "intec-demo-leads";
 
 type CampaignOption = { id: string; name: string; businessUnitId: string };
+type TeamMember = { id: string; fullName: string; roles: AppRole[] };
+type OwnerFilter = "all" | "mine" | "unassigned" | string;
 type LeadDraft = Omit<Lead, "id" | "createdAt">;
 
 function blankDraft(units: BusinessUnit[]): LeadDraft {
@@ -38,6 +45,7 @@ function blankDraft(units: BusinessUnit[]): LeadDraft {
     source: "",
     notes: "",
     saleValue: null,
+    assignedTo: null,
     statusHistory: [],
   };
 }
@@ -72,6 +80,7 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
     source: String(row.source ?? ""),
     notes: String(row.notes ?? ""),
     saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
+    assignedTo: row.assigned_to ? String(row.assigned_to) : null,
     statusHistory: historyValue.map((item) => {
       const history = item as Record<string, unknown>;
       return {
@@ -114,6 +123,24 @@ export function LeadsTable() {
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isCommercial, setIsCommercial] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
+  const searchParams = useSearchParams();
+  const urlQuery = searchParams.get("q") ?? "";
+  const urlOwner = searchParams.get("owner") ?? "";
+  const urlKey = `${urlQuery}|${urlOwner}`;
+  const [appliedUrlKey, setAppliedUrlKey] = useState("|");
+  if (urlKey !== "|" && urlKey !== appliedUrlKey) {
+    setAppliedUrlKey(urlKey);
+    setUnitId("all");
+    if (urlQuery) setQuery(urlQuery);
+    if (urlOwner === "mine") {
+      setOwnerFilter("mine");
+      setStatus("new");
+    }
+  }
   // Nuevos leads solo ofrecen unidades marcadas visibleInLeads; al editar uno
   // existente se mantienen todas para no perder su marca si se ocultó después.
   const registrableUnits = useMemo(() => units.filter((unit) => unit.visibleInLeads), [units]);
@@ -127,17 +154,35 @@ export function LeadsTable() {
   const filteredCampaigns = useMemo(() => campaignOptions.filter((campaign) => !draft.businessUnitId || campaign.businessUnitId === draft.businessUnitId), [campaignOptions, draft.businessUnitId]);
   const visibleRows = useMemo(() => rows.filter((lead) => {
     const matchesQuery = `${lead.contactName} ${lead.clientCompanyName} ${lead.productInterest} ${lead.phone} ${lead.email}`.toLowerCase().includes(query.toLowerCase());
-    const matchesFrom = !dateFrom || lead.createdAt >= dateFrom;
-    const matchesTo = !dateTo || lead.createdAt <= `${dateTo}T23:59:59`;
-    return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status) && matchesFrom && matchesTo;
-  }), [query, rows, status, unitId, dateFrom, dateTo]);
+    const matchesDates = inDateKeyRange(lead.createdAt, dateFrom, dateTo);
+    const owner = lead.assignedTo ?? null;
+    const matchesOwner = ownerFilter === "all"
+      || (ownerFilter === "mine" ? owner === currentUserId : ownerFilter === "unassigned" ? owner === null : owner === ownerFilter);
+    return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status) && matchesDates && matchesOwner;
+  }), [query, rows, status, unitId, dateFrom, dateTo, ownerFilter, currentUserId]);
+
+  const teamById = useMemo(() => new Map(team.map((member) => [member.id, member.fullName])), [team]);
+  const ownerName = (id: string | null | undefined) => (id ? teamById.get(id) ?? "Usuario inactivo" : "Sin asignar");
+  // Only commercials can own leads; keep the current owner listed even if their role changed.
+  const ownerOptions = useMemo(() => team.filter((member) => member.roles.includes("commercial") || member.id === draft.assignedTo), [team, draft.assignedTo]);
+
+  const leadSummary = useMemo(() => {
+    const won = visibleRows.filter((lead) => lead.status === "won");
+    return {
+      total: visibleRows.length,
+      fresh: visibleRows.filter((lead) => lead.status === "new").length,
+      won: won.length,
+      conversion: visibleRows.length ? (won.length / visibleRows.length) * 100 : 0,
+      value: won.reduce((sum, lead) => sum + (lead.saleValue ?? 0), 0),
+    };
+  }, [visibleRows]);
 
   async function loadRealData() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("campaigns").select("id, name, business_unit_id").neq("status", "archived").order("name"),
-      supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at)").order("created_at", { ascending: false }).limit(500),
+      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, assigned_to, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at)").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
     ]);
     if (unitError || campaignError || leadError) {
@@ -151,7 +196,13 @@ export function LeadsTable() {
     setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>)));
     const user = authData.user;
     if (user) {
-      const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
+      const [{ data: profile }, { data: teamData }] = await Promise.all([
+        supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle(),
+        supabase.rpc("list_team_members"),
+      ]);
+      setCurrentUserId(user.id);
+      setIsCommercial(Boolean(profile?.roles.includes("commercial")));
+      setTeam(((teamData ?? []) as { id: string; full_name: string | null; roles: AppRole[] }[]).map((row) => ({ id: row.id, fullName: row.full_name || "Usuario", roles: row.roles })));
       setCanEdit(Boolean(profile && hasAnyRole(profile.roles, ["admin", "commercial", "marketing"])));
       setAccess(profile && hasAnyRole(profile.roles, LEADS_ROLES) ? "allowed" : "denied");
     } else {
@@ -166,7 +217,7 @@ export function LeadsTable() {
 
   function openNew() {
     setEditingId(null);
-    const draftForNew = blankDraft(registrableUnits);
+    const draftForNew = { ...blankDraft(registrableUnits), assignedTo: isCommercial ? currentUserId : null };
     setDraft(unitId !== "all" ? { ...draftForNew, businessUnitId: unitId } : draftForNew);
     setEditorOpen(true);
     setMessage(null);
@@ -190,6 +241,7 @@ export function LeadsTable() {
       source: lead.source,
       notes: lead.notes,
       saleValue: lead.saleValue,
+      assignedTo: lead.assignedTo ?? null,
       statusHistory: lead.statusHistory,
     });
     setEditorOpen(true);
@@ -241,6 +293,7 @@ export function LeadsTable() {
           source: draft.source.trim() || null,
           notes: draft.notes?.trim() || null,
           sale_value: draft.saleValue,
+          assigned_to: draft.assignedTo || null,
         };
         const supabase = createClient();
         const result = editingId ? await supabase.from("leads").update(payload).eq("id", editingId) : await supabase.from("leads").insert(payload);
@@ -306,6 +359,7 @@ export function LeadsTable() {
       { header: "Tipo", value: (lead) => lead.type },
       { header: "Interés", value: (lead) => lead.productInterest },
       { header: "Fuente", value: (lead) => lead.source },
+      { header: "Responsable", value: (lead) => ownerName(lead.assignedTo) },
       { header: "Valor (€)", value: (lead) => lead.saleValue ?? "" },
       { header: "Notas", value: (lead) => lead.notes ?? "" },
     ]);
@@ -370,22 +424,34 @@ export function LeadsTable() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || status !== "all" || dateFrom !== "" || dateTo !== ""}
-        onClear={() => { setQuery(""); setStatus("all"); setDateFrom(""); setDateTo(""); }}
+        hasActiveFilters={query !== "" || status !== "all" || ownerFilter !== "all" || dateFrom !== "" || dateTo !== ""}
+        onClear={() => { setQuery(""); setStatus("all"); setOwnerFilter("all"); setDateFrom(""); setDateTo(""); }}
         resultCount={visibleRows.length}
         resultLabel="Leads"
       >
         <div className="filter-bar lead-filters">
           <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
           <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span>Responsable</span><select value={ownerFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setOwnerFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            {currentUserId ? <option value="mine">Mis leads</option> : null}
+            <option value="unassigned">Sin asignar</option>
+            {team.filter((member) => member.roles.includes("commercial")).map((member) => <option key={member.id} value={member.id}>{member.fullName}</option>)}
+          </select></label>
           <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateFrom(event.target.value)} /></label>
           <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
+      <section className="kpi-grid">
+        <KpiCard label="Leads" value={numberFormatter.format(leadSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<LeadsIcon />} tone="sky" />
+        <KpiCard label="Sin contactar" value={numberFormatter.format(leadSummary.fresh)} delta="Sin comparación" helper="en estado nuevo" icon={<PlusCircleIcon />} tone={leadSummary.fresh > 0 ? "rose" : "indigo"} />
+        <KpiCard label="Conversión" value={formatPercent(leadSummary.conversion)} delta="Sin comparación" helper={`${numberFormatter.format(leadSummary.won)} ganados`} icon={<ConversionIcon />} tone="emerald" />
+        <KpiCard label="Valor ganado" value={currencyFormatter.format(leadSummary.value)} delta="Sin comparación" helper="de los leads ganados" icon={<EuroIcon />} tone="amber" />
+      </section>
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Responsable</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>
             <tbody>{visibleRows.map((lead) => {
               const unit = units.find((item) => item.id === lead.businessUnitId);
               return (
@@ -395,13 +461,14 @@ export function LeadsTable() {
                   <td><strong>{lead.contactName || "Sin contacto"}</strong><small>{lead.clientCompanyName || "—"}</small></td>
                   <td>{lead.campaign || "General"}</td>
                   <td>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => setPendingStatus({ lead, status: event.target.value as LeadStatus })}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
+                  <td className={lead.assignedTo ? undefined : "muted"}>{ownerName(lead.assignedTo)}</td>
                   <td>{lead.productInterest || "—"}</td>
                   <td>{lead.saleValue ? currencyFormatter.format(lead.saleValue) : "—"}</td>
                   <td><button type="button" className="button button-compact button-secondary" onClick={() => openEdit(lead)}>{canEdit ? "Editar" : "Ver"}</button></td>
                 </tr>
               );
             })}
-            {visibleRows.length === 0 ? <tr><td colSpan={8} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
+            {visibleRows.length === 0 ? <tr><td colSpan={9} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -430,6 +497,10 @@ export function LeadsTable() {
             <label><span>Población</span><input value={draft.location} readOnly={!canEdit} onChange={(event) => updateDraft("location", event.target.value)} /></label>
             <label><span>Producto o interés</span><input value={draft.productInterest} readOnly={!canEdit} onChange={(event) => updateDraft("productInterest", event.target.value)} /></label>
             <label><span>Estado *</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label><span>Responsable</span><select value={draft.assignedTo ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("assignedTo", event.target.value || null)}>
+              <option value="">Sin asignar</option>
+              {ownerOptions.map((member) => <option key={member.id} value={member.id}>{member.fullName}</option>)}
+            </select></label>
             <label><span>Tipo</span><select value={draft.type} disabled={!canEdit} onChange={(event) => updateDraft("type", event.target.value)}>{Object.values(leadTypeLabels).map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
             <label><span>Fuente</span><input value={draft.source} readOnly={!canEdit} onChange={(event) => updateDraft("source", event.target.value)} /></label>
             <label><span>Valor de venta</span><input type="number" min="0" step="0.01" value={draft.saleValue ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("saleValue", event.target.value ? Number(event.target.value) : null)} /></label>

@@ -11,6 +11,7 @@ import { monthKey, monthRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatPercent } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit } from "@/lib/types";
 
 const LOGO_BUCKET = "business-unit-logos";
@@ -90,8 +91,8 @@ export function UnitsManager() {
     const range = monthRange(monthKey());
     const [{ data: unitData, error: unitError }, { data: inquiryData }, { data: leadData }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
-      supabase.from("inquiries").select("business_unit_id, count").gte("created_at", range.start).lt("created_at", range.end),
-      supabase.from("leads").select("business_unit_id, status").gte("created_at", range.start).lt("created_at", range.end),
+      fetchAllPages((from, to) => supabase.from("inquiries").select("business_unit_id, count").gte("created_at", range.start).lt("created_at", range.end).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("leads").select("business_unit_id, status").gte("created_at", range.start).lt("created_at", range.end).order("id").range(from, to)),
       supabase.auth.getUser(),
     ]);
     if (unitError) {
@@ -309,7 +310,7 @@ export function UnitsManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Configuración</span><h2>Unidades de negocio</h2><p>Las marcas internas organizan consultas, campañas, leads y estadísticas.</p></div>
+        <div><p>Las marcas internas organizan consultas, campañas, leads y estadísticas.</p></div>
         {isAdmin ? <button type="button" className="button button-primary" onClick={openNew}>+ Nueva unidad</button> : null}
       </section>
 

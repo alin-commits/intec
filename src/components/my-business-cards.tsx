@@ -56,7 +56,7 @@ export function MyBusinessCards({ cards, units, currentUserId }: { cards: Busine
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Equipo</span><h2>Mis tarjetas de visita</h2><p>Estas son las tarjetas que tienes asignadas. Marca la que usas normalmente para encontrarla rápido.</p></div>
+        <div><p>Estas son las tarjetas que tienes asignadas. Marca la que usas normalmente para encontrarla rápido.</p></div>
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />

@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { CrmManager } from "@/components/crm-manager";
 
 export default function CrmPage() {
-  return <CrmManager />;
+  return (
+    <Suspense>
+      <CrmManager />
+    </Suspense>
+  );
 }

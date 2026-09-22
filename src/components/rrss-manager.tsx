@@ -9,6 +9,7 @@ import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
+import { EuroIcon, EyeIcon, HeartIcon, InboxIcon, LeadsIcon, MailIcon, MegaphoneIcon, UsuariosIcon, ConversionIcon, PlusCircleIcon } from "@/components/icons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import {
   RRSS_ROLES,
@@ -27,8 +28,8 @@ import {
   demoSocialMediaStats,
 } from "@/lib/demo-data";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { monthKey, monthLabel, monthShortLabel, yearOfMonth } from "@/lib/dates";
-import { reportSafeError } from "@/lib/errors";
+import { inDateKeyRange, monthKey, monthLabel, monthShortLabel, previousDateRange, previousMonthKey, todayKey, yearOfMonth } from "@/lib/dates";
+import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { exportAdsReportPdf, exportMailingReportPdf, exportSocialReportPdf } from "@/lib/rrss-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -80,6 +81,44 @@ function safeDiv(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
 }
 
+/**
+ * KpiCard props comparing against the previous period. Without a previous
+ * value (no period to compare, or it was 0) the card just shows `fallback`.
+ */
+function compareProps(current: number, previous: number | null, compareLabel: string, fallback: string) {
+  if (previous === null || previous === 0) return { delta: "Sin comparación", positive: true, helper: fallback };
+  const change = ((current - previous) / previous) * 100;
+  return { delta: formatPercent(Math.abs(change)), positive: change >= 0, helper: compareLabel };
+}
+
+function socialTotals(rows: SocialMediaStat[]) {
+  const followers = latestFollowersSnapshot(rows).reduce((sum, row) => sum + row.followersEnd, 0);
+  return rows.reduce((acc, row) => ({
+    followers,
+    newFollowers: acc.newFollowers + row.newFollowers,
+    interactions: acc.interactions + row.interactions,
+    reach: acc.reach + row.reach,
+  }), { followers, newFollowers: 0, interactions: 0, reach: 0 });
+}
+
+function adsTotals(rows: MetaAdsEntry[]) {
+  return rows.reduce((acc, entry) => ({
+    spend: acc.spend + entry.amountSpent,
+    leads: acc.leads + entry.leads,
+    revenue: acc.revenue + entry.revenue,
+    followersGained: acc.followersGained + entry.followersGained,
+  }), { spend: 0, leads: 0, revenue: 0, followersGained: 0 });
+}
+
+function mailingTotals(rows: MailingCampaign[]) {
+  return rows.reduce((acc, campaign) => ({
+    sent: acc.sent + campaign.sentCount,
+    delivered: acc.delivered + campaign.deliveredCount,
+    opens: acc.opens + campaign.opens,
+    revenue: acc.revenue + campaign.revenue,
+  }), { sent: 0, delivered: 0, opens: 0, revenue: 0 });
+}
+
 function blankSocialDraft(units: BusinessUnit[]): SocialDraft {
   return {
     businessUnitId: units[0]?.id ?? "",
@@ -125,7 +164,7 @@ function blankMailingDraft(units: BusinessUnit[]): MailingDraft {
     businessUnitId: units[0]?.id ?? "",
     campaignName: "",
     campaignType: "newsletter",
-    sentDate: new Date().toISOString().slice(0, 10),
+    sentDate: todayKey(),
     sentCount: 0,
     deliveredCount: 0,
     opens: 0,
@@ -237,7 +276,7 @@ export function RrssManager() {
       { data: socialData, error: socialError },
       { data: adsData, error: adsError },
       { data: mailingData, error: mailingError },
-      { data: campaignData },
+      { data: campaignData, error: campaignError },
       { data: authData },
     ] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
@@ -255,6 +294,7 @@ export function RrssManager() {
     setSocialStats((socialData ?? []).map((row) => mapSocialRow(row as Record<string, unknown>)));
     setAdsEntries((adsData ?? []).map((row) => mapAdsRow(row as Record<string, unknown>)));
     setMailingCampaigns((mailingData ?? []).map((row) => mapMailingRow(row as Record<string, unknown>)));
+    if (campaignError) setMessage(PARTIAL_LOAD_MESSAGE);
     setCampaignOptions((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name })));
     const user = authData.user;
     if (user) {
@@ -320,7 +360,7 @@ export function RrssManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Marketing</span><h2>RRSS y métricas de marketing</h2><p>Redes sociales, Meta Ads y campañas de email, registradas manualmente por marca y periodo.</p></div>
+        <div><p>Redes sociales, Meta Ads y campañas de email, registradas manualmente por marca y periodo.</p></div>
       </section>
 
       {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar las métricas, pero no registrar ni editar datos.</span></div> : null}
@@ -390,15 +430,13 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const filteredPeriodRows = useMemo(() => (unitFilter === "all" ? periodRows : periodRows.filter((row) => row.businessUnitId === unitFilter)), [periodRows, unitFilter]);
   const periodLabel = viewMode === "month" ? monthLabel(selectedMonth) : `año ${selectedYear}`;
 
-  const totals = useMemo(() => {
-    const followers = latestFollowersSnapshot(filteredPeriodRows).reduce((sum, row) => sum + row.followersEnd, 0);
-    return filteredPeriodRows.reduce((acc, row) => ({
-      followers,
-      newFollowers: acc.newFollowers + row.newFollowers,
-      interactions: acc.interactions + row.interactions,
-      reach: acc.reach + row.reach,
-    }), { followers, newFollowers: 0, interactions: 0, reach: 0 });
-  }, [filteredPeriodRows]);
+  const totals = useMemo(() => socialTotals(filteredPeriodRows), [filteredPeriodRows]);
+  const previousTotals = useMemo(() => {
+    const previousMonths = viewMode === "month" ? [previousMonthKey(selectedMonth)] : monthsOfYear(selectedYear - 1);
+    const rows = stats.filter((row) => previousMonths.includes(row.periodMonth) && (unitFilter === "all" || row.businessUnitId === unitFilter));
+    return rows.length ? socialTotals(rows) : null;
+  }, [stats, viewMode, selectedMonth, selectedYear, unitFilter]);
+  const socialCompareLabel = viewMode === "month" ? "frente al mes anterior" : `frente a ${selectedYear - 1}`;
 
   const unitSummaries = useMemo(() => units.map((unit) => {
     const rows = periodRows.filter((row) => row.businessUnitId === unit.id);
@@ -609,10 +647,10 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       </div>
 
       <section className="kpi-grid">
-        <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} delta="Sin comparación" helper={`a cierre de ${periodLabel}`} />
-        <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} delta="Sin comparación" helper={periodLabel} />
-        <KpiCard label="Interacciones" value={numberFormatter.format(totals.interactions)} delta="Sin comparación" helper={periodLabel} />
-        <KpiCard label="Alcance" value={numberFormatter.format(totals.reach)} delta="Sin comparación" helper={periodLabel} />
+        <KpiCard label="Seguidores totales" value={numberFormatter.format(totals.followers)} {...compareProps(totals.followers, previousTotals?.followers ?? null, socialCompareLabel, `a cierre de ${periodLabel}`)} icon={<UsuariosIcon />} tone="indigo" />
+        <KpiCard label="Nuevos seguidores" value={numberFormatter.format(totals.newFollowers)} {...compareProps(totals.newFollowers, previousTotals?.newFollowers ?? null, socialCompareLabel, periodLabel)} icon={<PlusCircleIcon />} tone="emerald" />
+        <KpiCard label="Interacciones" value={numberFormatter.format(totals.interactions)} {...compareProps(totals.interactions, previousTotals?.interactions ?? null, socialCompareLabel, periodLabel)} icon={<HeartIcon />} tone="rose" />
+        <KpiCard label="Alcance" value={numberFormatter.format(totals.reach)} {...compareProps(totals.reach, previousTotals?.reach ?? null, socialCompareLabel, periodLabel)} icon={<EyeIcon />} tone="sky" />
       </section>
 
       <section className="dashboard-grid">
@@ -623,7 +661,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           <TrendChart
             data={monthlyTrendData}
             series={[
-              { key: "newFollowers", label: "Nuevos seguidores", color: "#2563eb" },
+              { key: "newFollowers", label: "Nuevos seguidores", color: "#4f46e5" },
               { key: "interactions", label: "Interacciones", color: "#d97706" },
             ]}
             ariaLabel="Evolución mensual de nuevos seguidores e interacciones"
@@ -763,9 +801,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
     .filter((entry) => {
       const matchesQuery = entry.campaignName.toLowerCase().includes(query.toLowerCase());
       const entryDate = entry.startDate ?? entry.createdAt;
-      const matchesFrom = !dateFrom || entryDate >= dateFrom;
-      const matchesTo = !dateTo || entryDate <= `${dateTo}T23:59:59`;
-      return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter) && matchesFrom && matchesTo;
+      const matchesDates = inDateKeyRange(entryDate, dateFrom, dateTo);
+      return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter) && matchesDates;
     })
     .sort((a, b) => {
       const aDate = a.startDate ?? a.createdAt;
@@ -773,12 +810,20 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
       return sortAsc ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate);
     }), [entries, query, unitFilter, statusFilter, sortAsc, dateFrom, dateTo]);
 
-  const totals = useMemo(() => visibleEntries.reduce((acc, entry) => ({
-    spend: acc.spend + entry.amountSpent,
-    leads: acc.leads + entry.leads,
-    revenue: acc.revenue + entry.revenue,
-    followersGained: acc.followersGained + entry.followersGained,
-  }), { spend: 0, leads: 0, revenue: 0, followersGained: 0 }), [visibleEntries]);
+  const totals = useMemo(() => adsTotals(visibleEntries), [visibleEntries]);
+  const previousTotals = useMemo(() => {
+    const window = previousDateRange(dateFrom, dateTo);
+    if (!window) return null;
+    const rows = entries.filter((entry) =>
+      entry.campaignName.toLowerCase().includes(query.toLowerCase())
+      && (unitFilter === "all" || entry.businessUnitId === unitFilter)
+      && (statusFilter === "all" || entry.status === statusFilter)
+      && inDateKeyRange(entry.startDate ?? entry.createdAt, window.from, window.to));
+    return rows.length ? adsTotals(rows) : null;
+  }, [entries, query, unitFilter, statusFilter, dateFrom, dateTo]);
+  const hasAdsRange = Boolean(previousDateRange(dateFrom, dateTo));
+  const adsFallback = hasAdsRange ? "sin datos del periodo anterior" : "elige fechas para comparar";
+  const adsCompareLabel = "frente al periodo anterior";
 
   const spendByUnit = useMemo(() => units
     .map((unit) => ({ unit, spend: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.amountSpent, 0) }))
@@ -929,13 +974,13 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
         </div>
       </section>
 
-      <section className="kpi-grid">
-        <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="Leads" value={numberFormatter.format(totals.leads)} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="Seguidores ganados" value={numberFormatter.format(totals.followersGained)} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="CPL medio" value={currencyFormatter.format(safeDiv(totals.spend, totals.leads))} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="según filtros" />
+      <section className="kpi-grid kpi-grid-3">
+        <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} {...compareProps(totals.spend, previousTotals?.spend ?? null, adsCompareLabel, adsFallback)} icon={<MegaphoneIcon />} tone="indigo" />
+        <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} {...compareProps(totals.revenue, previousTotals?.revenue ?? null, adsCompareLabel, adsFallback)} icon={<EuroIcon />} tone="emerald" />
+        <KpiCard label="Leads" value={numberFormatter.format(totals.leads)} {...compareProps(totals.leads, previousTotals?.leads ?? null, adsCompareLabel, adsFallback)} icon={<LeadsIcon />} tone="sky" />
+        <KpiCard label="Seguidores ganados" value={numberFormatter.format(totals.followersGained)} {...compareProps(totals.followersGained, previousTotals?.followersGained ?? null, adsCompareLabel, adsFallback)} icon={<UsuariosIcon />} tone="indigo" />
+        <KpiCard label="CPL medio" value={currencyFormatter.format(safeDiv(totals.spend, totals.leads))} delta="Sin comparación" helper="coste por lead" icon={<EuroIcon />} tone="amber" />
+        <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="ingresos por euro invertido" icon={<ConversionIcon />} tone="emerald" />
       </section>
 
       <section className="dashboard-grid">
@@ -1070,18 +1115,25 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
   const visibleCampaigns = useMemo(() => campaigns
     .filter((campaign) => {
       const matchesQuery = campaign.campaignName.toLowerCase().includes(query.toLowerCase());
-      const matchesFrom = !dateFrom || campaign.sentDate >= dateFrom;
-      const matchesTo = !dateTo || campaign.sentDate <= dateTo;
-      return matchesQuery && (unitFilter === "all" || campaign.businessUnitId === unitFilter) && (typeFilter === "all" || campaign.campaignType === typeFilter) && matchesFrom && matchesTo;
+      const matchesDates = inDateKeyRange(campaign.sentDate, dateFrom, dateTo);
+      return matchesQuery && (unitFilter === "all" || campaign.businessUnitId === unitFilter) && (typeFilter === "all" || campaign.campaignType === typeFilter) && matchesDates;
     })
     .sort((a, b) => sortAsc ? a.sentDate.localeCompare(b.sentDate) : b.sentDate.localeCompare(a.sentDate)), [campaigns, query, unitFilter, typeFilter, sortAsc, dateFrom, dateTo]);
 
-  const totals = useMemo(() => visibleCampaigns.reduce((acc, campaign) => ({
-    sent: acc.sent + campaign.sentCount,
-    delivered: acc.delivered + campaign.deliveredCount,
-    opens: acc.opens + campaign.opens,
-    revenue: acc.revenue + campaign.revenue,
-  }), { sent: 0, delivered: 0, opens: 0, revenue: 0 }), [visibleCampaigns]);
+  const totals = useMemo(() => mailingTotals(visibleCampaigns), [visibleCampaigns]);
+  const previousTotals = useMemo(() => {
+    const window = previousDateRange(dateFrom, dateTo);
+    if (!window) return null;
+    const rows = campaigns.filter((campaign) =>
+      campaign.campaignName.toLowerCase().includes(query.toLowerCase())
+      && (unitFilter === "all" || campaign.businessUnitId === unitFilter)
+      && (typeFilter === "all" || campaign.campaignType === typeFilter)
+      && inDateKeyRange(campaign.sentDate, window.from, window.to));
+    return rows.length ? mailingTotals(rows) : null;
+  }, [campaigns, query, unitFilter, typeFilter, dateFrom, dateTo]);
+  const hasMailingRange = Boolean(previousDateRange(dateFrom, dateTo));
+  const mailingFallback = hasMailingRange ? "sin datos del periodo anterior" : "elige fechas para comparar";
+  const mailingCompareLabel = "frente al periodo anterior";
 
   const openRateByUnit = useMemo(() => units
     .map((unit) => {
@@ -1221,10 +1273,10 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
       </section>
 
       <section className="kpi-grid">
-        <KpiCard label="Enviados" value={numberFormatter.format(totals.sent)} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="Entregados" value={numberFormatter.format(totals.delivered)} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="Open rate medio" value={formatPercent(ratio(totals.opens, totals.delivered))} delta="Sin comparación" helper="según filtros" />
-        <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} delta="Sin comparación" helper="según filtros" />
+        <KpiCard label="Enviados" value={numberFormatter.format(totals.sent)} {...compareProps(totals.sent, previousTotals?.sent ?? null, mailingCompareLabel, mailingFallback)} icon={<MailIcon />} tone="indigo" />
+        <KpiCard label="Entregados" value={numberFormatter.format(totals.delivered)} delta="Sin comparación" helper={`${formatPercent(ratio(totals.delivered, totals.sent))} de los enviados`} icon={<InboxIcon />} tone="sky" />
+        <KpiCard label="Open rate medio" value={formatPercent(ratio(totals.opens, totals.delivered))} delta="Sin comparación" helper="aperturas sobre entregados" icon={<EyeIcon />} tone="amber" />
+        <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} {...compareProps(totals.revenue, previousTotals?.revenue ?? null, mailingCompareLabel, mailingFallback)} icon={<EuroIcon />} tone="emerald" />
       </section>
 
       <section className="panel chart-panel">

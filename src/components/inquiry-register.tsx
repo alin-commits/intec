@@ -1,25 +1,38 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
-import { KpiCard } from "@/components/kpi-card";
+import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
+import { CalendarIcon, CheckCircleIcon, ConsultasIcon, DocumentIcon, PhoneIcon, RefreshIcon, TrophyIcon, XCircleIcon } from "@/components/icons";
+import { KpiCard, type KpiTone } from "@/components/kpi-card";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
 import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
-import { dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
+import { dateKeyInMadrid, dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, todayKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
 
 type ViewMode = "month" | "year";
+
+const SALE_TYPE_ICONS: Record<SaleType, ReactNode> = {
+  oferta: <DocumentIcon />,
+  seguimiento: <RefreshIcon />,
+  pedido: <CheckCircleIcon />,
+  perdido: <XCircleIcon />,
+};
+const SALE_TYPE_TONES: Record<SaleType, KpiTone> = { oferta: "sky", seguimiento: "amber", pedido: "emerald", perdido: "rose" };
+
+
 type CompareMode = "previous" | "current" | "previous_year" | "none";
 
 const compareModeHelpers: Record<CompareMode, string> = {
@@ -113,7 +126,7 @@ export function InquiryRegister() {
   const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; count: string }>({ businessUnitId: "", inquiryType: "phone", count: "1" });
   const [weeklyInquiryOpen, setWeeklyInquiryOpen] = useState(false);
   const [weeklyInquiryUnitId, setWeeklyInquiryUnitId] = useState("");
-  const [weeklyInquiryDate, setWeeklyInquiryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [weeklyInquiryDate, setWeeklyInquiryDate] = useState(() => todayKey());
   const [weeklyInquiryDraft, setWeeklyInquiryDraft] = useState(() => blankWeeklyInquiryDraft());
   const [newSaleDraft, setNewSaleDraft] = useState<{ saleType: SaleType; value: string }>({ saleType: "pedido", value: "" });
   const [pendingDeleteSale, setPendingDeleteSale] = useState<SalesEntry | null>(null);
@@ -124,7 +137,7 @@ export function InquiryRegister() {
   const [quickSaleType, setQuickSaleType] = useState<SaleType>("pedido");
   const [quickSaleValue, setQuickSaleValue] = useState("");
   const [weeklyUnitId, setWeeklyUnitId] = useState("");
-  const [weeklyDate, setWeeklyDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [weeklyDate, setWeeklyDate] = useState(() => todayKey());
   const [weeklyDraft, setWeeklyDraft] = useState(() => blankWeeklyDraft());
   const [editingSale, setEditingSale] = useState<SalesEntry | null>(null);
   const [saleEditDraft, setSaleEditDraft] = useState<{ businessUnitId: string; saleType: SaleType; value: string; count: string }>({ businessUnitId: "", saleType: "pedido", value: "", count: "1" });
@@ -147,6 +160,12 @@ export function InquiryRegister() {
   const registrableUnits = useMemo(() => selectableUnits.filter((unit) => unit.visibleInConsultas), [selectableUnits]);
 
   const selectedMonthYear = yearOfMonth(selectedMonth);
+  const yearOptions = useMemo(() => {
+    const thisYear = yearOfMonth(currentMonthKey);
+    const years = new Set(Array.from({ length: 6 }, (_, index) => thisYear - index));
+    years.add(selectedYear);
+    return Array.from(years).sort((x, y) => y - x);
+  }, [currentMonthKey, selectedYear]);
   const monthRangeValue = useMemo(() => monthRange(selectedMonth), [selectedMonth]);
   const annualRangeForMonth = useMemo(() => yearRange(selectedMonthYear), [selectedMonthYear]);
   const weekBuckets = useMemo(() => monthWeekBuckets(selectedMonth), [selectedMonth]);
@@ -170,8 +189,8 @@ export function InquiryRegister() {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-        supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }),
-        supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").gte("occurred_on", fetchStart.slice(0, 10)).lt("occurred_on", fetchEnd.slice(0, 10)).order("occurred_on", { ascending: false }),
+        fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
         supabase.auth.getUser(),
       ]);
       if (unitError || inquiryError || salesError) {
@@ -211,7 +230,7 @@ export function InquiryRegister() {
       setQuickSaleType("pedido");
       setQuickSaleValue("");
       setWeeklyUnitId(defaultUnitId);
-      setWeeklyDate(new Date().toISOString().slice(0, 10));
+      setWeeklyDate(todayKey());
       setWeeklyDraft(blankWeeklyDraft());
       setSaleChooserOpen(true);
     }
@@ -251,6 +270,11 @@ export function InquiryRegister() {
     return best;
   }, [filtered]);
 
+  const channelDonutItems: DonutItem[] = useMemo(() => {
+    const counts = countsByChannel(filtered);
+    return inquiryChannelOrder.map((channel) => ({ label: inquiryChannelLabels[channel], value: counts[channel] ?? 0, color: inquiryChannelColors[channel] }));
+  }, [filtered]);
+
   const topUnit = useMemo(() => {
     const source = currentRecords.filter((record) => selectedType === "all" || record.inquiryType === selectedType);
     const counts = new Map<string, number>();
@@ -269,13 +293,13 @@ export function InquiryRegister() {
       return Array.from({ length: daysInMonth(selectedMonth) }, (_, index) => {
         const day = index + 1;
         const rows = filtered.filter((record) => dayNumber(record.createdAt) === day);
-        return { label: String(day), web: totalCount(rows.filter((record) => record.inquiryType !== "phone")), phone: totalCount(rows.filter((record) => record.inquiryType === "phone")) };
+        return { label: String(day), ...countsByChannel(rows) };
       });
     }
     return monthsOfYear(selectedYear).map((month) => {
       const monthR = monthRange(month);
       const rows = filtered.filter((record) => inRange(record, monthR.start, monthR.end));
-      return { label: monthShortLabel(month), web: totalCount(rows.filter((record) => record.inquiryType !== "phone")), phone: totalCount(rows.filter((record) => record.inquiryType === "phone")) };
+      return { label: monthShortLabel(month), ...countsByChannel(rows) };
     });
   }, [filtered, selectedMonth, selectedYear, viewMode]);
 
@@ -336,8 +360,8 @@ export function InquiryRegister() {
     });
   }, [currentRecords, previousRecords, selectedUnit, sortColumn, sortDirection, units]);
 
-  const periodStartDate = currentPeriod.start.slice(0, 10);
-  const periodEndDate = currentPeriod.end.slice(0, 10);
+  const periodStartDate = dateKeyInMadrid(currentPeriod.start);
+  const periodEndDate = dateKeyInMadrid(currentPeriod.end);
   const filteredSales = useMemo(() => salesEntries.filter((entry) =>
     entry.occurredOn >= periodStartDate && entry.occurredOn < periodEndDate
     && (selectedUnit === "all" || entry.businessUnitId === selectedUnit)
@@ -412,7 +436,7 @@ export function InquiryRegister() {
       setRecords((current) => [newRecord, ...current]);
 
       if (pendingSaleType !== "none" && saleValue !== null) {
-        const occurredOn = newRecord.createdAt.slice(0, 10);
+        const occurredOn = dateKeyInMadrid(newRecord.createdAt);
         if (!configured) {
           const entry: SalesEntry = {
             id: `SE-${Date.now()}`,
@@ -530,7 +554,7 @@ export function InquiryRegister() {
     }
     setBusy(true);
     try {
-      const occurredOn = editingRecord.createdAt.slice(0, 10);
+      const occurredOn = dateKeyInMadrid(editingRecord.createdAt);
       if (!configured) {
         const entry: SalesEntry = {
           id: `SE-${Date.now()}`,
@@ -640,7 +664,7 @@ export function InquiryRegister() {
     setQuickSaleType("pedido");
     setQuickSaleValue("");
     setWeeklyUnitId(defaultUnitId);
-    setWeeklyDate(new Date().toISOString().slice(0, 10));
+    setWeeklyDate(todayKey());
     setWeeklyDraft(blankWeeklyDraft());
     setSaleChooserOpen(true);
     setMessage(null);
@@ -668,7 +692,7 @@ export function InquiryRegister() {
     }
     setBusy(true);
     try {
-      const occurredOn = record.createdAt.slice(0, 10);
+      const occurredOn = dateKeyInMadrid(record.createdAt);
       if (!configured) {
         const entry: SalesEntry = {
           id: `SE-${Date.now()}`,
@@ -767,7 +791,7 @@ export function InquiryRegister() {
   function openWeeklyInquiry() {
     const defaultUnitId = registrationUnitId ?? selectableUnits[0]?.id ?? "";
     setWeeklyInquiryUnitId(defaultUnitId);
-    setWeeklyInquiryDate(new Date().toISOString().slice(0, 10));
+    setWeeklyInquiryDate(todayKey());
     setWeeklyInquiryDraft(blankWeeklyInquiryDraft());
     setWeeklyInquiryOpen(true);
     setMessage(null);
@@ -1008,7 +1032,9 @@ export function InquiryRegister() {
           ) : (
             <label>
               <span>Año</span>
-              <input type="number" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value) || selectedYear)} />
+              <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+                {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
             </label>
           )}
           {viewMode === "month" ? (
@@ -1038,40 +1064,71 @@ export function InquiryRegister() {
         </div>
       </CollapsibleFilters>
 
-      <section className="kpi-grid inquiry-kpi-grid">
-        <KpiCard label="Consultas totales" value={numberFormatter.format(total)} delta={variation === null ? "Sin comparación" : formatPercent(Math.abs(variation))} positive={variation === null || variation >= 0} helper={comparisonHelper} />
-        <KpiCard label={viewMode === "month" ? "Media diaria" : "Media mensual"} value={(viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ",")} delta={viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`} helper="" />
-        <KpiCard label="Canal principal" value={topChannel ? inquiryChannelLabels[topChannel.channel] : "—"} delta={topChannel ? `${numberFormatter.format(topChannel.count)} consultas` : "Sin datos"} helper="" />
-        <KpiCard label="Unidad líder" value={topUnit ? topUnit.unit.name : "—"} delta={topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "Sin datos"} helper="" />
+      <section className="kpi-grid">
+        <KpiCard
+          label="Consultas totales"
+          value={numberFormatter.format(total)}
+          delta={variation === null ? "Sin comparación" : formatPercent(Math.abs(variation))}
+          positive={variation === null || variation >= 0}
+          helper={variation === null ? "sin datos del periodo anterior" : comparisonHelper}
+          icon={<ConsultasIcon />}
+          tone="indigo"
+        />
+        <KpiCard
+          label={viewMode === "month" ? "Media diaria" : "Media mensual"}
+          value={(viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ",")}
+          delta="Sin comparación"
+          helper={viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`}
+          icon={<CalendarIcon />}
+          tone="sky"
+        />
+        <KpiCard
+          label="Canal principal"
+          value={topChannel ? inquiryChannelLabels[topChannel.channel] : "—"}
+          delta="Sin comparación"
+          helper={topChannel ? `${numberFormatter.format(topChannel.count)} consultas` : "sin datos"}
+          icon={topChannel?.channel === "phone" ? <PhoneIcon /> : <ConsultasIcon />}
+          tone="emerald"
+        />
+        <KpiCard
+          label="Unidad líder"
+          value={topUnit ? topUnit.unit.name : "—"}
+          delta="Sin comparación"
+          helper={topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "sin datos"}
+          icon={<TrophyIcon />}
+          tone="amber"
+        />
       </section>
 
       <section className="section-heading">
         <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta se registra por consulta (al editarla) o de golpe por semana. La cantidad indica cuántas ventas componen el valor total.</p></div>
       </section>
-      <section className="sales-summary-grid">
+      <section className="kpi-grid">
         {saleTypeOrder.map((type) => (
-          <KpiCard key={type} label={saleTypeLabels[type]} value={currencyFormatter.format(salesSummary[type].value)} delta={`${numberFormatter.format(salesSummary[type].count)} ventas`} helper="del periodo seleccionado" />
+          <KpiCard
+            key={type}
+            label={saleTypeLabels[type]}
+            value={currencyFormatter.format(salesSummary[type].value)}
+            delta="Sin comparación"
+            helper={`${numberFormatter.format(salesSummary[type].count)} ${salesSummary[type].count === 1 ? "venta" : "ventas"} en el periodo`}
+            icon={SALE_TYPE_ICONS[type]}
+            tone={SALE_TYPE_TONES[type]}
+          />
         ))}
       </section>
 
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
-          <div className="panel-heading"><div><span className="eyebrow">Evolución</span><h2>{viewMode === "month" ? monthLabel(selectedMonth) : `Año ${selectedYear}`}</h2></div><span className="muted">Web y telefónicas</span></div>
+          <div className="panel-heading"><div><h2>Evolución de consultas</h2><p className="panel-subtitle">Por canal · {viewMode === "month" ? monthLabel(selectedMonth) : `año ${selectedYear}`}</p></div></div>
           <TrendChart
             data={trendData}
-            series={[
-              { key: "web", label: "Web", color: "#2563eb" },
-              { key: "phone", label: "Telefónicas", color: "#06b6d4" },
-            ]}
-            ariaLabel="Evolución de consultas web y telefónicas"
+            series={inquiryChannelOrder.map((channel) => ({ key: channel, label: inquiryChannelLabels[channel], color: inquiryChannelColors[channel] }))}
+            ariaLabel="Evolución de consultas por canal"
           />
         </article>
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Distribución</span><h2>Canales del periodo</h2></div></div>
-          <div className="channel-breakdown">
-            <div><span>Web</span><strong>{webTotal}</strong><small>{total ? formatPercent((webTotal / total) * 100) : "0,0 %"}</small></div>
-            <div><span>Teléfono</span><strong>{phoneTotal}</strong><small>{total ? formatPercent((phoneTotal / total) * 100) : "0,0 %"}</small></div>
-          </div>
+          <div className="panel-heading"><div><h2>Consultas por canal</h2><p className="panel-subtitle">Web {formatPercent(total ? (webTotal / total) * 100 : 0)} · Teléfono {formatPercent(total ? (phoneTotal / total) * 100 : 0)}</p></div></div>
+          <DonutChart items={channelDonutItems} centerLabel="consultas" ariaLabel="Consultas del periodo por canal" emptyMessage="Sin consultas en este periodo." />
         </article>
       </section>
 
@@ -1370,7 +1427,7 @@ export function InquiryRegister() {
                 </select>
               </label>
               <label><span>Semana (elige cualquier día)</span>
-                <input type="date" value={weeklyDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setWeeklyDate(event.target.value)} />
+                <input type="date" value={weeklyDate} max={todayKey()} onChange={(event) => setWeeklyDate(event.target.value)} />
               </label>
             </div>
             <p className="muted">Semana del {formatDate(isoWeekStart(weeklyDate))}. Indica cuántas ventas de cada tipo y su valor total en euros.</p>
@@ -1399,7 +1456,7 @@ export function InquiryRegister() {
             </select>
           </label>
           <label><span>Semana (elige cualquier día)</span>
-            <input type="date" value={weeklyInquiryDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setWeeklyInquiryDate(event.target.value)} />
+            <input type="date" value={weeklyInquiryDate} max={todayKey()} onChange={(event) => setWeeklyInquiryDate(event.target.value)} />
           </label>
         </div>
         <p className="muted">Semana del {formatDate(isoWeekStart(weeklyInquiryDate))}. Indica cuántas consultas hubo de cada canal.</p>

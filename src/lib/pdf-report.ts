@@ -32,7 +32,7 @@ export function formatEuroForPdf(value: number): string {
 export const REPORT_TEXT_COLOR: RGB = [15, 23, 42];
 export const REPORT_MUTED_COLOR: RGB = [100, 116, 139];
 export const REPORT_BORDER_COLOR: RGB = [226, 232, 240];
-export const REPORT_BRAND_COLOR: RGB = [37, 99, 235];
+export const REPORT_BRAND_COLOR: RGB = [51, 44, 128];
 export const REPORT_ALT_ROW_BG: RGB = [248, 250, 252];
 
 const STAT_CHUNK_SIZE = 5;
@@ -44,7 +44,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /** Builds a report PDF from data as vector text/tables (no DOM screenshot). Shared by every exportable report in the app. */
-export async function generatePdfReport<T>({ title, subtitle, stats, sectionTitle, columns, rows, filename, orientation = "l" }: ReportOptions<T>) {
+async function buildPdfReport<T>({ title, subtitle, stats, sectionTitle, columns, rows, orientation = "l" }: ReportOptions<T>) {
   const [{ default: jsPDF }, { autoTable }] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
@@ -134,5 +134,17 @@ export async function generatePdfReport<T>({ title, subtitle, stats, sectionTitl
     pdf.text(`Página ${page} de ${totalPages}`, pageWidth - margin, pageHeight - 8, { align: "right" });
   }
 
-  pdf.save(filename);
+  return pdf;
+}
+
+/** Downloads the report in the browser. */
+export async function generatePdfReport<T>(options: ReportOptions<T>) {
+  const pdf = await buildPdfReport(options);
+  pdf.save(options.filename);
+}
+
+/** Returns the report bytes (for email attachments on the server). */
+export async function renderPdfReport<T>(options: ReportOptions<T>): Promise<ArrayBuffer> {
+  const pdf = await buildPdfReport(options);
+  return pdf.output("arraybuffer");
 }

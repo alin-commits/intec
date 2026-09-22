@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { appOrigin } from "@/lib/app-origin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle();
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  const origin = appOrigin(request);
   const sent = await sendEmail({
     to: ticket.reporter_email,
     ...buildTicketResolvedEmail({

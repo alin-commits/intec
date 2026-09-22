@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { appOrigin } from "@/lib/app-origin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildTicketCreatedEmail } from "@/lib/tickets/email-templates";
@@ -13,7 +14,9 @@ const ALLOWED_MIME_TYPES: Record<string, string> = {
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
 const RATE_LIMIT_WINDOW_MINUTES = 10;
-const RATE_LIMIT_MAX_SUBMISSIONS = 5;
+// Everyone in the office shares one public IP, so this has to allow a burst
+// of genuine reports (e.g. a network outage) while still stopping spam.
+const RATE_LIMIT_MAX_SUBMISSIONS = 30;
 
 function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -136,7 +139,7 @@ export async function POST(request: Request) {
     if (adminEmail) recipients.add(adminEmail);
 
     if (recipients.size > 0) {
-      const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+      const origin = appOrigin(request);
       const sent = await sendEmail({
         to: Array.from(recipients),
         ...buildTicketCreatedEmail({

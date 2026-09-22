@@ -282,7 +282,7 @@ export function UsersManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Acceso y permisos</span><h2>Usuarios</h2><p>Gestiona quién puede entrar en la plataforma y qué acciones puede realizar. Un usuario puede tener varios roles a la vez.</p></div>
+        <div><p>Gestiona quién puede entrar en la plataforma y qué acciones puede realizar. Un usuario puede tener varios roles a la vez.</p></div>
         <div className="summary-pill"><strong>{activeCount}</strong><span>usuarios activos</span></div>
       </section>
 

@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildInviteEmail } from "@/lib/email-templates";
+import { appOrigin } from "@/lib/app-origin";
 import type { AppRole } from "@/lib/types";
 
 const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer", "it", "marketing", "direction"]);
@@ -11,8 +12,7 @@ function normalizeRoles(input: unknown): AppRole[] | null {
   if (!Array.isArray(input) || input.length === 0) return null;
   const roles = input as AppRole[];
   if (!roles.every((role) => allowedRoles.has(role))) return null;
-  if (roles.includes("direction") && roles.length > 1) return null;
-  return roles;
+  return Array.from(new Set(roles));
 }
 
 export async function POST(request: Request) {
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     if (body.roles !== undefined) {
       const normalized = normalizeRoles(body.roles);
       if (!normalized) {
-        return NextResponse.json({ error: "Selecciona al menos un rol válido (Dirección no se puede combinar con otros)." }, { status: 400 });
+        return NextResponse.json({ error: "Selecciona al menos un rol válido." }, { status: 400 });
       }
       roles = normalized;
     }
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Falta SUPABASE_SERVICE_ROLE_KEY en Vercel." }, { status: 503 });
     }
 
-    const origin = new URL(request.url).origin;
+    const origin = appOrigin(request);
 
     if (isEmailConfigured()) {
       const { data, error } = await admin.auth.admin.generateLink({

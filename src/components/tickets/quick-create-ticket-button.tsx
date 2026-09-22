@@ -4,10 +4,11 @@ import { useState, type FormEvent } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ticketCategoryLabels, ticketCategoryOrder, ticketPriorityLabels, ticketPriorityOrder } from "@/lib/tickets/constants";
+import { todayKey } from "@/lib/dates";
 import type { TicketCategory, TicketPriority } from "@/lib/tickets/types";
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayKey();
 }
 
 export function QuickCreateTicketButton({ visible, onCreated }: { visible: boolean; onCreated?: () => void }) {

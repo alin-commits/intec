@@ -83,6 +83,7 @@ export type Lead = {
   source: string;
   notes?: string;
   saleValue: number | null;
+  assignedTo?: string | null;
   statusHistory?: LeadStatusEvent[];
 };
 

@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { LeadsTable } from "@/components/leads-table";
 
 export default function LeadsPage() {
-  return <LeadsTable />;
+  return (
+    <Suspense>
+      <LeadsTable />
+    </Suspense>
+  );
 }

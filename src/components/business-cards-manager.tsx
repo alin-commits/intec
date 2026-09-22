@@ -344,7 +344,7 @@ export function BusinessCardsManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Equipo</span><h2>Tarjetas de visita</h2><p>Tarjetas digitales para empleados: mismo diseño para todas, con el color y el logo de su marca.</p></div>
+        <div><p>Tarjetas digitales para empleados: mismo diseño para todas, con el color y el logo de su marca.</p></div>
         <button type="button" className="button button-primary" onClick={openNew}>+ Nueva tarjeta</button>
       </section>
 

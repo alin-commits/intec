@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
+import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -16,111 +18,8 @@ const departmentLabels: Record<DirectionDepartment, string> = {
   marketing: "Marketing",
 };
 
-function DashboardIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <rect x="2.5" y="2.5" width="6.3" height="6.3" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="11.2" y="2.5" width="6.3" height="6.3" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="2.5" y="11.2" width="6.3" height="6.3" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="11.2" y="11.2" width="6.3" height="6.3" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
-function ConsultasIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <rect x="2.8" y="3.5" width="14.4" height="9.6" rx="2.4" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M6 13.1v3.4l3.6-3.4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-      <path d="M7 8.3h.01M10 8.3h.01M13 8.3h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function LeadsIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <circle cx="10" cy="10" r="6.8" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="10" cy="10" r="3.4" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="10" cy="10" r="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function CrmIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <rect x="2.5" y="4.2" width="15" height="11.6" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="7.4" cy="8.6" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M4.9 12.8c0-1.5 1.1-2.4 2.5-2.4s2.5.9 2.5 2.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M11.9 7.8h3M11.9 10.4h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CampanasIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d="M5 2.8v14.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M5 4h8.3c.9 0 1.3 1 .7 1.7L12 8l2 2.3c.6.7.2 1.7-.7 1.7H5V4Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function UnidadesIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d="M10 2.5 17 6.3 10 10 3 6.3 10 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-      <path d="M3 10.2 10 14l7-3.8" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-      <path d="M3 13.9 10 17.7l7-3.8" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function RrssIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <circle cx="5" cy="10" r="2.2" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="15" cy="4.8" r="2.2" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="15" cy="15.2" r="2.2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="m6.9 8.9 6.2-3.1M6.9 11.1l6.2 3.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function UsuariosIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <circle cx="7.3" cy="6.6" r="2.4" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M2.5 16c0-2.7 2.1-4.3 4.8-4.3s4.8 1.6 4.8 4.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="14.3" cy="7.2" r="1.9" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M12.6 11.2c1.9-.4 4.9.6 4.9 3.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function TicketsIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path d="M3 6.4c0-1 .8-1.9 1.9-1.9h10.2c1 0 1.9.8 1.9 1.9v1.2a1.7 1.7 0 0 0 0 3.2v1.2c0 1-.8 1.9-1.9 1.9H4.9c-1 0-1.9-.8-1.9-1.9v-1.2a1.7 1.7 0 0 0 0-3.2V6.4Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-      <path d="M8.2 4.5v11" stroke="currentColor" strokeWidth="1.5" strokeDasharray="1.6 1.6" />
-    </svg>
-  );
-}
-
-function TarjetasIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="7" cy="9" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M4.5 13.2c0-1.5 1.1-2.4 2.5-2.4s2.5.9 2.5 2.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M11.5 8.3h4M11.5 11.2h4M11.5 13.2h2.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
-  { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
+  { href: "/dashboard", label: "Inicio", icon: DashboardIcon },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
@@ -143,7 +42,7 @@ const pageTitles: Record<string, string> = {
   "/leads": "Leads",
   "/crm": "CRM",
   "/campanas": "Campañas",
-  "/rrss": "Métricas de marketing",
+  "/rrss": "RRSS y métricas de marketing",
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
   "/tarjetas": "Tarjetas de visita",
@@ -195,6 +94,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [configured]);
 
   const title = Object.entries(pageTitles).find(([path]) => pathname.startsWith(path))?.[1] ?? "Actividad comercial";
+  const isDashboard = pathname.startsWith("/dashboard");
+  const firstName = profile.fullName.split(" ")[0];
+  const initials = profile.fullName.split(" ").filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("");
   const isDirection = profile.roles.includes("direction");
   const navRoles: AppRole[] = isDirection ? (directionView ? [directionView] : []) : profile.roles;
   const showConsultaActions = hasAnyRole(profile.roles, ["commercial"]) || (hasAnyRole(profile.roles, ["admin"]) && pathname.startsWith("/consultas"));
@@ -221,7 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className={mobileNavOpen ? "sidebar mobile-open" : "sidebar"}>
         <div className="sidebar-top">
           <Link href="/dashboard" className="brand">
-            <span className="brand-logo-chip"><Logo className="brand-logo" variant="white" priority /></span>
+            <Logo className="brand-logo" priority />
             <small>Commercial Hub</small>
           </Link>
           <button type="button" className="sidebar-toggle" aria-label={mobileNavOpen ? "Cerrar menú" : "Abrir menú"} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((current) => !current)}>
@@ -248,23 +150,41 @@ export function AppShell({ children }: { children: ReactNode }) {
               {directionView ? `Viendo: ${departmentLabels[directionView]} · Cambiar` : "Elegir departamento"}
             </button>
           ) : null}
-          <div className="sidebar-footer">
-            <div><strong>{profile.fullName}</strong><small>{profile.roles.map((role) => roleLabels[role]).join(" + ")}</small></div>
-            <button type="button" className="sidebar-logout" onClick={signOut}>Salir</button>
-          </div>
+          <button type="button" className="nav-link sidebar-logout" onClick={signOut}>
+            <span className="nav-icon"><LogoutIcon /></span>Cerrar sesión
+          </button>
         </div>
       </aside>
       <main className="main-content">
         <header className="topbar">
-          <div><span className="eyebrow">Panel interno</span><h1>{title}</h1></div>
+          {isDashboard ? (
+            <div className="topbar-title">
+              <h1>Hola, {firstName}</h1>
+              <p>Aquí tienes el resumen de la actividad comercial.</p>
+            </div>
+          ) : (
+            <div className="topbar-title"><h1>{title}</h1></div>
+          )}
           <div className="topbar-actions">
-            {!configured ? <span className="demo-badge">Modo demostración</span> : <span className="live-badge">Datos conectados</span>}
+            {configured ? (
+              <>
+                <GlobalSearch roles={profile.roles} />
+                <NotificationsBell roles={profile.roles} />
+              </>
+            ) : <span className="demo-badge">Modo demostración</span>}
             {showConsultaActions ? (
               <>
                 <Link href="/consultas?openSale=1" className="button button-secondary">Registrar venta</Link>
                 <Link href="/consultas" className="button button-primary">Registrar consulta</Link>
               </>
             ) : null}
+            <div className="user-chip" title={profile.fullName}>
+              <span className="user-avatar" aria-hidden="true">{initials}</span>
+              <div className="user-chip-text">
+                <strong>{profile.fullName}</strong>
+                <small>{profile.roles.map((role) => roleLabels[role]).join(" + ")}</small>
+              </div>
+            </div>
           </div>
         </header>
         {children}

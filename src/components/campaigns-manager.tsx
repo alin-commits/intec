@@ -6,13 +6,17 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
+import { KpiCard } from "@/components/kpi-card";
+import { CampanasIcon, ConversionIcon, EuroIcon, LeadsIcon } from "@/components/icons";
 import { CAMPAIGNS_ROLES, hasAnyRole, campaignStatusLabels } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
-import { reportSafeError } from "@/lib/errors";
+import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-report-pdf";
+import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 
 const STORAGE_KEY = "intec-demo-campaigns";
@@ -89,6 +93,17 @@ function adsStatsFor(campaign: Campaign, ads: AdsStub[]) {
   return { count: rows.length, spend, revenue, roas: spend > 0 ? revenue / spend : 0 };
 }
 
+const NOTIFIED_STATUSES: CampaignStatus[] = ["active", "finished", "archived"];
+
+/** Emails commercials + dirección about the new status. A failure must not block saving. */
+function notifyCampaignStatus(campaignId: string) {
+  void fetch("/api/campaigns/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campaignId }),
+  }).catch((cause) => console.error("No se pudo enviar el aviso de campaña:", cause));
+}
+
 function initialDemoCampaigns(configured: boolean): Campaign[] {
   if (configured || typeof window === "undefined") return demoCampaigns;
   const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -123,10 +138,10 @@ export function CampaignsManager() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData }, { data: authData }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData, error: adsError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, created_at, updated_at").order("created_at", { ascending: false }),
-      supabase.from("leads").select("campaign_id, status, sale_value").limit(2000),
+      fetchAllPages((from, to) => supabase.from("leads").select("campaign_id, status, sale_value").order("id").range(from, to)),
       supabase.from("meta_ads_entries").select("campaign_id, amount_spent, revenue").not("campaign_id", "is", null),
       supabase.auth.getUser(),
     ]);
@@ -137,6 +152,7 @@ export function CampaignsManager() {
     setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
     setCampaigns((campaignData ?? []).map((row) => mapCampaignRow(row as Record<string, unknown>)));
     setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>)));
+    if (adsError) setMessage(PARTIAL_LOAD_MESSAGE);
     setAds((adsData ?? []).map((row) => ({ campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), revenue: Number(row.revenue ?? 0) })));
     const user = authData.user;
     if (user) {
@@ -156,10 +172,25 @@ export function CampaignsManager() {
 
   const visibleCampaigns = useMemo(() => campaigns.filter((campaign) => {
     const matchesQuery = campaign.name.toLowerCase().includes(query.toLowerCase());
-    const matchesFrom = !dateFrom || campaign.createdAt >= dateFrom;
-    const matchesTo = !dateTo || campaign.createdAt <= `${dateTo}T23:59:59`;
+    const runsFrom = campaign.startDate ?? campaign.endDate ?? dateKeyInMadrid(campaign.createdAt);
+    const runsTo = campaign.endDate ?? "9999-12-31";
+    const matchesFrom = !dateFrom || runsTo >= dateFrom;
+    const matchesTo = !dateTo || runsFrom <= dateTo;
     return matchesQuery && (unitId === "all" || campaign.businessUnitId === unitId) && (status === "all" || campaign.status === status) && matchesFrom && matchesTo;
   }), [campaigns, query, status, unitId, dateFrom, dateTo]);
+
+  const campaignSummary = useMemo(() => {
+    const stats = visibleCampaigns.map((campaign) => statsFor(campaign, leads));
+    const leadsTotal = stats.reduce((sum, item) => sum + item.total, 0);
+    const won = stats.reduce((sum, item) => sum + item.won, 0);
+    return {
+      active: visibleCampaigns.filter((campaign) => campaign.status === "active").length,
+      leads: leadsTotal,
+      won,
+      value: stats.reduce((sum, item) => sum + item.value, 0),
+      spend: visibleCampaigns.reduce((sum, campaign) => sum + adsStatsFor(campaign, ads).spend, 0),
+    };
+  }, [visibleCampaigns, leads, ads]);
 
   function openNew() {
     setEditingId(null);
@@ -223,8 +254,17 @@ export function CampaignsManager() {
           direct_sale_value: draft.directSaleValue,
         };
         const supabase = createClient();
-        const result = editingId ? await supabase.from("campaigns").update(payload).eq("id", editingId) : await supabase.from("campaigns").insert(payload);
-        if (result.error) throw result.error;
+        const previousStatus = editingId ? campaigns.find((campaign) => campaign.id === editingId)?.status ?? null : null;
+        let savedId = editingId;
+        if (editingId) {
+          const { error } = await supabase.from("campaigns").update(payload).eq("id", editingId);
+          if (error) throw error;
+        } else {
+          const { data, error } = await supabase.from("campaigns").insert(payload).select("id").single();
+          if (error) throw error;
+          savedId = data.id;
+        }
+        if (savedId && draft.status !== previousStatus && NOTIFIED_STATUSES.includes(draft.status)) notifyCampaignStatus(savedId);
         await loadRealData();
         setMessage(editingId ? "Campaña actualizada correctamente." : "Campaña creada correctamente.");
       }
@@ -245,6 +285,7 @@ export function CampaignsManager() {
       } else {
         const { error } = await createClient().from("campaigns").update({ status: "archived" }).eq("id", pendingArchive.id);
         if (error) throw error;
+        if (pendingArchive.status !== "archived") notifyCampaignStatus(pendingArchive.id);
         await loadRealData();
       }
       setMessage(`Campaña "${pendingArchive.name}" archivada.`);
@@ -337,7 +378,7 @@ export function CampaignsManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Captación</span><h2>Campañas</h2><p>Crea campañas, sigue sus leads y su conversión, y archívalas cuando terminen (nunca se eliminan).</p></div>
+        <div><p>Crea campañas, sigue sus leads y su conversión, y archívalas cuando terminen (nunca se eliminan).</p></div>
         <div className="panel-heading-trailing">
           <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva campaña</button> : null}
@@ -368,6 +409,13 @@ export function CampaignsManager() {
           <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
         </div>
       </CollapsibleFilters>
+
+      <section className="kpi-grid">
+        <KpiCard label="Campañas activas" value={String(campaignSummary.active)} delta="Sin comparación" helper={`de ${visibleCampaigns.length} según los filtros`} icon={<CampanasIcon />} tone="indigo" />
+        <KpiCard label="Leads generados" value={String(campaignSummary.leads)} delta="Sin comparación" helper="asociados a estas campañas" icon={<LeadsIcon />} tone="sky" />
+        <KpiCard label="Ventas ganadas" value={String(campaignSummary.won)} delta="Sin comparación" helper="leads ganados + ventas directas" icon={<ConversionIcon />} tone="emerald" />
+        <KpiCard label="Valor total" value={currencyFormatter.format(campaignSummary.value)} delta="Sin comparación" helper={campaignSummary.spend > 0 ? `${currencyFormatter.format(campaignSummary.spend)} invertidos en Meta Ads` : "sin gasto en Meta Ads"} icon={<EuroIcon />} tone="amber" />
+      </section>
 
       <section className="campaigns-grid">
         {visibleCampaigns.map((campaign) => {

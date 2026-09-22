@@ -9,15 +9,16 @@ type SendEmailInput = {
   to: string | string[];
   subject: string;
   html: string;
+  attachments?: { filename: string; content: Buffer }[];
 };
 
-export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<boolean> {
+export async function sendEmail({ to, subject, html, attachments }: SendEmailInput): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
   if (!apiKey || !from) return false;
 
   const resend = new Resend(apiKey);
-  const { error } = await resend.emails.send({ from, to, subject, html });
+  const { error } = await resend.emails.send({ from, to, subject, html, ...(attachments?.length ? { attachments } : {}) });
   if (error) {
     console.error("Error al enviar email con Resend:", error);
     return false;

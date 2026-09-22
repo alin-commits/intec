@@ -2,6 +2,17 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildResetPasswordEmail } from "@/lib/email-templates";
+import { appOrigin } from "@/lib/app-origin";
+
+const RATE_LIMIT_WINDOW_MINUTES = 60;
+const MAX_PER_EMAIL = 3;
+const MAX_PER_IP = 10;
+
+function getClientIp(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
+  return request.headers.get("x-real-ip") ?? "unknown";
+}
 
 function genericResponse() {
   return NextResponse.json({
@@ -28,7 +39,19 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
     if (!admin) return genericResponse();
 
-    const origin = new URL(request.url).origin;
+    // Stop anyone from flooding an inbox (or the Resend quota) with reset
+    // emails. Over the limit we still answer the generic message, so the
+    // response never reveals whether an address exists.
+    const ip = getClientIp(request);
+    const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MINUTES * 60 * 1000).toISOString();
+    const [{ count: emailCount }, { count: ipCount }] = await Promise.all([
+      admin.from("password_reset_log").select("id", { count: "exact", head: true }).eq("email", email).gte("created_at", windowStart),
+      admin.from("password_reset_log").select("id", { count: "exact", head: true }).eq("ip", ip).gte("created_at", windowStart),
+    ]);
+    if ((emailCount ?? 0) >= MAX_PER_EMAIL || (ipCount ?? 0) >= MAX_PER_IP) return genericResponse();
+    await admin.from("password_reset_log").insert({ email, ip });
+
+    const origin = appOrigin(request);
     const { data, error } = await admin.auth.admin.generateLink({
       type: "recovery",
       email,
