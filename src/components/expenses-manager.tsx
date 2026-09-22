@@ -38,6 +38,28 @@ const RENEWAL_WINDOW_DAYS = 30;
 const EXPENSE_COLUMNS = "id, name, provider, category, kind, amount, billing_period, start_date, status, cancelled_on, business_unit_id, payment_method, url, notes";
 
 type ExpenseDraft = Omit<MarketingExpense, "id">;
+type SortKey = "name" | "category" | "unit" | "kind" | "amount" | "monthly" | "next" | "status";
+type SortState = { key: SortKey; direction: "asc" | "desc" } | null;
+
+const SORTABLE_COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Concepto" },
+  { key: "category", label: "Categoría" },
+  { key: "unit", label: "Unidad" },
+  { key: "kind", label: "Tipo" },
+  { key: "amount", label: "Importe" },
+  { key: "monthly", label: "Coste/mes" },
+  { key: "next", label: "Próximo cargo" },
+  { key: "status", label: "Estado" },
+];
+// Amounts read best biggest-first; text and dates in natural order.
+const DESC_FIRST: SortKey[] = ["amount", "monthly"];
+const KIND_ORDER: Record<string, number> = { monthly: 0, quarterly: 1, yearly: 2, one_off: 3 };
+
+/** Date shown in "Próximo cargo": next renewal, the one-off date, or the cancellation date. */
+function displayDate(expense: MarketingExpense, today: string): string | null {
+  if (expense.kind === "one_off") return expense.startDate;
+  return nextRenewal(expense, today) ?? expense.cancelledOn;
+}
 
 function blankDraft(): ExpenseDraft {
   return {
@@ -113,6 +135,7 @@ export function ExpensesManager() {
   const [unitId, setUnitId] = useState("all");
   const [kind, setKind] = useState("all");
   const [status, setStatus] = useState("all");
+  const [sort, setSort] = useState<SortState>(null);
   const [year, setYear] = useState(currentYear);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -175,8 +198,42 @@ export function ExpensesManager() {
         const matchesUnit = unitId === "all" || (unitId === "general" ? expense.businessUnitId === null : expense.businessUnitId === unitId);
         return matchesQuery && matchesUnit && (category === "all" || expense.category === category) && (kind === "all" || expense.kind === kind) && (status === "all" || expense.status === status);
       })
-      .sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name, "es") : a.status === "active" ? -1 : 1));
-  }, [expenses, query, unitId, category, kind, status]);
+      .sort((a, b) => {
+        const byDefault = a.status === b.status ? a.name.localeCompare(b.name, "es") : a.status === "active" ? -1 : 1;
+        if (!sort) return byDefault;
+        const factor = sort.direction === "asc" ? 1 : -1;
+        const unitOf = (expense: MarketingExpense) => (expense.businessUnitId ? units.find((unit) => unit.id === expense.businessUnitId)?.name ?? "" : "General");
+        let result = 0;
+        switch (sort.key) {
+          case "name": result = a.name.localeCompare(b.name, "es"); break;
+          case "category": result = expenseCategoryLabels[a.category].localeCompare(expenseCategoryLabels[b.category], "es"); break;
+          case "unit": result = unitOf(a).localeCompare(unitOf(b), "es"); break;
+          case "kind": result = KIND_ORDER[a.kind === "one_off" ? "one_off" : a.billingPeriod ?? "monthly"] - KIND_ORDER[b.kind === "one_off" ? "one_off" : b.billingPeriod ?? "monthly"]; break;
+          case "amount": result = a.amount - b.amount; break;
+          case "monthly": result = monthlyCost(a) - monthlyCost(b); break;
+          case "status": result = a.status === b.status ? 0 : a.status === "active" ? -1 : 1; break;
+          case "next": {
+            const dateA = displayDate(a, today);
+            const dateB = displayDate(b, today);
+            // Rows without a date always go last, whichever the direction.
+            if (!dateA || !dateB) return dateA ? -1 : dateB ? 1 : byDefault;
+            result = dateA.localeCompare(dateB);
+            break;
+          }
+        }
+        return result * factor || byDefault;
+      });
+  }, [expenses, query, unitId, category, kind, status, sort, units, today]);
+
+  function toggleSort(key: SortKey) {
+    setSort((current) => {
+      const first = DESC_FIRST.includes(key) ? "desc" : "asc";
+      if (!current || current.key !== key) return { key, direction: first };
+      // Third click goes back to the default order.
+      if (current.direction === first) return { key, direction: first === "asc" ? "desc" : "asc" };
+      return null;
+    });
+  }
 
   const summary = useMemo(() => {
     const monthly = visibleExpenses.reduce((sum, expense) => sum + monthlyCost(expense), 0);
@@ -459,7 +516,20 @@ export function ExpensesManager() {
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Concepto</th><th>Categoría</th><th>Unidad</th><th>Tipo</th><th>Importe</th><th>Coste/mes</th><th>Próximo cargo</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr>
+              {SORTABLE_COLUMNS.map((column) => {
+                const active = sort?.key === column.key;
+                return (
+                  <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className={active ? "sort-header active" : "sort-header"} onClick={() => toggleSort(column.key)} title="Ordenar">
+                      {column.label}
+                      <span aria-hidden="true">{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+                    </button>
+                  </th>
+                );
+              })}
+              <th>Acciones</th>
+            </tr></thead>
             <tbody>
               {visibleExpenses.map((expense) => {
                 const renewal = nextRenewal(expense, today);

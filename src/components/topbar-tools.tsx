@@ -33,7 +33,29 @@ function useClickOutside(ref: RefObject<HTMLElement | null>, onOutside: () => vo
 
 // ---------- Notifications ----------
 
-type Alert = { key: string; label: string; count: number; href: string; icon: ReactNode; urgent: boolean };
+// `signature` describes what the alert is about right now; a hidden alert comes
+// back as soon as its signature changes (something new to deal with).
+type Alert = { key: string; label: string; count: number; href: string; icon: ReactNode; urgent: boolean; signature: string };
+type HiddenAlerts = Record<string, string>;
+
+const HIDDEN_ALERTS_KEY = "intec-hidden-alerts";
+
+function readHiddenAlerts(userId: string): HiddenAlerts {
+  try {
+    const saved = window.localStorage.getItem(`${HIDDEN_ALERTS_KEY}:${userId}`);
+    return saved ? (JSON.parse(saved) as HiddenAlerts) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeHiddenAlerts(userId: string, hidden: HiddenAlerts) {
+  try {
+    window.localStorage.setItem(`${HIDDEN_ALERTS_KEY}:${userId}`, JSON.stringify(hidden));
+  } catch {
+    // Private mode or blocked storage: the alert simply shows again next time.
+  }
+}
 type Message = { id: string; title: string; body: string; senderName: string; createdAt: string; unread: boolean };
 
 const MESSAGE_LIMIT = 20;
@@ -58,6 +80,8 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
   const [viewingSent, setViewingSent] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [pollTick, setPollTick] = useState(0);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [hiddenAlerts, setHiddenAlerts] = useState<HiddenAlerts>({});
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dismissToast = useCallback(() => setToast(null), []);
   const closePanel = useCallback(() => {
@@ -109,16 +133,22 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
         canExpenses ? supabase.from("marketing_expenses").select("id, name, amount, billing_period, start_date").eq("kind", "subscription").eq("status", "active") : null,
       ]);
       if (!active) return;
-      const next: Alert[] = [];
-      if (staleLeads?.count) next.push({ key: "leads", label: `${onlyOwnLeads ? "Tus leads" : "Leads"} sin contactar desde hace más de ${STALE_LEAD_DAYS} días`, count: staleLeads.count, href: onlyOwnLeads ? "/leads?owner=mine" : "/leads", icon: <LeadsIcon />, urgent: false });
-      if (urgentTickets?.count) next.push({ key: "urgent", label: "Tickets de prioridad alta abiertos", count: urgentTickets.count, href: "/tickets", icon: <TicketsIcon />, urgent: true });
-      if (staleTickets?.count) next.push({ key: "stale", label: `Tickets abiertos desde hace más de ${STALE_TICKET_DAYS} días`, count: staleTickets.count, href: "/tickets", icon: <ClockIcon />, urgent: false });
+      if (user) {
+        setUserId(user.id);
+        setHiddenAlerts(readHiddenAlerts(user.id));
+      }
       const today = todayKey();
-      const renewingSoon = (subscriptions?.data ?? []).filter((row) => {
-        const date = nextRenewal({ id: row.id, name: row.name, amount: Number(row.amount), billingPeriod: row.billing_period as BillingPeriod, startDate: row.start_date, kind: "subscription", status: "active", category: "software", provider: null, cancelledOn: null, businessUnitId: null, paymentMethod: null, url: null, notes: null }, today);
-        return date !== null && daysBetween(today, date) <= RENEWAL_ALERT_DAYS;
-      }).length;
-      if (renewingSoon) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon, href: "/gastos", icon: <WalletIcon />, urgent: false });
+      // Pending work reminds again the next day while it is still pending.
+      const daily = (count: number) => `${today}|${count}`;
+      const next: Alert[] = [];
+      if (staleLeads?.count) next.push({ key: "leads", label: `${onlyOwnLeads ? "Tus leads" : "Leads"} sin contactar desde hace más de ${STALE_LEAD_DAYS} días`, count: staleLeads.count, href: onlyOwnLeads ? "/leads?owner=mine" : "/leads", icon: <LeadsIcon />, urgent: false, signature: daily(staleLeads.count) });
+      if (urgentTickets?.count) next.push({ key: "urgent", label: "Tickets de prioridad alta abiertos", count: urgentTickets.count, href: "/tickets", icon: <TicketsIcon />, urgent: true, signature: daily(urgentTickets.count) });
+      if (staleTickets?.count) next.push({ key: "stale", label: `Tickets abiertos desde hace más de ${STALE_TICKET_DAYS} días`, count: staleTickets.count, href: "/tickets", icon: <ClockIcon />, urgent: false, signature: daily(staleTickets.count) });
+      // Each upcoming charge (subscription + date) is acknowledged once; only a new one brings the alert back.
+      const renewingSoon = (subscriptions?.data ?? [])
+        .map((row) => ({ id: row.id, date: nextRenewal({ id: row.id, name: row.name, amount: Number(row.amount), billingPeriod: row.billing_period as BillingPeriod, startDate: row.start_date, kind: "subscription", status: "active", category: "software", provider: null, cancelledOn: null, businessUnitId: null, paymentMethod: null, url: null, notes: null }, today) }))
+        .filter((item): item is { id: string; date: string } => item.date !== null && daysBetween(today, item.date) <= RENEWAL_ALERT_DAYS);
+      if (renewingSoon.length) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon.length, href: "/gastos", icon: <WalletIcon />, urgent: false, signature: renewingSoon.map((item) => `${item.id}@${item.date}`).sort().join(",") });
       setAlerts(next);
       const rows = (received?.data ?? []) as { id: string; title: string; body: string; sender_name: string; created_at: string; announcement_recipients: { read_at: string | null }[] }[];
       setMessages(rows.map((row) => ({
@@ -134,8 +164,16 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rolesKey stands in for roles
   }, [rolesKey, pathname, pollTick]);
 
+  const visibleAlerts = alerts.filter((alert) => hiddenAlerts[alert.key] !== alert.signature);
   const unreadIds = messages.filter((message) => message.unread).map((message) => message.id);
-  const total = alerts.reduce((sum, alert) => sum + alert.count, 0) + unreadIds.length;
+  const total = visibleAlerts.reduce((sum, alert) => sum + alert.count, 0) + unreadIds.length;
+
+  function hideAlerts(toHide: Alert[]) {
+    const next = { ...hiddenAlerts };
+    for (const alert of toHide) next[alert.key] = alert.signature;
+    setHiddenAlerts(next);
+    if (userId) writeHiddenAlerts(userId, next);
+  }
 
   function togglePanel() {
     if (open) {
@@ -203,24 +241,30 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
             </>
           ) : null}
 
-          {alerts.length ? (
+          {visibleAlerts.length ? (
             <>
-              {messages.length ? <span className="search-group-title">Pendientes</span> : null}
+              <div className="notice-section-head">
+                <span className="search-group-title">Pendientes</span>
+                {visibleAlerts.length > 1 ? (
+                  <button type="button" className="notice-clear-all" onClick={() => hideAlerts(visibleAlerts)}>Ocultar todos</button>
+                ) : null}
+              </div>
               <ul className="popover-list">
-                {alerts.map((alert) => (
-                  <li key={alert.key}>
+                {visibleAlerts.map((alert) => (
+                  <li key={alert.key} className="popover-alert">
                     <Link href={alert.href} onClick={closePanel} className={alert.urgent ? "popover-item popover-item-urgent" : "popover-item"}>
                       <span className="popover-icon">{alert.icon}</span>
                       <span className="popover-text">{alert.label}</span>
                       <strong>{alert.count}</strong>
                     </Link>
+                    <button type="button" className="notice-dismiss" aria-label={`Ocultar «${alert.label}»`} title="Ocultar hasta que haya novedades" onClick={() => hideAlerts([alert])}>×</button>
                   </li>
                 ))}
               </ul>
             </>
           ) : null}
 
-          {!alerts.length && !messages.length ? <p className="muted popover-empty">Todo al día: no hay nada pendiente.</p> : null}
+          {!visibleAlerts.length && !messages.length ? <p className="muted popover-empty">Todo al día: no hay nada pendiente.</p> : null}
         </div>
       ) : null}
       {canSend ? <SendAnnouncementModal open={composing} onClose={() => setComposing(false)} onSent={setToast} /> : null}

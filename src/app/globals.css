@@ -712,3 +712,12 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 tr.row-muted td { opacity: .6; }
 .expenses-delete { margin-right: auto; color: #b91c1c; }
 @media (max-width: 900px) { .expenses-grid { grid-template-columns: 1fr; } }
+.sort-header { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; white-space: nowrap; }
+.sort-header span { font-size: 11px; opacity: .35; }
+.sort-header:hover span { opacity: .8; }
+.sort-header.active { color: var(--primary); }
+.sort-header.active span { opacity: 1; }
+.popover-alert { display: flex; align-items: center; gap: 2px; }
+.popover-alert .popover-item { flex: 1; min-width: 0; }
+.popover-alert .notice-dismiss { margin: 0; }
+.popover-alert:hover .notice-dismiss { opacity: 1; }
