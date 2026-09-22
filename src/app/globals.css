@@ -697,3 +697,18 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .sent-recipients li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .sent-recipients small { color: var(--muted); font-size: 12px; }
 .sent-recipients li.is-read small { color: #166534; }
+
+/* Gastos de marketing */
+.expenses-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.renewal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.renewal-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-muted); font-size: 13px; }
+.renewal-list li > span { display: grid; min-width: 0; }
+.renewal-list li small { color: var(--muted); font-size: 12px; }
+.renewal-list li.renewal-soon { background: #fef2f2; }
+.renewal-list li.renewal-soon small { color: #b91c1c; font-weight: 600; }
+.inline-select { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.inline-select select { min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); font-weight: 700; }
+.table-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+tr.row-muted td { opacity: .6; }
+.expenses-delete { margin-right: auto; color: #b91c1c; }
+@media (max-width: 900px) { .expenses-grid { grid-template-columns: 1fr; } }

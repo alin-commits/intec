@@ -39,6 +39,9 @@ export const CRM_ROLES: AppRole[] = ["admin", "marketing", "commercial", "direct
 /** Who can send internal notices (avisos) to other users. */
 export const ANNOUNCEMENT_SENDER_ROLES: AppRole[] = ["admin", "direction", "marketing", "it"];
 export const CRM_EDIT_ROLES: AppRole[] = ["admin", "marketing", "commercial"];
+/** Marketing department expenses (apps, subscriptions, one-off spending). */
+export const EXPENSES_ROLES: AppRole[] = ["admin", "marketing", "direction"];
+export const EXPENSES_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
 
 export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
 

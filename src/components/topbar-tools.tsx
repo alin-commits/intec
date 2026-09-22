@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { BellIcon, ClockIcon, CrmIcon, LeadsIcon, MegaphoneIcon, SearchIcon, TicketsIcon } from "@/components/icons";
+import { BellIcon, ClockIcon, CrmIcon, LeadsIcon, MegaphoneIcon, SearchIcon, TicketsIcon, WalletIcon } from "@/components/icons";
 import { SendAnnouncementModal } from "@/components/send-announcement-modal";
 import { SentAnnouncementsModal } from "@/components/sent-announcements-modal";
 import { Toast } from "@/components/ui/toast";
-import { ANNOUNCEMENT_SENDER_ROLES, CRM_ROLES, LEADS_ROLES, hasAnyRole } from "@/lib/constants";
+import { ANNOUNCEMENT_SENDER_ROLES, CRM_ROLES, EXPENSES_EDIT_ROLES, LEADS_ROLES, hasAnyRole } from "@/lib/constants";
+import { todayKey } from "@/lib/dates";
+import { daysBetween, nextRenewal, type BillingPeriod } from "@/lib/expenses";
 import { createClient } from "@/lib/supabase/client";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
@@ -17,6 +19,7 @@ import type { AppRole } from "@/lib/types";
 const STALE_LEAD_DAYS = 3;
 const STALE_TICKET_DAYS = 3;
 const SEARCH_LIMIT = 5;
+const RENEWAL_ALERT_DAYS = 7;
 
 function useClickOutside(ref: RefObject<HTMLElement | null>, onOutside: () => void) {
   useEffect(() => {
@@ -82,6 +85,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
       const alertRoles = roles.filter((role) => role !== "direction");
       const canLeads = hasAnyRole(alertRoles, LEADS_ROLES);
       const canTickets = hasAnyRole(alertRoles, TICKET_VIEW_ROLES);
+      const canExpenses = hasAnyRole(alertRoles, EXPENSES_EDIT_ROLES);
       const leadsBefore = new Date(Date.now() - STALE_LEAD_DAYS * 86400000).toISOString();
       const ticketsBefore = new Date(Date.now() - STALE_TICKET_DAYS * 86400000).toISOString();
       // A pure commercial is alerted about the leads they own; everyone else sees all of them.
@@ -89,7 +93,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
       const { data: { user } } = await supabase.auth.getUser();
       let staleLeadsQuery = supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "new").lt("created_at", leadsBefore);
       if (onlyOwnLeads && user) staleLeadsQuery = staleLeadsQuery.eq("assigned_to", user.id);
-      const [staleLeads, urgentTickets, staleTickets, received] = await Promise.all([
+      const [staleLeads, urgentTickets, staleTickets, received, subscriptions] = await Promise.all([
         canLeads ? staleLeadsQuery : null,
         canTickets ? supabase.from("tickets").select("id", { count: "exact", head: true }).eq("priority", "high").in("status", OPEN_TICKET_STATUSES).is("archived_at", null) : null,
         canTickets ? supabase.from("tickets").select("id", { count: "exact", head: true }).in("status", OPEN_TICKET_STATUSES).is("archived_at", null).lt("created_at", ticketsBefore) : null,
@@ -102,12 +106,19 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
             .order("created_at", { ascending: false })
             .limit(MESSAGE_LIMIT)
           : null,
+        canExpenses ? supabase.from("marketing_expenses").select("id, name, amount, billing_period, start_date").eq("kind", "subscription").eq("status", "active") : null,
       ]);
       if (!active) return;
       const next: Alert[] = [];
       if (staleLeads?.count) next.push({ key: "leads", label: `${onlyOwnLeads ? "Tus leads" : "Leads"} sin contactar desde hace más de ${STALE_LEAD_DAYS} días`, count: staleLeads.count, href: onlyOwnLeads ? "/leads?owner=mine" : "/leads", icon: <LeadsIcon />, urgent: false });
       if (urgentTickets?.count) next.push({ key: "urgent", label: "Tickets de prioridad alta abiertos", count: urgentTickets.count, href: "/tickets", icon: <TicketsIcon />, urgent: true });
       if (staleTickets?.count) next.push({ key: "stale", label: `Tickets abiertos desde hace más de ${STALE_TICKET_DAYS} días`, count: staleTickets.count, href: "/tickets", icon: <ClockIcon />, urgent: false });
+      const today = todayKey();
+      const renewingSoon = (subscriptions?.data ?? []).filter((row) => {
+        const date = nextRenewal({ id: row.id, name: row.name, amount: Number(row.amount), billingPeriod: row.billing_period as BillingPeriod, startDate: row.start_date, kind: "subscription", status: "active", category: "software", provider: null, cancelledOn: null, businessUnitId: null, paymentMethod: null, url: null, notes: null }, today);
+        return date !== null && daysBetween(today, date) <= RENEWAL_ALERT_DAYS;
+      }).length;
+      if (renewingSoon) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon, href: "/gastos", icon: <WalletIcon />, urgent: false });
       setAlerts(next);
       const rows = (received?.data ?? []) as { id: string; title: string; body: string; sender_name: string; created_at: string; announcement_recipients: { read_at: string | null }[] }[];
       setMessages(rows.map((row) => ({

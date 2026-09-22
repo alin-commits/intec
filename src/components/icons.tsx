@@ -207,6 +207,10 @@ export function BellIcon() {
   return <Svg><path d="M5.2 8.2a4.8 4.8 0 0 1 9.6 0c0 4.3 1.7 5.6 1.7 5.6H3.5s1.7-1.3 1.7-5.6Z" /><path d="M8.4 16.4a1.8 1.8 0 0 0 3.2 0" /></Svg>;
 }
 
+export function WalletIcon() {
+  return <Svg><path d="M3.5 6.5v8c0 .8.7 1.5 1.5 1.5h10.5c.6 0 1-.4 1-1V8c0-.6-.4-1-1-1H5a1.5 1.5 0 0 1-1.5-1.5c0-.8.7-1.5 1.5-1.5h9" /><path d="M13.5 11.5h.01" /></Svg>;
+}
+
 export function SearchIcon() {
   return <Svg><circle cx="8.8" cy="8.8" r="5.3" /><path d="m12.8 12.8 3.8 3.8" /></Svg>;
 }
