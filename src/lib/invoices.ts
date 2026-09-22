@@ -1,6 +1,6 @@
 // Marketing invoices (PDFs uploaded in Gastos → Facturas). Shared by the page
 // and the AI extraction route.
-import type { ExpenseCategory } from "@/lib/expenses";
+import type { BillingPeriod, ExpenseCategory } from "@/lib/expenses";
 
 export const INVOICE_BUCKET = "marketing-invoices";
 export const INVOICE_MAX_BYTES = 10 * 1024 * 1024;
@@ -35,6 +35,8 @@ export type InvoiceExtraction = {
   vatAmount: number | null;
   totalAmount: number | null;
   category: ExpenseCategory;
+  /** Billing period if the invoice looks like a recurring fee (subscription), otherwise null. */
+  recurrence: BillingPeriod | null;
 };
 
 /** Amount an invoice adds to the department's spending (base, without VAT). Subscription invoices add nothing extra. */

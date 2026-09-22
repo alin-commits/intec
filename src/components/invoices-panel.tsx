@@ -9,7 +9,7 @@ import { formatDate, currencyFormatter } from "@/lib/format";
 import { formatEuroForPdf, generatePdfReport } from "@/lib/pdf-report";
 import { reportSafeError } from "@/lib/errors";
 import { todayKey } from "@/lib/dates";
-import { expenseCategoryColors, expenseCategoryLabels, type ExpenseCategory, type MarketingExpense } from "@/lib/expenses";
+import { billingPeriodLabels, expenseCategoryColors, expenseCategoryLabels, type BillingPeriod, type ExpenseCategory, type MarketingExpense } from "@/lib/expenses";
 import { INVOICE_BUCKET, INVOICE_MAX_BYTES, invoiceSpend, matchSubscription, type InvoiceExtraction, type MarketingInvoice } from "@/lib/invoices";
 import { createClient } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
@@ -93,6 +93,8 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<InvoiceDraft>(blankDraft);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  /** When set, saving also creates a new subscription for this supplier and links the invoice to it. */
+  const [newSubscription, setNewSubscription] = useState<BillingPeriod | null>(null);
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MarketingInvoice | null>(null);
@@ -163,12 +165,17 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
           businessUnitId: match?.businessUnitId ?? null,
           expenseId: match?.id ?? null,
         });
+        // A recurring fee from a supplier we don't track yet: propose creating the subscription.
+        setNewSubscription(!match && extraction.recurrence ? extraction.recurrence : null);
         note = match
           ? `Datos leídos con IA. Parece una factura de la suscripción «${match.name}»: queda asociada y no sumará dos veces. Revisa y guarda.`
-          : "Datos leídos con IA. Revísalos antes de guardar.";
+          : extraction.recurrence
+            ? `Datos leídos con IA. Parece una cuota ${billingPeriodLabels[extraction.recurrence].toLowerCase()} que aún no está en Suscripciones: al guardar se creará la suscripción «${extraction.supplier}» y la factura quedará asociada. Si no la quieres, cámbialo en «¿Es de una suscripción?».`
+            : "Datos leídos con IA. Revísalos antes de guardar.";
         if (!extraction.invoiceDate || extraction.baseAmount === null || extraction.totalAmount === null) note += " Faltan algunos datos que no se veían claros.";
       } else {
         setDraft(base);
+        setNewSubscription(null);
       }
       setAiNote(note);
       setEditingId(null);
@@ -194,6 +201,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
     setDraft({ ...rest, invoiceNumber: rest.invoiceNumber ?? "", concept: rest.concept ?? "", notes: rest.notes ?? "" });
     setEditingId(invoice.id);
     setAiNote(null);
+    setNewSubscription(null);
     setEditorOpen(true);
   }
 
@@ -227,11 +235,38 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
         notes: draft.notes?.trim() || null,
       };
       const supabase = createClient();
+      let createdExpenseId: string | null = null;
+      if (newSubscription) {
+        // The subscription starts on this invoice's date and costs its base amount (totals count bases, without VAT).
+        const { data: created, error: expenseError } = await supabase
+          .from("marketing_expenses")
+          .insert({
+            name: payload.supplier,
+            provider: payload.supplier,
+            category: payload.category,
+            kind: "subscription",
+            amount: payload.base_amount,
+            billing_period: newSubscription,
+            start_date: payload.invoice_date,
+            status: "active",
+            business_unit_id: payload.business_unit_id,
+            notes: "Creada a partir de una factura.",
+          })
+          .select("id")
+          .single();
+        if (expenseError) throw expenseError;
+        createdExpenseId = created.id;
+        payload.expense_id = created.id;
+      }
       const { error } = editingId ? await supabase.from("marketing_invoices").update(payload).eq("id", editingId) : await supabase.from("marketing_invoices").insert(payload);
-      if (error) throw error;
+      if (error) {
+        if (createdExpenseId) await supabase.from("marketing_expenses").delete().eq("id", createdExpenseId);
+        throw error;
+      }
       setEditorOpen(false);
+      setNewSubscription(null);
       await onChanged();
-      onMessage(editingId ? "Factura actualizada." : "Factura guardada.");
+      onMessage(createdExpenseId ? `Factura guardada y suscripción «${payload.supplier}» creada.` : editingId ? "Factura actualizada." : "Factura guardada.");
     } catch (cause) {
       onMessage(reportSafeError(cause, "No se pudo guardar la factura."));
     } finally {
@@ -413,12 +448,31 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
               <option value="">General (todas)</option>
               {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
             </select></label>
-            <label><span>¿Es de una suscripción?</span><select value={draft.expenseId ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("expenseId", event.target.value || null)}>
+            <label><span>¿Es de una suscripción?</span><select
+              value={newSubscription ? `new:${newSubscription}` : draft.expenseId ?? ""}
+              disabled={!canEdit}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value.startsWith("new:")) {
+                  setNewSubscription(value.slice(4) as BillingPeriod);
+                  updateDraft("expenseId", null);
+                } else {
+                  setNewSubscription(null);
+                  updateDraft("expenseId", value || null);
+                }
+              }}
+            >
               <option value="">No, suma como gasto</option>
               {subscriptions.map((expense) => <option key={expense.id} value={expense.id}>Sí: {expense.name}{expense.status === "cancelled" ? " (de baja)" : ""}</option>)}
+              {!editingId || !draft.expenseId ? (
+                <optgroup label="Crear suscripción nueva">
+                  {(Object.keys(billingPeriodLabels) as BillingPeriod[]).map((period) => <option key={period} value={`new:${period}`}>+ Nueva suscripción {billingPeriodLabels[period].toLowerCase()}</option>)}
+                </optgroup>
+              ) : null}
             </select></label>
             <label className="form-field-wide"><span>Notas</span><textarea rows={2} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
+          {newSubscription ? <p className="muted invoice-hint">Al guardar se crea en Suscripciones «{draft.supplier || "este proveedor"}» ({billingPeriodLabels[newSubscription].toLowerCase()}, {currencyFormatter.format(draft.baseAmount)} sin IVA, desde el {draft.invoiceDate ? formatDate(draft.invoiceDate) : "—"}) y esta factura queda como su justificante. Si ya pagabas antes, ajusta luego la fecha del primer cargo en la suscripción.</p> : null}
           {draft.expenseId ? <p className="muted invoice-hint">Asociada a una suscripción: se guarda como justificante, pero no suma otra vez en los totales (la suscripción ya cuenta ese cargo).</p> : null}
           {Math.abs(round2(draft.baseAmount + draft.vatAmount) - round2(draft.totalAmount)) > 0.01 ? <p className="muted invoice-hint">Ojo: base + IVA ({currencyFormatter.format(draft.baseAmount + draft.vatAmount)}) no coincide con el total. Puede haber retenciones o recargos; revísalo.</p> : null}
           <div className="modal-actions">
