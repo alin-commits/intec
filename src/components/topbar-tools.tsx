@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { BellIcon, ClockIcon, CrmIcon, LeadsIcon, MegaphoneIcon, SearchIcon, TicketsIcon } from "@/components/icons";
 import { SendAnnouncementModal } from "@/components/send-announcement-modal";
+import { SentAnnouncementsModal } from "@/components/sent-announcements-modal";
 import { Toast } from "@/components/ui/toast";
 import { ANNOUNCEMENT_SENDER_ROLES, CRM_ROLES, LEADS_ROLES, hasAnyRole } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
@@ -51,6 +52,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [open, setOpen] = useState(false);
   const [composing, setComposing] = useState(false);
+  const [viewingSent, setViewingSent] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [pollTick, setPollTick] = useState(0);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -96,6 +98,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
             .from("announcements")
             .select("id, title, body, sender_name, created_at, announcement_recipients!inner(read_at)")
             .eq("announcement_recipients.recipient_id", user.id)
+            .is("announcement_recipients.dismissed_at", null)
             .order("created_at", { ascending: false })
             .limit(MESSAGE_LIMIT)
           : null,
@@ -133,6 +136,16 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
     if (unreadIds.length) void createClient().rpc("mark_announcements_read", { announcement_ids: unreadIds });
   }
 
+  // Removes the notices from this user's bell only; other recipients keep theirs.
+  async function dismissMessages(ids: string[]) {
+    setMessages((current) => current.filter((message) => !ids.includes(message.id)));
+    const { error } = await createClient().rpc("dismiss_announcements", { announcement_ids: ids });
+    if (error) {
+      setToast("No se pudo borrar el aviso. Inténtalo de nuevo.");
+      setPollTick((tick) => tick + 1);
+    }
+  }
+
   return (
     <div className="topbar-popover" ref={wrapperRef}>
       <button type="button" className="icon-button topbar-icon-button" aria-label={total ? `${total} avisos` : "Sin avisos"} aria-expanded={open} onClick={togglePanel}>
@@ -144,21 +157,32 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
           <div className="popover-header">
             <strong className="popover-title">Avisos</strong>
             {canSend ? (
-              <button type="button" className="button button-primary button-compact" onClick={() => { closePanel(); setComposing(true); }}>
-                <MegaphoneIcon /> Enviar aviso
-              </button>
+              <div className="popover-header-actions">
+                <button type="button" className="button button-secondary button-compact" onClick={() => { closePanel(); setViewingSent(true); }}>
+                  Enviados
+                </button>
+                <button type="button" className="button button-primary button-compact" onClick={() => { closePanel(); setComposing(true); }}>
+                  <MegaphoneIcon /> Enviar aviso
+                </button>
+              </div>
             ) : null}
           </div>
 
           {messages.length ? (
             <>
-              <span className="search-group-title">Mensajes</span>
+              <div className="notice-section-head">
+                <span className="search-group-title">Mensajes</span>
+                {messages.length > 1 ? (
+                  <button type="button" className="notice-clear-all" onClick={() => void dismissMessages(messages.map((message) => message.id))}>Borrar todos</button>
+                ) : null}
+              </div>
               <ul className="popover-list">
                 {messages.map((message) => (
                   <li key={message.id} className={message.unread ? "notice-message notice-message-unread" : "notice-message"}>
                     <div className="notice-message-head">
                       <strong>{message.title}</strong>
                       <small>{timeAgo(message.createdAt)}</small>
+                      <button type="button" className="notice-dismiss" aria-label={`Borrar el aviso «${message.title}»`} title="Borrar aviso" onClick={() => void dismissMessages([message.id])}>×</button>
                     </div>
                     <p>{message.body}</p>
                     <small className="notice-message-sender">De {message.senderName}</small>
@@ -189,6 +213,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
         </div>
       ) : null}
       {canSend ? <SendAnnouncementModal open={composing} onClose={() => setComposing(false)} onSent={setToast} /> : null}
+      {canSend ? <SentAnnouncementsModal open={viewingSent} onClose={() => setViewingSent(false)} /> : null}
       <Toast message={toast} onDismiss={dismissToast} />
     </div>
   );
