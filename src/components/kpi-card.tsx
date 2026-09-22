@@ -16,6 +16,12 @@ type KpiCardProps = {
 
 const NO_COMPARISON = "Sin comparación";
 
+function valueSizeClass(value: string): string {
+  if (value.length > 13) return "kpi-value kpi-value-xlong";
+  if (value.length > 9) return "kpi-value kpi-value-long";
+  return "kpi-value";
+}
+
 export function KpiCard({ label, value, delta, positive = true, helper, icon, tone = "indigo", sparkline }: KpiCardProps) {
   const neutral = delta === NO_COMPARISON;
   const context = helper ?? "frente al mes anterior";
@@ -32,7 +38,7 @@ export function KpiCard({ label, value, delta, positive = true, helper, icon, to
     return (
       <article className="panel kpi-card">
         <div className="kpi-label">{label}</div>
-        <div className="kpi-value">{value}</div>
+        <div className={valueSizeClass(value)}>{value}</div>
         {footer}
       </article>
     );
@@ -45,7 +51,7 @@ export function KpiCard({ label, value, delta, positive = true, helper, icon, to
         <div className="kpi-label">{label}</div>
       </div>
       <div className="kpi-card-body">
-        <div className="kpi-value">{value}</div>
+        <div className={valueSizeClass(value)}>{value}</div>
         {sparkline ? <Sparkline values={sparkline} /> : null}
       </div>
       {footer}

@@ -726,3 +726,14 @@ tr.row-muted td { opacity: .6; }
 .invoice-dropzone.dragging { border-color: var(--primary); background: var(--primary-soft); }
 .invoice-ai-note { min-width: 0; margin-bottom: 14px; }
 .invoice-hint { margin: 10px 0 0; font-size: 12.5px; }
+
+/* Long money values (with cents) must fit their card */
+.kpi-value { white-space: nowrap; min-width: 0; }
+.kpi-value-long, .kpi-card-rich .kpi-value-long { font-size: 24px; }
+.kpi-value-xlong, .kpi-card-rich .kpi-value-xlong { font-size: 20px; }
+.kpi-card-body .kpi-value { flex: 0 0 auto; }
+.kpi-card-body .sparkline { flex: 0 1 96px; min-width: 0; max-width: 96px; }
+.donut-center strong { white-space: nowrap; }
+.donut-center strong.donut-center-long { font-size: 19px; }
+.donut-center strong.donut-center-xlong { font-size: 15px; letter-spacing: -0.02em; }
+.donut-legend strong, .pending-list strong, .panel-footer-stat strong, .renewal-list strong, .campaign-stats-grid strong, .campaign-card-footer strong { white-space: nowrap; }

@@ -47,7 +47,7 @@ export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin 
           ))}
         </svg>
         <div className="donut-center">
-          <strong>{format(total)}</strong>
+          <strong className={format(total).length > 10 ? "donut-center-xlong" : format(total).length > 7 ? "donut-center-long" : undefined}>{format(total)}</strong>
           <span>{centerLabel}</span>
         </div>
       </div>

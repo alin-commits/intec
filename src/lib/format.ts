@@ -3,7 +3,9 @@ export const currencyFormatter = new Intl.NumberFormat("es-ES", {
   currency: "EUR",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
-});
+  // Spanish style skips the separator for 4 digits ("1234,56 €"); always grouping keeps columns consistent.
+  useGrouping: "always",
+} as Intl.NumberFormatOptions);
 
 export const numberFormatter = new Intl.NumberFormat("es-ES");
 
