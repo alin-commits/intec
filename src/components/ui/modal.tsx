@@ -2,12 +2,14 @@
 
 import { useEffect, type ReactNode } from "react";
 
-export function Modal({ open, title, eyebrow, children, onClose }: {
+export function Modal({ open, title, eyebrow, children, onClose, scrollInside = false }: {
   open: boolean;
   title: string;
   eyebrow?: string;
   children: ReactNode;
   onClose: () => void;
+  /** For long content: the title stays fixed and only the body scrolls, inside the card's rounded edges. */
+  scrollInside?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -21,12 +23,12 @@ export function Modal({ open, title, eyebrow, children, onClose }: {
   if (!open) return null;
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <section className={scrollInside ? "modal-card modal-card-wide modal-card-scroll-inside" : "modal-card modal-card-wide"} role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="modal-heading">
           <div>{eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}<h2 id="modal-title">{title}</h2></div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
-        {children}
+        {scrollInside ? <div className="modal-scroll-body">{children}</div> : children}
       </section>
     </div>
   );

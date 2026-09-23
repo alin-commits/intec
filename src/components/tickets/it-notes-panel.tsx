@@ -484,7 +484,7 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
         )}
       </section>
 
-      <Modal open={Boolean(viewingNote)} title={viewingNote?.title ?? ""} eyebrow="Base de conocimiento" onClose={() => setViewingId(null)}>
+      <Modal open={Boolean(viewingNote)} title={viewingNote?.title ?? ""} eyebrow="Base de conocimiento" scrollInside onClose={() => setViewingId(null)}>
         {viewingNote ? (
           <div className="note-detail">
             <div className="note-meta">
@@ -517,7 +517,7 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
         ) : null}
       </Modal>
 
-      <Modal open={Boolean(draft)} title={draft?.id ? "Editar nota" : "Nueva nota"} eyebrow="Base de conocimiento" onClose={closeEditor}>
+      <Modal open={Boolean(draft)} title={draft?.id ? "Editar nota" : "Nueva nota"} eyebrow="Base de conocimiento" scrollInside onClose={closeEditor}>
         {draft ? (
           <form
             className="note-form"

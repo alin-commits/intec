@@ -877,3 +877,10 @@ tr.row-muted td { opacity: .6; }
   .note-step-number { width: 34px; height: 34px; font-size: 14px; }
   .note-stepper li:not(:last-child)::before { left: 16px; top: 36px; }
 }
+/* Modal whose body scrolls inside the card (long notes): the scrollbar stays within the rounded edges */
+.modal-card-scroll-inside { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.modal-card-scroll-inside > .modal-heading { flex-shrink: 0; margin-bottom: 0; padding: 22px 26px 16px; border-bottom: 1px solid var(--border); }
+.modal-scroll-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 26px 26px; }
+.modal-scroll-body::-webkit-scrollbar-track { margin: 6px 0 14px; }
+@media (max-width: 640px) { .modal-card-scroll-inside > .modal-heading { padding: 18px 18px 14px; } .modal-scroll-body { padding: 16px 18px 22px; } }
+.modal-scroll-body .note-meta { margin-top: 0; }
