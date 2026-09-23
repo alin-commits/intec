@@ -44,6 +44,7 @@ const pageTitles: Record<string, string> = {
   "/crm": "CRM",
   "/campanas": "Campañas",
   "/rrss": "RRSS y métricas de marketing",
+  "/gastos": "Gastos de marketing",
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
   "/tarjetas": "Tarjetas de visita",
@@ -146,6 +147,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-bottom">
+          {/* Only shown in the mobile menu, where the topbar just shows the initials. */}
+          <div className="sidebar-user">
+            <span className="user-avatar" aria-hidden="true">{initials}</span>
+            <div className="user-chip-text">
+              <strong>{profile.fullName}</strong>
+              <small>{profile.roles.map((role) => roleLabels[role]).join(" + ")}</small>
+            </div>
+          </div>
           {isDirection ? (
             <button type="button" className="sidebar-department-switch" onClick={changeDepartment}>
               {directionView ? `Viendo: ${departmentLabels[directionView]} · Cambiar` : "Elegir departamento"}
