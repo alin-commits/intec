@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createBlock, noteBlockTypeLabels, noteBlockTypeOrder, type NoteBlock, type NoteBlockType } from "@/lib/tickets/notes";
 
 const URL_PATTERN = /(https?:\/\/[^\s<>"')\]]+)/g;
@@ -31,50 +31,193 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+type ViewSection = { id: string; heading: string | null; blocks: NoteBlock[] };
+
+/** Splits the note at each heading so every section can be shown as its own card. */
+function groupSections(blocks: NoteBlock[]): ViewSection[] {
+  const sections: ViewSection[] = [];
+  for (const block of blocks) {
+    if (block.type === "heading") {
+      sections.push({ id: block.id, heading: block.text, blocks: [] });
+    } else if (sections.length === 0) {
+      sections.push({ id: `intro-${block.id}`, heading: null, blocks: [block] });
+    } else {
+      sections[sections.length - 1].blocks.push(block);
+    }
+  }
+  return sections;
+}
+
+const SECTION_ICONS: [RegExp, string][] = [
+  [/(error|codigo|troubleshoot|diagnos|solucion de problemas)/, "🔧"],
+  [/(problema|incidencia|sintoma|fallo|averia|issue)/, "⚠️"],
+  [/(soluci|resuel|arregl|fix)/, "✅"],
+  [/(requisit|antes de|necesit|preparaci|comprobaci|checklist)/, "📋"],
+  [/(instala|montaje|conexi|conectar|configura|puesta en marcha|setup)/, "🛠️"],
+  [/(uso|utiliza|funcionamiento|como se usa|operaci)/, "🖱️"],
+  [/(mantenimiento|limpieza|actualiza)/, "🧰"],
+  [/(especificaci|datos|caracter|referencia|tabla|indicador|luces|led)/, "📊"],
+  [/(seguridad|aviso|precauci|advertencia|importante)/, "🛡️"],
+  [/(contacto|soporte|proveedor|garant)/, "☎️"],
+  [/(resumen|para que sirve|introduc|descripci|que es)/, "💡"],
+];
+
+function sectionIcon(heading: string): string {
+  const normalized = heading.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return SECTION_ICONS.find(([pattern]) => pattern.test(normalized))?.[1] ?? "📌";
+}
+
+function ProgressBar({ done, total, onReset }: { done: number; total: number; onReset: () => void }) {
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="note-progress">
+      <div className="note-progress-track" aria-hidden="true"><span style={{ width: `${percent}%` }} /></div>
+      <span className="note-progress-label">{done === total ? "¡Completado!" : `${done} de ${total}`}</span>
+      {done > 0 ? <button type="button" className="note-progress-reset" onClick={() => onReset()}>Reiniciar</button> : null}
+    </div>
+  );
+}
+
+/**
+ * Read view of a note. Steps and checklist items can be ticked while following
+ * the guide; that progress only lasts while the note is open (it is never saved).
+ */
 export function NoteBlocksView({ blocks }: { blocks: NoteBlock[] }) {
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set(
+    blocks.flatMap((block) => (block.type === "checklist" ? block.items.flatMap((item, index) => (item.done ? [`${block.id}:${index}`] : [])) : [])),
+  ));
+  const sections = useMemo(() => groupSections(blocks), [blocks]);
+  const headed = sections.filter((section) => section.heading);
+
   if (blocks.length === 0) return <p className="muted">Esta nota todavía no tiene contenido.</p>;
+
+  function toggle(key: string) {
+    setTicked((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  function reset(blockId: string) {
+    setTicked((current) => new Set(Array.from(current).filter((key) => !key.startsWith(`${blockId}:`))));
+  }
+
+  function renderBlock(block: NoteBlock, isSummary: boolean) {
+    switch (block.type) {
+      case "heading":
+        return null;
+      case "text":
+        return isSummary
+          ? <div key={block.id} className="note-summary"><span className="note-summary-icon" aria-hidden="true">💡</span><p>{linkify(block.text)}</p></div>
+          : <p key={block.id} className="note-view-text">{linkify(block.text)}</p>;
+      case "code":
+        return (
+          <div key={block.id} className="note-code">
+            <span className="note-code-label">Comando</span>
+            <CopyButton text={block.text} />
+            <pre><code>{block.text}</code></pre>
+          </div>
+        );
+      case "steps": {
+        const doneCount = block.items.filter((_, index) => ticked.has(`${block.id}:${index}`)).length;
+        const nextIndex = doneCount > 0 ? block.items.findIndex((_, index) => !ticked.has(`${block.id}:${index}`)) : -1;
+        return (
+          <div key={block.id} className="note-steps-block">
+            {block.items.length > 1 ? <ProgressBar done={doneCount} total={block.items.length} onReset={() => reset(block.id)} /> : null}
+            <ol className="note-stepper">
+              {block.items.map((item, index) => {
+                const key = `${block.id}:${index}`;
+                const isDone = ticked.has(key);
+                const className = isDone ? "done" : index === nextIndex ? "next" : undefined;
+                return (
+                  <li key={index} className={className}>
+                    <button type="button" className="note-step-number" aria-pressed={isDone} aria-label={isDone ? `Desmarcar paso ${index + 1}` : `Marcar paso ${index + 1} como hecho`} onClick={() => toggle(key)}>
+                      {isDone ? "✓" : index + 1}
+                    </button>
+                    <div className="note-step-body">
+                      <span className="note-step-kicker">Paso {index + 1}{index === nextIndex ? " · siguiente" : ""}</span>
+                      <p>{linkify(item)}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        );
+      }
+      case "checklist": {
+        const doneCount = block.items.filter((_, index) => ticked.has(`${block.id}:${index}`)).length;
+        return (
+          <div key={block.id} className="note-steps-block">
+            {block.items.length > 1 ? <ProgressBar done={doneCount} total={block.items.length} onReset={() => reset(block.id)} /> : null}
+            <ul className="note-view-checklist">
+              {block.items.map((item, index) => {
+                const key = `${block.id}:${index}`;
+                const isDone = ticked.has(key);
+                return (
+                  <li key={index} className={isDone ? "done" : undefined}>
+                    <button type="button" className="note-check-row" aria-pressed={isDone} onClick={() => toggle(key)}>
+                      <span className="note-check" aria-hidden="true">{isDone ? "✓" : ""}</span>
+                      <span>{linkify(item.text)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      }
+      case "table": {
+        if (block.rows.length === 0) return null;
+        const [header, ...body] = block.rows;
+        return (
+          <div key={block.id} className="note-table-scroll">
+            <table className="note-table note-table-view">
+              <thead><tr>{header.map((cell, index) => <th key={index}>{cell}</th>)}</tr></thead>
+              <tbody>{body.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index}>{linkify(cell)}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+        );
+      }
+    }
+  }
+
   return (
     <div className="note-view">
-      {blocks.map((block) => {
-        switch (block.type) {
-          case "heading":
-            return <h3 key={block.id} className="note-view-heading">{block.text}</h3>;
-          case "text":
-            return <p key={block.id} className="note-view-text">{linkify(block.text)}</p>;
-          case "code":
-            return (
-              <div key={block.id} className="note-code">
-                <CopyButton text={block.text} />
-                <pre><code>{block.text}</code></pre>
-              </div>
-            );
-          case "steps":
-            return <ol key={block.id} className="note-view-steps">{block.items.map((item, index) => <li key={index}>{linkify(item)}</li>)}</ol>;
-          case "checklist":
-            return (
-              <ul key={block.id} className="note-view-checklist">
-                {block.items.map((item, index) => (
-                  <li key={index} className={item.done ? "done" : undefined}>
-                    <span className="note-check" aria-hidden="true">{item.done ? "✓" : ""}</span>
-                    <span>{linkify(item.text)}</span>
-                  </li>
-                ))}
-              </ul>
-            );
-          case "table": {
-            if (block.rows.length === 0) return null;
-            const [header, ...body] = block.rows;
-            return (
-              <div key={block.id} className="note-table-scroll">
-                <table className="note-table">
-                  <thead><tr>{header.map((cell, index) => <th key={index}>{cell}</th>)}</tr></thead>
-                  <tbody>{body.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index}>{linkify(cell)}</td>)}</tr>)}</tbody>
-                </table>
-              </div>
-            );
-          }
-        }
-      })}
+      {headed.length >= 3 ? (
+        <nav className="note-toc" aria-label="Secciones de la nota">
+          <span className="note-toc-title">En esta nota</span>
+          <div className="note-toc-links">
+            {headed.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                className="note-toc-link"
+                onClick={() => document.getElementById(`note-section-${section.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                <span aria-hidden="true">{sectionIcon(section.heading ?? "")}</span> {section.heading}
+              </button>
+            ))}
+          </div>
+        </nav>
+      ) : null}
+
+      {sections.map((section, sectionIndex) => (
+        section.heading === null ? (
+          <div key={section.id} className="note-intro">
+            {section.blocks.map((block, index) => renderBlock(block, sectionIndex === 0 && index === 0 && block.type === "text"))}
+          </div>
+        ) : (
+          <section key={section.id} id={`note-section-${section.id}`} className="note-section">
+            <h3 className="note-section-heading">
+              <span className="note-section-icon" aria-hidden="true">{sectionIcon(section.heading)}</span>
+              {section.heading}
+            </h3>
+            {section.blocks.length > 0 ? <div className="note-section-body">{section.blocks.map((block) => renderBlock(block, false))}</div> : null}
+          </section>
+        )
+      ))}
     </div>
   );
 }

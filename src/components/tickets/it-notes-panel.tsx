@@ -181,6 +181,8 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
   }, [notes]);
 
   const viewingNote = viewingId ? notes.find((note) => note.id === viewingId) ?? null : null;
+  const viewingFiles = viewingNote ? filesByNote.get(viewingNote.id) ?? [] : [];
+  const viewingStepCount = viewingNote ? viewingNote.content.reduce((total, block) => total + (block.type === "steps" ? block.items.length : 0), 0) : 0;
 
   function openEditor(note: ItNote | null) {
     setDraft(draftFromNote(note, note ? filesByNote.get(note.id) ?? [] : []));
@@ -482,25 +484,29 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
         )}
       </section>
 
-      <Modal open={Boolean(viewingNote)} title={viewingNote?.title ?? ""} eyebrow={viewingNote ? itNoteCategoryLabels[viewingNote.category] : undefined} onClose={() => setViewingId(null)}>
+      <Modal open={Boolean(viewingNote)} title={viewingNote?.title ?? ""} eyebrow="Base de conocimiento" onClose={() => setViewingId(null)}>
         {viewingNote ? (
           <div className="note-detail">
-            <p className="muted">Actualizada el {authorLabel(viewingNote)}</p>
-            <NoteBlocksView blocks={viewingNote.content} />
-            {(filesByNote.get(viewingNote.id) ?? []).length > 0 ? (
-              <div className="note-files">
-                <span className="eyebrow">Archivos adjuntos</span>
-                <ul>
-                  {(filesByNote.get(viewingNote.id) ?? []).map((file) => (
-                    <li key={file.id}>
-                      <button type="button" className="note-file-link" onClick={() => void handleOpenFile(file)}>📄 {file.fileName}</button>
-                      <span className="muted">{formatFileSize(file.sizeBytes)}</span>
-                    </li>
-                  ))}
-                </ul>
+            <div className="note-meta">
+              <span className={`note-category note-category-${viewingNote.category}`}>{itNoteCategoryLabels[viewingNote.category]}</span>
+              <span className="note-meta-item">🕒 {authorLabel(viewingNote)}</span>
+              {viewingStepCount > 0 ? <span className="note-meta-item">👣 {viewingStepCount} paso{viewingStepCount === 1 ? "" : "s"}</span> : null}
+              {viewingFiles.length > 0 ? <span className="note-meta-item">📎 {viewingFiles.length} adjunto{viewingFiles.length === 1 ? "" : "s"}</span> : null}
+            </div>
+            {viewingFiles.length > 0 ? (
+              <div className="note-file-cards">
+                {viewingFiles.map((file) => (
+                  <button key={file.id} type="button" className="note-file-card" onClick={() => void handleOpenFile(file)}>
+                    <span className="note-file-card-icon" aria-hidden="true">{isPdfFileName(file.path) ? "PDF" : "📄"}</span>
+                    <span className="note-file-card-text">
+                      <strong>{file.fileName}</strong>
+                      <span>{formatFileSize(file.sizeBytes)} · Abrir</span>
+                    </span>
+                  </button>
+                ))}
               </div>
             ) : null}
-            {canManage ? (
+            <NoteBlocksView key={`${viewingNote.id}:${viewingNote.updatedAt}`} blocks={viewingNote.content} />            {canManage ? (
               <div className="modal-actions">
                 <button type="button" className="button button-danger" onClick={() => setPendingDelete(viewingNote)}>Eliminar</button>
                 <button type="button" className="button button-secondary" onClick={() => void togglePinned(viewingNote)}>{viewingNote.pinned ? "Desfijar" : "Fijar arriba"}</button>
