@@ -12,6 +12,8 @@ import {
   formatFileSize,
   IT_NOTE_FILE_MAX_BYTES,
   IT_NOTES_BUCKET,
+  isEffectivelyEmpty,
+  isPdfFileName,
   itNoteCategoryLabels,
   itNoteCategoryOrder,
   mapItNoteFileRow,
@@ -22,12 +24,19 @@ import {
   type ItNoteCategory,
   type ItNoteFile,
   type NoteBlock,
+  type NoteExtraction,
 } from "@/lib/tickets/notes";
 import { EmptyState } from "./empty-state";
 import { NoteBlocksEditor, NoteBlocksView } from "./note-blocks";
 
+/** A file already uploaded to storage (to be read by the AI) but not yet linked to the note. */
+type StagedFile = { path: string; fileName: string; sizeBytes: number };
+
 type NoteDraft = {
+  /** Null while the note hasn't been saved yet. */
   id: string | null;
+  /** The id the note has or will get on insert, so files can be uploaded under it before saving. */
+  noteId: string;
   title: string;
   category: ItNoteCategory;
   pinned: boolean;
@@ -35,7 +44,10 @@ type NoteDraft = {
   files: ItNoteFile[];
   removedFiles: ItNoteFile[];
   pendingFiles: File[];
+  stagedFiles: StagedFile[];
 };
+
+type PdfSource = { file: File } | { path: string; fileName: string };
 
 /** New notes start with the usual "problem → cause → solution" outline; any block can be removed. */
 function templateBlocks(): NoteBlock[] {
@@ -48,8 +60,8 @@ function templateBlocks(): NoteBlock[] {
 }
 
 function draftFromNote(note: ItNote | null, files: ItNoteFile[]): NoteDraft {
-  if (!note) return { id: null, title: "", category: "solution", pinned: false, content: templateBlocks(), files: [], removedFiles: [], pendingFiles: [] };
-  return { id: note.id, title: note.title, category: note.category, pinned: note.pinned, content: note.content, files, removedFiles: [], pendingFiles: [] };
+  if (!note) return { id: null, noteId: crypto.randomUUID(), title: "", category: "solution", pinned: false, content: templateBlocks(), files: [], removedFiles: [], pendingFiles: [], stagedFiles: [] };
+  return { id: note.id, noteId: note.id, title: note.title, category: note.category, pinned: note.pinned, content: note.content, files, removedFiles: [], pendingFiles: [], stagedFiles: [] };
 }
 
 /** Opens a short-lived link to a private file. The tab is opened first so popup blockers allow it. */
@@ -112,7 +124,14 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
   const [pendingDelete, setPendingDelete] = useState<ItNote | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  // Latest draft for async work (the AI answer arrives after the user may have kept editing).
+  const draftRef = useRef<NoteDraft | null>(null);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   function applyNotesData(data: NotesData) {
     if (data.status === "ready") {
@@ -175,11 +194,84 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
   }
 
   function closeEditor() {
-    if (saving) return;
+    if (saving || aiBusy) return;
     if (draftDirty && !window.confirm("Hay cambios sin guardar. ¿Salir sin guardar?")) return;
+    // PDFs uploaded only so the AI could read them are discarded with the draft.
+    if (draft?.stagedFiles.length) void createClient().storage.from(IT_NOTES_BUCKET).remove(draft.stagedFiles.map((file) => file.path));
     const reopenId = draft?.id ?? null;
     setDraft(null);
     setViewingId(reopenId);
+  }
+
+  function removeStagedFile(staged: StagedFile) {
+    void createClient().storage.from(IT_NOTES_BUCKET).remove([staged.path]);
+    setDraft((current) => (current ? { ...current, stagedFiles: current.stagedFiles.filter((file) => file.path !== staged.path) } : current));
+  }
+
+  /** Sends a PDF to the AI and fills the draft with the note it writes. New files are uploaded first (staged). */
+  async function fillFromPdf(noteId: string, source: PdfSource) {
+    if (aiBusy) return;
+    setAiBusy(true);
+    const supabase = createClient();
+    try {
+      let path: string;
+      let fileName: string;
+      if ("file" in source) {
+        const file = source.file;
+        path = noteFileStoragePath(noteId, file.name);
+        fileName = file.name.slice(0, 200);
+        const { error: uploadError } = await supabase.storage.from(IT_NOTES_BUCKET).upload(path, file, { contentType: "application/pdf", upsert: false });
+        if (uploadError) throw uploadError;
+        const staged: StagedFile = { path, fileName, sizeBytes: file.size };
+        setDraft((current) => (current ? { ...current, pendingFiles: current.pendingFiles.filter((item) => item !== file), stagedFiles: [...current.stagedFiles, staged] } : current));
+        setDraftDirty(true);
+      } else {
+        path = source.path;
+        fileName = source.fileName;
+      }
+
+      const response = await fetch("/api/it-notes/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, fileName }) });
+      const payload = (await response.json().catch(() => ({}))) as { extraction?: NoteExtraction; error?: string };
+      if (!response.ok || !payload.extraction) {
+        onMessage(payload.error ?? "No se pudo leer el manual con la IA.");
+        return;
+      }
+      const extraction = payload.extraction;
+      const latest = draftRef.current;
+      if (!latest || latest.noteId !== noteId) return;
+      const replaced = isEffectivelyEmpty(latest.content);
+      const hasTitle = Boolean(latest.title.trim());
+      setDraft((current) => (current ? {
+        ...current,
+        title: hasTitle ? current.title : extraction.title,
+        category: hasTitle ? current.category : extraction.category,
+        content: replaced ? extraction.blocks : [...current.content, ...extraction.blocks],
+      } : current));
+      setDraftDirty(true);
+      onMessage(replaced ? "La IA ha rellenado la nota. Revísala antes de guardar." : "La IA ha añadido el contenido del manual al final de la nota. Revísalo antes de guardar.");
+    } catch (cause) {
+      onMessage(reportSafeError(cause, "No se pudo leer el manual con la IA."));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  function startNoteFromPdf(list: FileList | null) {
+    const file = list?.[0];
+    if (!file) return;
+    if (!isPdfFileName(file.name) && file.type !== "application/pdf") {
+      onMessage("Elige un archivo PDF.");
+      return;
+    }
+    if (file.size > IT_NOTE_FILE_MAX_BYTES) {
+      onMessage("El PDF supera los 25 MB.");
+      return;
+    }
+    const next = { ...draftFromNote(null, []), content: [], pendingFiles: [file] };
+    setDraft(next);
+    setDraftDirty(true);
+    setViewingId(null);
+    void fillFromPdf(next.noteId, { file });
   }
 
   function addPendingFiles(list: FileList | null) {
@@ -217,7 +309,7 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
         const { error } = await supabase.from("it_notes").update(payload).eq("id", noteId);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.from("it_notes").insert({ ...payload, created_by: currentUserId }).select("id").single();
+        const { data, error } = await supabase.from("it_notes").insert({ ...payload, id: draft.noteId, created_by: currentUserId }).select("id").single();
         if (error) throw error;
         noteId = String(data.id);
       }
@@ -229,6 +321,14 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
       }
 
       const failed: string[] = [];
+      for (const staged of draft.stagedFiles) {
+        const { error: rowError } = await supabase.from("it_note_files").insert({ note_id: noteId, path: staged.path, file_name: staged.fileName, size_bytes: staged.sizeBytes });
+        if (rowError) {
+          reportSafeError(rowError, "");
+          await supabase.storage.from(IT_NOTES_BUCKET).remove([staged.path]);
+          failed.push(staged.fileName);
+        }
+      }
       for (const file of draft.pendingFiles) {
         const path = noteFileStoragePath(noteId, file.name);
         const { error: uploadError } = await supabase.storage.from(IT_NOTES_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
@@ -319,7 +419,18 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
           </div>
           {canManage ? (
             <div className="panel-heading-trailing">
+              <button type="button" className="button button-secondary" onClick={() => pdfInputRef.current?.click()}>✨ Nueva nota desde PDF</button>
               <button type="button" className="button button-primary" onClick={() => openEditor(null)}>+ Nueva nota</button>
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                hidden
+                onChange={(event) => {
+                  startNoteFromPdf(event.target.files);
+                  event.target.value = "";
+                }}
+              />
             </div>
           ) : null}
         </div>
@@ -424,24 +535,46 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
               <span>Fijar arriba del todo</span>
             </label>
 
+            {aiBusy ? (
+              <div className="note-ai-status" role="status">
+                <span className="note-ai-spinner" aria-hidden="true" />
+                <span><strong>Leyendo el manual con IA…</strong> Puede tardar hasta un minuto. Después podrás revisar y cambiar todo antes de guardar.</span>
+              </div>
+            ) : null}
+
             <NoteBlocksEditor blocks={draft.content} onChange={(content) => updateDraft({ content })} />
 
             <div className="note-files">
               <span className="eyebrow">Archivos adjuntos (manuales, capturas…)</span>
-              {draft.files.length + draft.pendingFiles.length > 0 ? (
+              <span className="muted">Con «✨ Rellenar con IA» la IA lee un PDF y escribe la nota: resumen, pasos, tablas y comandos.</span>
+              {draft.files.length + draft.stagedFiles.length + draft.pendingFiles.length > 0 ? (
                 <ul>
                   {draft.files.map((file) => (
                     <li key={file.id}>
                       <span>📄 {file.fileName}</span>
                       <span className="muted">{formatFileSize(file.sizeBytes)}</span>
-                      <button type="button" className="icon-button" aria-label={`Quitar ${file.fileName}`} onClick={() => updateDraft({ files: draft.files.filter((item) => item.id !== file.id), removedFiles: [...draft.removedFiles, file] })}>×</button>
+                      {isPdfFileName(file.path) ? (
+                        <button type="button" className="button button-secondary button-compact" disabled={aiBusy} onClick={() => void fillFromPdf(draft.noteId, { path: file.path, fileName: file.fileName })}>✨ Rellenar con IA</button>
+                      ) : null}
+                      <button type="button" className="icon-button" aria-label={`Quitar ${file.fileName}`} disabled={aiBusy} onClick={() => updateDraft({ files: draft.files.filter((item) => item.id !== file.id), removedFiles: [...draft.removedFiles, file] })}>×</button>
+                    </li>
+                  ))}
+                  {draft.stagedFiles.map((file) => (
+                    <li key={file.path}>
+                      <span>📄 {file.fileName}</span>
+                      <span className="muted">{formatFileSize(file.sizeBytes)}</span>
+                      <button type="button" className="button button-secondary button-compact" disabled={aiBusy} onClick={() => void fillFromPdf(draft.noteId, { path: file.path, fileName: file.fileName })}>✨ Rellenar con IA</button>
+                      <button type="button" className="icon-button" aria-label={`Quitar ${file.fileName}`} disabled={aiBusy} onClick={() => removeStagedFile(file)}>×</button>
                     </li>
                   ))}
                   {draft.pendingFiles.map((file, index) => (
                     <li key={`pending-${index}`}>
                       <span>📄 {file.name} <em className="muted">(se subirá al guardar)</em></span>
                       <span className="muted">{formatFileSize(file.size)}</span>
-                      <button type="button" className="icon-button" aria-label={`Quitar ${file.name}`} onClick={() => updateDraft({ pendingFiles: draft.pendingFiles.filter((_, i) => i !== index) })}>×</button>
+                      {isPdfFileName(file.name) || file.type === "application/pdf" ? (
+                        <button type="button" className="button button-secondary button-compact" disabled={aiBusy} onClick={() => void fillFromPdf(draft.noteId, { file })}>✨ Rellenar con IA</button>
+                      ) : null}
+                      <button type="button" className="icon-button" aria-label={`Quitar ${file.name}`} disabled={aiBusy} onClick={() => updateDraft({ pendingFiles: draft.pendingFiles.filter((_, i) => i !== index) })}>×</button>
                     </li>
                   ))}
                 </ul>
@@ -471,8 +604,8 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
             </div>
 
             <div className="modal-actions">
-              <button type="button" className="button button-secondary" onClick={closeEditor} disabled={saving}>Cancelar</button>
-              <button type="submit" className="button button-primary" disabled={saving}>{saving ? "Guardando…" : "Guardar nota"}</button>
+              <button type="button" className="button button-secondary" onClick={closeEditor} disabled={saving || aiBusy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={saving || aiBusy}>{saving ? "Guardando…" : "Guardar nota"}</button>
             </div>
           </form>
         ) : null}

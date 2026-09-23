@@ -183,3 +183,22 @@ export function noteFileStoragePath(noteId: string, fileName: string): string {
   const extension = dot > 0 ? fileName.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10) : "";
   return `${noteId}/${crypto.randomUUID()}${extension ? `.${extension}` : ""}`;
 }
+
+/** Attachments are stored as `<note uuid>/<uuid>.<ext>`; only PDFs can be read by the AI. */
+export const IT_NOTE_PDF_PATH_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/;
+
+export function isPdfFileName(name: string): boolean {
+  return name.toLowerCase().endsWith(".pdf");
+}
+
+/** What the AI drafts from a manual; always reviewed by a person before saving. */
+export type NoteExtraction = {
+  title: string;
+  category: ItNoteCategory;
+  blocks: NoteBlock[];
+};
+
+/** True while the note only has the starter outline (or nothing), so AI content can replace it. */
+export function isEffectivelyEmpty(blocks: NoteBlock[]): boolean {
+  return cleanNoteContent(blocks).every((block) => block.type === "heading");
+}

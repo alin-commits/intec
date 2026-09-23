@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { EXPENSES_EDIT_ROLES, hasAnyRole } from "@/lib/constants";
+import { generateJsonWithGemini, type GeminiFailure } from "@/lib/gemini";
 import { INVOICE_BUCKET, INVOICE_MAX_BYTES, INVOICE_PATH_PATTERN, type InvoiceExtraction } from "@/lib/invoices";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/types";
@@ -8,7 +9,6 @@ import type { AppRole } from "@/lib/types";
 // Reading a PDF with the model can take a while.
 export const maxDuration = 60;
 
-const DEFAULT_MODEL = "gemini-3.1-flash-lite";
 const CATEGORIES = ["software", "advertising", "design", "events", "print", "services", "other"] as const;
 
 const requestSchema = z.object({ path: z.string().regex(INVOICE_PATH_PATTERN) });
@@ -52,60 +52,24 @@ const extractionSchema = z.object({
   recurrence: z.enum(["monthly", "quarterly", "yearly"]).nullable().catch(null),
 });
 
-// Google sometimes answers 503 ("high demand") or 500 for a busy model. Those are
-// retried once and then the next model is tried, all within the route's time limit.
-const FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash"];
-const RETRYABLE = new Set([500, 502, 503, 504]);
 const TIME_BUDGET_MS = 52_000;
 
-type GeminiResult = { ok: true; raw: unknown } | { ok: false; message: string };
+const FAILURE_MESSAGES: Record<GeminiFailure, string> = {
+  auth: "La clave de la IA no es válida o no tiene permiso. Rellena los datos a mano y avisa al administrador.",
+  unreadable: "La IA no pudo leer la factura. Rellena los datos a mano.",
+  rate_limit: "Se ha alcanzado el límite de la IA. Prueba en un minuto o rellénalo a mano.",
+  busy: "La IA de Google está saturada ahora mismo. Prueba de nuevo en unos minutos o rellénalo a mano.",
+};
 
-async function readWithGemini(apiKey: string, pdfBase64: string): Promise<GeminiResult> {
-  const configured = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
-  const models = [configured, ...FALLBACK_MODELS.filter((model) => model !== configured)];
-  const deadline = Date.now() + TIME_BUDGET_MS;
-  const body = JSON.stringify({
-    contents: [{ role: "user", parts: [{ inline_data: { mime_type: "application/pdf", data: pdfBase64 } }, { text: PROMPT }] }],
-    generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA },
+async function readWithGemini(apiKey: string, pdfBase64: string): Promise<{ ok: true; raw: unknown } | { ok: false; message: string }> {
+  const result = await generateJsonWithGemini({
+    apiKey,
+    parts: [{ inline_data: { mime_type: "application/pdf", data: pdfBase64 } }, { text: PROMPT }],
+    responseSchema: RESPONSE_SCHEMA,
+    timeBudgetMs: TIME_BUDGET_MS,
+    label: "la factura",
   });
-  let lastStatus = 0;
-
-  for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const remaining = deadline - Date.now();
-      if (remaining < 5_000) break;
-      try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body,
-          signal: AbortSignal.timeout(Math.min(remaining, 40_000)),
-        });
-        if (response.ok) {
-          const payload = (await response.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-          const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
-          return { ok: true, raw: JSON.parse(text) };
-        }
-        lastStatus = response.status;
-        console.error(`Gemini (${model}) respondió con error:`, response.status, (await response.text()).slice(0, 300));
-        // Bad key or bad request won't improve with another model.
-        if (response.status === 401 || response.status === 403) {
-          return { ok: false, message: "La clave de la IA no es válida o no tiene permiso. Rellena los datos a mano y avisa al administrador." };
-        }
-        if (response.status === 400) return { ok: false, message: "La IA no pudo leer la factura. Rellena los datos a mano." };
-        // 404: model not available for this key; 429: quota for this model. Both → next model.
-        if (!RETRYABLE.has(response.status)) break;
-      } catch (cause) {
-        lastStatus = 0;
-        console.error(`No se pudo leer la factura con Gemini (${model}):`, cause);
-      }
-      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1_500));
-    }
-  }
-
-  if (lastStatus === 429) return { ok: false, message: "Se ha alcanzado el límite de la IA. Prueba en un minuto o rellénalo a mano." };
-  if (RETRYABLE.has(lastStatus)) return { ok: false, message: "La IA de Google está saturada ahora mismo. Prueba de nuevo en unos minutos o rellénalo a mano." };
-  return { ok: false, message: "La IA no pudo leer la factura. Rellena los datos a mano." };
+  return result.ok ? result : { ok: false, message: FAILURE_MESSAGES[result.failure] };
 }
 
 export async function POST(request: Request) {

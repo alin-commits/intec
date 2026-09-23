@@ -811,3 +811,8 @@ tr.row-muted td { opacity: .6; }
 .note-table-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .note-add-block { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border: 1.5px dashed var(--border); border-radius: 12px; }
 @media (max-width: 640px) { .notes-panel { padding: 16px; } .notes-grid { grid-template-columns: 1fr; } }
+.note-ai-status { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid #d6d3f0; background: var(--primary-soft); color: var(--primary); font-size: 13px; line-height: 1.45; }
+.note-ai-spinner { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid rgba(51,44,128,.2); border-top-color: var(--primary); animation: note-ai-spin .8s linear infinite; }
+@keyframes note-ai-spin { to { transform: rotate(360deg); } }
+.note-files li .button-compact { flex-shrink: 0; }
+@media (max-width: 640px) { .note-files li { flex-wrap: wrap; } }
