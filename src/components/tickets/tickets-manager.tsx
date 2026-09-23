@@ -19,6 +19,7 @@ import { QuickCreateTicketButton } from "./quick-create-ticket-button";
 import { TicketDashboardCards, TicketPriorityPanel } from "./ticket-dashboard-cards";
 import { TicketTable, type TicketSortColumn, type TicketSortState } from "./ticket-table";
 import { EmptyState } from "./empty-state";
+import { ItNotesPanel } from "./it-notes-panel";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 
@@ -49,6 +50,7 @@ export function TicketsManager() {
   const [chartMode, setChartMode] = useState<"month" | "year" | "total">("year");
   const [chartMonth, setChartMonth] = useState(() => monthKey());
   const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
+  const [tab, setTab] = useState<"tickets" | "notes">("tickets");
 
   async function loadTickets() {
     const supabase = createClient();
@@ -298,14 +300,26 @@ export function TicketsManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><p>Incidencias enviadas desde /soporte por cualquier trabajador de la empresa.</p></div>
-        <div className="panel-heading-trailing">
-          <QuickCreateTicketButton visible={canManage} onCreated={() => void loadTickets()} />
-          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
-        </div>
+        <div><p>{tab === "notes" ? "Soluciones, procedimientos y manuales del equipo de informática." : "Incidencias enviadas desde /soporte por cualquier trabajador de la empresa."}</p></div>
+        {tab === "tickets" ? (
+          <div className="panel-heading-trailing">
+            <QuickCreateTicketButton visible={canManage} onCreated={() => void loadTickets()} />
+            <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+          </div>
+        ) : null}
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
+
+      <div className="view-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === "tickets"} className={tab === "tickets" ? "view-tab active" : "view-tab"} onClick={() => setTab("tickets")}>Tickets</button>
+        <button type="button" role="tab" aria-selected={tab === "notes"} className={tab === "notes" ? "view-tab active" : "view-tab"} onClick={() => setTab("notes")}>Notas</button>
+      </div>
+
+      {tab === "notes" ? (
+        <ItNotesPanel canManage={canManage} currentUserId={currentUserId} onMessage={setMessage} />
+      ) : (
+      <>
 
       <section className="panel period-bar">
         <label><span>Periodo</span>
@@ -416,6 +430,8 @@ export function TicketsManager() {
           </>
         )}
       </section>
+      </>
+      )}
 
       <ConfirmationDialog
         open={Boolean(pendingBulkAction)}
