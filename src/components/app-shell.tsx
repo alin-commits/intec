@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
+import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, KeyIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, EXPENSES_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, EXPENSES_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
@@ -19,7 +19,7 @@ const departmentLabels: Record<DirectionDepartment, string> = {
 };
 
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
-  { href: "/dashboard", label: "Inicio", icon: DashboardIcon },
+  { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
@@ -29,6 +29,8 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
   { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
   { href: "/tarjetas", label: "Tarjetas", icon: TarjetasIcon, roles: CARDS_ROLES },
+  // Everyone with an account can reach the vault; what they see inside is decided per credential.
+  { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
 

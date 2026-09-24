@@ -27,6 +27,8 @@ export const roleLabels: Record<AppRole, string> = {
   it: "Informática",
   marketing: "Marketing",
   direction: "Dirección",
+  employee: "Empleado",
+  vault_admin: "Admin. de contraseñas",
 };
 
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
@@ -42,8 +44,12 @@ export const CRM_EDIT_ROLES: AppRole[] = ["admin", "marketing", "commercial"];
 /** Marketing department expenses (apps, subscriptions, one-off spending). */
 export const EXPENSES_ROLES: AppRole[] = ["admin", "marketing", "direction"];
 export const EXPENSES_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
+/** Manages the password vault: permissions and audit log (not access to personal entries). */
+export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];
+/** Everyone except the employee role, whose only page is Contraseñas. */
+export const DASHBOARD_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "vault_admin"];
 
-export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction"];
+export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "employee", "vault_admin"];
 
 /** True if the user holds at least one of the given roles. */
 export function hasAnyRole(userRoles: AppRole[], allowed: AppRole[]): boolean {

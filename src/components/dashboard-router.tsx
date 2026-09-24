@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { hasAnyRole } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
@@ -12,6 +13,7 @@ import { DirectionDepartmentPicker } from "./direction-department-picker";
 
 export function DashboardRouter() {
   const configured = isSupabaseConfigured();
+  const router = useRouter();
   const [roles, setRoles] = useState<AppRole[] | null>(configured ? null : ["admin"]);
   const [directionView, setDirectionViewState] = useState<DirectionDepartment | null>(null);
 
@@ -31,6 +33,12 @@ export function DashboardRouter() {
   }, [configured]);
 
   if (roles === null) return <div className="page-stack" />;
+
+  // The employee role only has access to Contraseñas.
+  if (roles.length > 0 && roles.every((role) => role === "employee")) {
+    router.replace("/contrasenas");
+    return <div className="page-stack" />;
+  }
 
   if (roles.includes("direction")) {
     if (!directionView) {

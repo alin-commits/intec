@@ -998,3 +998,31 @@ tr.row-muted td { opacity: .6; }
   /* Chart legends wrap instead of being cut off at the sides */
   .chart-legend { flex-wrap: wrap; gap: 6px 14px; }
 }
+
+/* Gestor de contraseñas */
+.vault-unlock { max-width: 560px; margin: 0 auto; display: grid; gap: 14px; text-align: center; justify-items: center; }
+.vault-unlock h2 { margin: 0; }
+.vault-unlock p { margin: 0; max-width: 46ch; }
+.vault-qr { border: 1px solid var(--border); border-radius: 14px; background: white; padding: 8px; }
+.vault-secret-line { font-size: 13px; }
+.vault-link-button { border: 0; background: transparent; padding: 0; cursor: pointer; font: inherit; color: var(--primary); }
+.vault-secret { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; letter-spacing: .04em; background: var(--surface-muted); border-radius: 8px; padding: 4px 8px; overflow-wrap: anywhere; }
+.vault-unlock-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.vault-unlock-form label { display: grid; gap: 6px; text-align: left; font-size: 12px; font-weight: 700; color: var(--muted); }
+.vault-unlock-form input { min-height: 42px; width: 160px; border: 1px solid var(--border); border-radius: 9px; padding: 0 12px; font-size: 18px; letter-spacing: .18em; text-align: center; }
+.vault-detail { display: grid; gap: 16px; }
+.vault-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vault-notes-body { margin: 6px 0 0; white-space: pre-line; overflow-wrap: anywhere; font-size: 13px; color: #334155; }
+.vault-generator { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin-top: 16px; }
+.vault-generator .button { justify-self: start; }
+.vault-generator-options { display: grid; gap: 10px; }
+.vault-generator-options label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.vault-strength { font-style: normal; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+.vault-strength-weak { background: #fee2e2; color: #b91c1c; }
+.vault-strength-fair { background: #fef3c7; color: #92400e; }
+.vault-strength-strong { background: #dcfce7; color: #166534; }
+.vault-admin-note { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.vault-admin-note svg { width: 15px; height: 15px; flex-shrink: 0; }
+.vault-audit-table { max-height: 50vh; overflow-y: auto; margin-top: 12px; }
+.vault-audit-table table { font-size: 13px; }
+tr.vault-audit-secret td:nth-child(3) { color: #b45309; font-weight: 700; }

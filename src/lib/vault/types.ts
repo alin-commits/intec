@@ -1,0 +1,71 @@
+// Shared types for the password vault. Nothing here ever holds a secret:
+// passwords and notes only exist decrypted inside a single server response.
+
+export type VaultVisibility = "shared" | "personal" | "restricted";
+export type VaultEntryType = "plain" | "email" | "server" | "bank" | "other";
+
+export type VaultEntrySummary = {
+  id: string;
+  name: string;
+  url: string | null;
+  username: string | null;
+  hasNotes: boolean;
+  categoryId: string | null;
+  businessUnitId: string | null;
+  visibility: VaultVisibility;
+  entryType: VaultEntryType;
+  tags: string[];
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastPasswordChangeAt: string;
+};
+
+export type VaultCategory = { id: string; name: string; description: string | null };
+
+export type VaultPermission = {
+  userId: string;
+  canView: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canManagePermissions: boolean;
+};
+
+export type VaultAuditAction =
+  | "VAULT_OPEN"
+  | "VAULT_UNLOCK_FAILED"
+  | "ENTRY_LIST"
+  | "ENTRY_VIEW"
+  | "PASSWORD_REVEAL"
+  | "PASSWORD_COPY"
+  | "ENTRY_CREATE"
+  | "ENTRY_UPDATE"
+  | "ENTRY_DELETE"
+  | "PERMISSION_ADD"
+  | "PERMISSION_REMOVE"
+  | "IMPORT";
+
+/** Why the vault refused a request, so the UI can ask for the right thing. */
+export type VaultDeniedReason = "signed_out" | "inactive" | "mfa_enrollment_required" | "mfa_required" | "locked" | "forbidden" | "not_configured" | "rate_limited";
+
+export const VAULT_ENTRY_COLUMNS =
+  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at";
+
+export function mapVaultEntry(row: Record<string, unknown>): VaultEntrySummary {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    url: row.url ? String(row.url) : null,
+    username: row.username ? String(row.username) : null,
+    hasNotes: Boolean(row.has_notes),
+    categoryId: row.category_id ? String(row.category_id) : null,
+    businessUnitId: row.business_unit_id ? String(row.business_unit_id) : null,
+    visibility: row.visibility as VaultVisibility,
+    entryType: row.entry_type as VaultEntryType,
+    tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    createdBy: row.created_by ? String(row.created_by) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastPasswordChangeAt: String(row.last_password_change_at),
+  };
+}
