@@ -34,7 +34,8 @@ const emptyBank: VaultBankDetails = { bankName: null, bankCode: null, accountHol
 
 
 type Category = { id: string; name: string; description: string | null; count: number };
-type Scope = { kind: "all" | "favorites" | "recent" | "personal" | "uncategorised" | "category"; id?: string };
+/** En una carpeta madre, `ids` lleva la suya y las de sus subcarpetas. */
+type Scope = { kind: "all" | "favorites" | "recent" | "personal" | "uncategorised" | "category"; id?: string; ids?: string[] };
 type EntryDraft = { name: string; url: string; username: string; password: string; notes: string; categoryId: string; visibility: VaultVisibility; entryType: VaultEntryType; bank: VaultBankDetails };
 type DetailPayload = { entry: VaultEntrySummary; can: { edit: boolean; delete: boolean; managePermissions: boolean }; sharedWith: VaultPermission[] };
 type TeamMember = { id: string; fullName: string };
@@ -138,7 +139,7 @@ export function VaultManager() {
     void (async () => {
       const params = new URLSearchParams();
       if (searchTerm.length >= 2) params.set("q", searchTerm);
-      if (scope.kind === "category" && scope.id) params.set("category", scope.id);
+      if (scope.kind === "category" && scope.id) params.set("category", (scope.ids ?? [scope.id]).join(","));
       if (scope.kind === "personal") params.set("visibility", "personal");
       if (scope.kind === "uncategorised") params.set("uncategorised", "1");
       if (scope.kind === "favorites") params.set("favorites", "1");
@@ -226,7 +227,7 @@ export function VaultManager() {
     const words = typed.split(/\s+/).filter(Boolean);
     const recent = data?.recent ?? [];
     return index.filter((entry) => {
-      if (scope.kind === "category" && entry.categoryId !== scope.id) return false;
+      if (scope.kind === "category" && !(entry.categoryId && (scope.ids ?? [scope.id]).includes(entry.categoryId))) return false;
       if (scope.kind === "personal" && !(entry.visibility === "personal" && entry.createdBy === userId)) return false;
       if (scope.kind === "favorites" && !favorites.has(entry.id)) return false;
       if (scope.kind === "uncategorised" && entry.categoryId) return false;
@@ -234,7 +235,7 @@ export function VaultManager() {
       const haystack = `${entry.name} ${entry.username ?? ""} ${entry.url ?? ""} ${categoryName(entry.categoryId)}`.toLowerCase();
       return words.every((word) => haystack.includes(word));
     });
-  }, [index, typed, scope.kind, scope.id, userId, favorites, categoryName, data?.recent]);
+  }, [index, typed, scope.kind, scope.id, scope.ids, userId, favorites, categoryName, data?.recent]);
 
   const visibleEntries = useMemo(() => {
     if (localResults) return localResults;
@@ -520,7 +521,7 @@ export function VaultManager() {
                   <button
                     type="button"
                     className={scope.kind === "category" && scope.id === node.category?.id ? "vault-tree-item active" : "vault-tree-item"}
-                    onClick={() => node.category && selectScope({ kind: "category", id: node.category.id })}
+                    onClick={() => node.category && selectScope({ kind: "category", id: node.category.id, ids: [node.category.id, ...node.children.map((child) => child.id)] })}
                     disabled={!node.category}
                   >
                     {node.name}<span>{node.total}</span>
@@ -553,6 +554,10 @@ export function VaultManager() {
                 {localResults
                   ? `${localResults.length} ${localResults.length === 1 ? "resultado" : "resultados"} de «${query.trim()}»`
                   : searchTerm ? `Resultados de «${searchTerm}»` : `${data?.total ?? 0} credenciales`}
+                {/* Buscando dentro de una carpeta es fácil pensar que no encuentra nada. */}
+                {query.trim() && scope.kind !== "all" ? (
+                  <> · solo en esta carpeta · <button type="button" className="text-link" onClick={() => selectScope({ kind: "all" })}>buscar en todas</button></>
+                ) : null}
               </p>
             </div>
             <div className="vault-list-tools">

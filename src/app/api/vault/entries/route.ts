@@ -39,7 +39,12 @@ export async function GET(request: Request) {
   }
 
   const term = sanitizeSearchTerm(url.searchParams.get("q") ?? "");
-  const category = url.searchParams.get("category");
+  // Una carpeta madre llega con la suya y las de sus subcarpetas, para que
+  // enseñe todo lo que cuelga de ella y no solo lo suyo.
+  const categoryIds = (url.searchParams.get("category") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^[0-9a-f-]{36}$/i.test(value));
   const visibility = url.searchParams.get("visibility");
   const page = Math.max(0, Number(url.searchParams.get("page") ?? 0) || 0);
 
@@ -58,7 +63,8 @@ export async function GET(request: Request) {
     .order("name")
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
   if (term.length >= 2) query = query.or(`name.ilike.%${term}%,username.ilike.%${term}%,url.ilike.%${term}%`);
-  if (category) query = query.eq("category_id", category);
+  if (categoryIds.length === 1) query = query.eq("category_id", categoryIds[0]);
+  else if (categoryIds.length > 1) query = query.in("category_id", categoryIds);
   if (visibility === "personal") query = query.eq("created_by", guard.userId);
   else if (visibility === "shared") query = query.eq("visibility", "shared");
   if (uncategorised) query = query.is("category_id", null);
@@ -129,7 +135,13 @@ export async function GET(request: Request) {
       visibleTotal,
       favorites: (favorites.data ?? []).map((row) => String(row.vault_entry_id)),
       recent,
-      total: needsExactCount ? (count ?? 0) : uncategorised ? counts.get("none") ?? 0 : category ? counts.get(category) ?? 0 : visibleTotal,
+      total: needsExactCount
+        ? count ?? 0
+        : uncategorised
+          ? counts.get("none") ?? 0
+          : categoryIds.length > 0
+            ? categoryIds.reduce((sum, id) => sum + (counts.get(id) ?? 0), 0)
+            : visibleTotal,
       page,
       pageSize: PAGE_SIZE,
       isVaultAdmin: guard.actor.isVaultAdmin,
