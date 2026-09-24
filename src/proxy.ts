@@ -25,8 +25,17 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   const publicPrefixes = ["/login", "/forgot-password", "/reset-password", "/invitacion", "/soporte", "/tarjeta", "/api/tickets", "/api/auth", "/api/cron"];
+  /**
+   * Rutas que no atienden a una persona sino a un programa, y que por tanto no
+   * pueden tener sesión: comprueban ellas mismas una clave compartida. Van por
+   * ruta exacta y no por prefijo, para que una ruta nueva bajo el mismo camino
+   * no quede abierta sin querer.
+   */
+  const machinePaths = ["/api/sage/ingest"];
   const isLogin = request.nextUrl.pathname.startsWith("/login");
-  const isPublicPath = request.nextUrl.pathname === "/" || publicPrefixes.some((path) => request.nextUrl.pathname.startsWith(path));
+  const isPublicPath = request.nextUrl.pathname === "/"
+    || machinePaths.includes(request.nextUrl.pathname)
+    || publicPrefixes.some((path) => request.nextUrl.pathname.startsWith(path));
 
   if (!user && !isPublicPath) {
     // An API call must get a clear "not authorized" instead of the HTML of the
