@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
-import { EyeIcon, KeyIcon, RefreshIcon, SearchIcon } from "@/components/icons";
+import { ChevronIcon, CopyIcon, EyeIcon, KeyIcon, RefreshIcon, SearchIcon, StarIcon } from "@/components/icons";
 import { MyTicketButton } from "@/components/tickets/my-ticket-button";
 import { VaultUnlock } from "@/components/vault/vault-unlock";
 import { DEFAULT_GENERATOR, generatePassword, MAX_LENGTH, MIN_LENGTH, passwordStrength, type GeneratorOptions } from "@/lib/vault/password-generator";
@@ -467,7 +467,7 @@ export function VaultManager() {
         <aside className="panel vault-tree">
           <ul className="vault-tree-list">
             <li><button type="button" className={scope.kind === "all" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "all" })}>Todas<span>{data?.visibleTotal ?? 0}</span></button></li>
-            <li><button type="button" className={scope.kind === "favorites" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "favorites" })}>★ Favoritas<span>{favorites.size}</span></button></li>
+            <li><button type="button" className={scope.kind === "favorites" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "favorites" })}><span className="vault-tree-label"><StarIcon filled /> Favoritas</span><span>{favorites.size}</span></button></li>
             <li><button type="button" className={scope.kind === "recent" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "recent" })}>Recientes<span>{data?.recent.length ?? 0}</span></button></li>
             <li><button type="button" className={scope.kind === "personal" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "personal" })}>Mías (personales)</button></li>
           </ul>
@@ -478,7 +478,7 @@ export function VaultManager() {
                 <div className="vault-tree-row">
                   {node.children.length > 0 ? (
                     <button type="button" className="vault-tree-toggle" onClick={() => toggleFolder(node.name)} aria-expanded={openFolders.includes(node.name)} aria-label={openFolders.includes(node.name) ? `Cerrar ${node.name}` : `Abrir ${node.name}`}>
-                      {openFolders.includes(node.name) ? "▾" : "▸"}
+                      <ChevronIcon open={openFolders.includes(node.name)} />
                     </button>
                   ) : <span className="vault-tree-toggle vault-tree-toggle-empty" />}
                   <button
@@ -532,7 +532,7 @@ export function VaultManager() {
                 {visibleEntries.map((entry) => (
                   <tr key={entry.id}>
                     <td>
-                      <button type="button" className={favorites.has(entry.id) ? "vault-star active" : "vault-star"} onClick={() => void toggleFavorite(entry.id)} aria-label={favorites.has(entry.id) ? "Quitar de favoritas" : "Marcar como favorita"} title="Favorita">★</button>
+                      <button type="button" className={favorites.has(entry.id) ? "vault-star active" : "vault-star"} onClick={() => void toggleFavorite(entry.id)} aria-label={favorites.has(entry.id) ? "Quitar de favoritas" : "Marcar como favorita"} title="Favorita"><StarIcon filled={favorites.has(entry.id)} /></button>
                     </td>
                     <td className="vault-name-cell">
                       <div className="vault-cell">
@@ -544,13 +544,13 @@ export function VaultManager() {
                     <td className="vault-user-cell" title={entry.username ?? ""}>
                       <div className="vault-cell">
                         <span>{entry.username || "—"}</span>
-                        {entry.username ? <button type="button" className="vault-icon-button" onClick={() => void copyText(entry.username as string, "Usuario")} title="Copiar usuario" aria-label={`Copiar el usuario de ${entry.name}`}>⧉</button> : null}
+                        {entry.username ? <button type="button" className="vault-icon-button" onClick={() => void copyText(entry.username as string, "Usuario")} title="Copiar usuario" aria-label={`Copiar el usuario de ${entry.name}`}><CopyIcon /></button> : null}
                       </div>
                     </td>
                     <td className="vault-folder-cell" title={categoryName(entry.categoryId)}>{shortFolder(entry.categoryId)}</td>
                     <td>
                       <div className="table-actions vault-row-actions">
-                        <button type="button" className="button button-compact button-primary" onClick={() => void copySecret(entry.id)} title="Copiar la contraseña">Copiar</button>
+                        <button type="button" className="button button-compact button-primary" onClick={() => void copySecret(entry.id)} title="Copiar la contraseña"><CopyIcon /> Copiar</button>
                         {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer" title="Abrir la web">Abrir</a> : null}
                         <button type="button" className="button button-compact button-secondary" onClick={() => void openDetail(entry.id)}>Ver</button>
                       </div>
@@ -581,7 +581,7 @@ export function VaultManager() {
               <span>Usuario</span>
               <strong className="vault-inline">
                 {detail.entry.username || "—"}
-                {detail.entry.username ? <button type="button" className="button button-compact button-secondary" onClick={() => void copyText(detail.entry.username as string, "Usuario")}>Copiar</button> : null}
+                {detail.entry.username ? <button type="button" className="button button-compact button-secondary" onClick={() => void copyText(detail.entry.username as string, "Usuario")}><CopyIcon /> Copiar</button> : null}
               </strong>
               <span>Contraseña</span>
               <strong className="vault-inline">
@@ -594,7 +594,7 @@ export function VaultManager() {
                   <code className="vault-secret">••••••••••••</code>
                 )}
                 <button type="button" className="button button-compact button-secondary" onClick={() => void reveal(detail.entry.id, "password")}><EyeIcon /> Mostrar</button>
-                <button type="button" className="button button-compact button-secondary" onClick={() => void copySecret(detail.entry.id)}>Copiar</button>
+                <button type="button" className="button button-compact button-secondary" onClick={() => void copySecret(detail.entry.id)}><CopyIcon /> Copiar</button>
               </strong>
               <span>Web</span>
               <strong>{detail.entry.url ? <a href={detail.entry.url} target="_blank" rel="noopener noreferrer" className="text-link">{detail.entry.url}</a> : "—"}</strong>

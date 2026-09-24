@@ -207,6 +207,18 @@ export function BellIcon() {
   return <Svg><path d="M5.2 8.2a4.8 4.8 0 0 1 9.6 0c0 4.3 1.7 5.6 1.7 5.6H3.5s1.7-1.3 1.7-5.6Z" /><path d="M8.4 16.4a1.8 1.8 0 0 0 3.2 0" /></Svg>;
 }
 
+export function CopyIcon() {
+  return <Svg><rect x="7.5" y="7.5" width="9" height="9" rx="1.8" /><path d="M13 5.2A1.7 1.7 0 0 0 11.3 3.5H5.2A1.7 1.7 0 0 0 3.5 5.2v6.1A1.7 1.7 0 0 0 5.2 13" /></Svg>;
+}
+
+export function StarIcon({ filled = false }: { filled?: boolean }) {
+  return <svg viewBox="0 0 20 20" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="m10 3.2 2.1 4.3 4.7.7-3.4 3.3.8 4.7-4.2-2.2-4.2 2.2.8-4.7L3.2 8.2l4.7-.7Z" /></svg>;
+}
+
+export function ChevronIcon({ open = false }: { open?: boolean }) {
+  return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .15s ease" }}><path d="m8 5.5 5 4.5-5 4.5" /></svg>;
+}
+
 export function KeyIcon() {
   return <Svg><circle cx="7" cy="12.5" r="3.5" /><path d="m9.7 10.3 6.8-6.8M14 6l2 2M12 8l2 2" /></Svg>;
 }
