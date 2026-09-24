@@ -143,6 +143,7 @@ export function VaultManager() {
       if (scope.kind === "personal") params.set("visibility", "personal");
       if (scope.kind === "uncategorised") params.set("uncategorised", "1");
       if (scope.kind === "favorites") params.set("favorites", "1");
+      if (scope.kind === "recent") params.set("recent", "1");
       params.set("page", String(page));
       const result = await vaultRequest<ListPayload>(`/api/vault/entries?${params}`);
       if (!active) return;

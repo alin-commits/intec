@@ -52,7 +52,36 @@ export async function GET(request: Request) {
   // only asked for when the total cannot be worked out from the folder counts.
   const onlyFavorites = url.searchParams.get("favorites") === "1";
   const uncategorised = url.searchParams.get("uncategorised") === "1";
+  const onlyRecent = url.searchParams.get("recent") === "1";
   const needsExactCount = term.length >= 2 || visibility === "personal" || onlyFavorites;
+
+  // "Recientes" son las que esta persona ha mostrado o copiado últimamente, y
+  // salen del registro de auditoría. Hay que filtrar por ellas en la consulta:
+  // si no, se pediría la primera página por orden alfabético y las recientes
+  // que quedaran más allá no aparecerían.
+  const recentQuery = guard.admin
+    .from("vault_audit_log")
+    .select("vault_entry_id")
+    .eq("user_id", guard.userId)
+    .in("action", ["PASSWORD_REVEAL", "PASSWORD_COPY"])
+    .not("vault_entry_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(60);
+
+  /** De más reciente a más antigua, sin repetir. */
+  function lastUsed(rows: { vault_entry_id: unknown }[] | null): string[] {
+    const list: string[] = [];
+    for (const row of rows ?? []) {
+      const entryId = String(row.vault_entry_id);
+      if (!list.includes(entryId)) list.push(entryId);
+      if (list.length >= 8) break;
+    }
+    return list;
+  }
+
+  // Solo cuando se piden las recientes hay que esperar a esta consulta antes de
+  // montar la principal; el resto de las veces va en paralelo con las demás.
+  const recentFirst = onlyRecent ? lastUsed((await recentQuery).data) : null;
 
   // Read with the user's own session: row level security applies, and the
   // ciphertext columns are not even granted to that role.
@@ -72,6 +101,7 @@ export async function GET(request: Request) {
     const { data: favoriteIds } = await guard.supabase.from("vault_favorites").select("vault_entry_id").eq("user_id", guard.userId);
     query = query.in("id", (favoriteIds ?? []).map((row) => row.vault_entry_id));
   }
+  if (recentFirst) query = query.in("id", recentFirst);
 
   const [{ data, error, count }, categories, folderCounts, favorites, recentLog] = await Promise.all([
     query,
@@ -80,15 +110,9 @@ export async function GET(request: Request) {
     // one row per credential just to add them up here.
     guard.supabase.rpc("vault_folder_counts"),
     guard.supabase.from("vault_favorites").select("vault_entry_id").eq("user_id", guard.userId),
-    guard.admin
-      .from("vault_audit_log")
-      .select("vault_entry_id")
-      .eq("user_id", guard.userId)
-      .in("action", ["PASSWORD_REVEAL", "PASSWORD_COPY"])
-      .not("vault_entry_id", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(60),
+    recentFirst ? Promise.resolve({ data: null }) : recentQuery,
   ]);
+  const recent = recentFirst ?? lastUsed(recentLog.data);
   if (error) {
     console.error("No se pudieron listar las credenciales:", error.message);
     return vaultError("No se pudieron cargar las credenciales.", 500, "forbidden");
@@ -114,14 +138,6 @@ export async function GET(request: Request) {
       visibleTotal += Number(row.folder_total);
     }
   }
-  // Most recently revealed first, without repeating.
-  const recent: string[] = [];
-  for (const row of recentLog.data ?? []) {
-    const id = String(row.vault_entry_id);
-    if (!recent.includes(id)) recent.push(id);
-    if (recent.length >= 8) break;
-  }
-
   return NextResponse.json(
     {
       entries: (data ?? []).map((row) => mapVaultEntry(row as Record<string, unknown>)),
@@ -135,7 +151,9 @@ export async function GET(request: Request) {
       visibleTotal,
       favorites: (favorites.data ?? []).map((row) => String(row.vault_entry_id)),
       recent,
-      total: needsExactCount
+      total: onlyRecent
+        ? recent.length
+        : needsExactCount
         ? count ?? 0
         : uncategorised
           ? counts.get("none") ?? 0
