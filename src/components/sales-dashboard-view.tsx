@@ -43,22 +43,24 @@ const channelNames: Record<string, string> = {
 };
 const channelColors = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#14b8a6", "#f43f5e", "#64748b", "#a16207"];
 
+const channelLabel = (series: string) => channelNames[series] ?? (series || "Sin serie");
+
 /** Días que tarda un día en dejar de moverse: se corrigen albaranes y se factura. */
 const PROVISIONAL_DAYS = 7;
 
 const monthNames = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 /**
- * El 16 de octubre de 2025 se cambio el sistema de series en Sage: las series
- * viejas (IM0, IM2, IM5, IM75...) acaban el dia 15 y las nuevas (CRE, B2C, POS,
+ * El 16 de octubre de 2025 se cambió el sistema de series en Sage: las series
+ * viejas (IM0, IM2, IM5, IM75...) acaban el día 15 y las nuevas (CRE, B2C, POS,
  * B2B, TK, SAT, CON...) arrancan el 16.
  *
- * En las viejas el coste no vale: suma mas que la propia venta, con un coste de
- * entre 1,1 y 1,9 veces la base imponible, lo que daria a la empresa un margen
+ * En las viejas el coste no vale: suma más que la propia venta, con un coste de
+ * entre 1,1 y 1,9 veces la base imponible, lo que daría a la empresa un margen
  * negativo del -45 % en 2024 y del -85 % en 2023. En las nuevas sale entre el
  * 25 % y el 35 % todos los meses, que es lo que se espera de una distribuidora.
  *
- * Asi que la venta de los anos anteriores se ensena -esa si es buena- y el
+ * Así que la venta de los años anteriores se enseña —esa sí es buena— y el
  * margen se calcula solo desde el primer mes completo con las series nuevas.
  */
 const COST_TRUSTED_FROM_MONTH = "2025-11";
@@ -76,16 +78,25 @@ function addRow(bucket: Bucket, row: SummaryRow): void {
   bucket.withoutCost += Number(row.net_without_cost);
 }
 
+function sumRows(list: SummaryRow[]): Bucket {
+  const bucket = emptyBucket();
+  for (const row of list) addRow(bucket, row);
+  return bucket;
+}
+
 /**
  * El margen sobre la venta que tiene coste fiable, o null cuando no hay nada
  * que medir. Deja fuera dos cosas: lo anterior al cambio de series y la venta
- * sin coste grabado, que si se contara subiria el margen artificialmente.
+ * sin coste grabado, que si se contara subiría el margen artificialmente.
  */
 function bucketMargin(bucket: Bucket): { amount: number; percent: number } | null {
   const base = bucket.costNet - bucket.withoutCost;
   if (base <= 0) return null;
   return { amount: base - bucket.cost, percent: ((base - bucket.cost) / base) * 100 };
 }
+
+/** Lo que el panel señala solo, para que no haya que ir buscándolo. */
+type Finding = { tone: "bad" | "warn" | "good"; text: string };
 
 export function SalesDashboardView() {
   const [stage, setStage] = useState<"loading" | "denied" | "ready">("loading");
@@ -94,8 +105,13 @@ export function SalesDashboardView() {
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [basis, setBasis] = useState<"albaran" | "factura">("albaran");
   const [companyCode, setCompanyCode] = useState<"all" | number>("all");
+  /** Filtros que se ponen pulsando en el propio panel, como en Power BI. */
+  const [channel, setChannel] = useState<string | null>(null);
+  const [repKey, setRepKey] = useState<string | null>(null);
   const [rows, setRows] = useState<SummaryRow[]>([]);
   const [previousRows, setPreviousRows] = useState<SummaryRow[]>([]);
+  /** El año anterior entero, solo para dibujarlo detrás en el gráfico. */
+  const [previousFullRows, setPreviousFullRows] = useState<SummaryRow[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
   const [lastRun, setLastRun] = useState<SyncRun | null>(null);
@@ -158,10 +174,16 @@ export function SalesDashboardView() {
             p_basis: basis,
           }),
         ]);
+        // Para la línea de detrás hace falta el año anterior completo: con el
+        // tramo parcial se desplomaría a cero a partir de este mes.
+        const full = partial
+          ? await supabase.rpc("sage_sales_summary", { p_from: `${year - 1}-01-01`, p_to: `${year - 1}-12-31`, p_basis: basis })
+          : { data: before };
         if (!active) return;
         setComparisonIsPartial(partial);
         setRows((current ?? []) as SummaryRow[]);
         setPreviousRows((before ?? []) as SummaryRow[]);
+        setPreviousFullRows((full.data ?? []) as SummaryRow[]);
       } catch (cause) {
         console.error("No se pudieron cargar las ventas:", cause);
         if (active) setError("No se pudieron cargar las ventas de ese periodo.");
@@ -169,76 +191,6 @@ export function SalesDashboardView() {
     })();
     return () => { active = false; };
   }, [stage, year, basis]);
-
-  const visible = useMemo(
-    () => rows.filter((row) => companyCode === "all" || row.company_code === companyCode),
-    [rows, companyCode],
-  );
-  const visibleBefore = useMemo(
-    () => previousRows.filter((row) => companyCode === "all" || row.company_code === companyCode),
-    [previousRows, companyCode],
-  );
-
-  const totals = useMemo(() => {
-    const sum = (list: SummaryRow[]) => {
-      const bucket = emptyBucket();
-      for (const row of list) addRow(bucket, row);
-      return bucket;
-    };
-    return { current: sum(visible), previous: sum(visibleBefore) };
-  }, [visible, visibleBefore]);
-
-  const { current, previous } = totals;
-  const variation = (now: number, before: number) => (before ? ((now - before) / before) * 100 : null);
-  const delta = (value: number | null) =>
-    value === null
-      ? { delta: "Sin comparación", positive: true }
-      : { delta: `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} %`, positive: value >= 0 };
-
-  const currentMargin = bucketMargin(current);
-  const previousMargin = bucketMargin(previous);
-  const withoutCostShare = current.costNet > 0 ? (current.withoutCost / current.costNet) * 100 : 0;
-  /** Venta del periodo que se queda fuera del margen por venir de las series viejas. */
-  const netBeforeSeriesChange = current.net - current.costNet;
-  const marginCoversEverything = netBeforeSeriesChange <= 0;
-
-  const monthly = useMemo(() => {
-    const map = new Map<string, Bucket>();
-    for (const row of visible) {
-      const bucket = map.get(row.month) ?? emptyBucket();
-      addRow(bucket, row);
-      map.set(row.month, bucket);
-    }
-    const months = Array.from({ length: 12 }, (_, index) => {
-      const bucket = map.get(`${year}-${String(index + 1).padStart(2, "0")}`) ?? emptyBucket();
-      return { label: monthNames[index], bucket, margin: bucketMargin(bucket) };
-    });
-    return {
-      points: months.map((month) => ({
-        label: month.label,
-        ventas: Math.round(month.bucket.net),
-        margen: Math.round(month.margin?.amount ?? 0),
-      })),
-      // La linea de margen solo se dibuja si la tienen todos los meses con venta:
-      // si no, caeria a cero en los de las series viejas y pareceria un desplome.
-      marginComplete: months.every((month) => month.bucket.net === 0 || month.margin !== null),
-    };
-  }, [visible, year]);
-
-  const byCompany = useMemo(() => {
-    const map = new Map<number, Bucket>();
-    for (const row of rows) {
-      const bucket = map.get(row.company_code) ?? emptyBucket();
-      addRow(bucket, row);
-      map.set(row.company_code, bucket);
-    }
-    return [...map].map(([code, bucket]) => ({
-      code,
-      name: companies.find((company) => company.code === code)?.name ?? `Sociedad ${code}`,
-      bucket,
-      margin: bucketMargin(bucket),
-    })).sort((a, b) => b.bucket.net - a.bucket.net);
-  }, [rows, companies]);
 
   /**
    * En Sage la misma persona está dada de alta varias veces: un código por
@@ -259,7 +211,7 @@ export function SalesDashboardView() {
    */
   const repIdentities = useMemo(() => {
     const plain = (name: string) =>
-      name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+      name.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
     // De más largo a más corto, para que el primero que encaje sea el completo.
     const names = [...new Set(reps.map((rep) => rep.name))].sort((a, b) => plain(b).length - plain(a).length);
     const identities = new Map<string, { key: string; label: string }>();
@@ -270,29 +222,151 @@ export function SalesDashboardView() {
     return identities;
   }, [reps]);
 
+  /**
+   * Quién firma una fila, ya juntadas las fichas repetidas de Sage. `isPerson`
+   * separa a los comerciales de verdad de los códigos comodín de Sage
+   * ("GENERAL", "SAT INTEC", "Alta Automática"): salen en el ranking porque su
+   * venta es real, pero no se les puede decir que suben o que bajan.
+   */
+  const repOf = useMemo(() => (row: SummaryRow): { key: string; label: string; assigned: boolean; isPerson: boolean } => {
+    if (row.rep_code === null) return { key: "sin", label: "Sin comercial asignado", assigned: false, isPerson: false };
+    const rep = reps.find((item) => item.company_code === row.company_code && item.code === row.rep_code);
+    const identity = rep ? repIdentities.get(rep.name) : undefined;
+    return {
+      key: identity?.key ?? `${row.company_code}-${row.rep_code}`,
+      label: identity?.label ?? `Código ${row.rep_code}`,
+      assigned: true,
+      isPerson: rep?.is_person ?? false,
+    };
+  }, [reps, repIdentities]);
+
+  /**
+   * Los filtros se aplican todos menos el del propio cuadro que se está
+   * pintando: si el ranking de comerciales se filtrase a sí mismo, al pulsar
+   * uno desaparecerían los demás y ya no se podría cambiar de opinión.
+   */
+  const filtered = useMemo(() => {
+    const pick = (list: SummaryRow[], skip?: "channel" | "rep") => list.filter((row) => {
+      if (companyCode !== "all" && row.company_code !== companyCode) return false;
+      if (skip !== "channel" && channel !== null && channelLabel(row.series) !== channel) return false;
+      if (skip !== "rep" && repKey !== null && repOf(row).key !== repKey) return false;
+      return true;
+    });
+    return {
+      visible: pick(rows),
+      visibleBefore: pick(previousRows),
+      visibleFullBefore: pick(previousFullRows),
+      forChannels: pick(rows, "channel"),
+      forReps: pick(rows, "rep"),
+      forRepsBefore: pick(previousRows, "rep"),
+    };
+  }, [rows, previousRows, previousFullRows, companyCode, channel, repKey, repOf]);
+
+  const { visible, visibleBefore } = filtered;
+
+  const current = useMemo(() => sumRows(visible), [visible]);
+  const previous = useMemo(() => sumRows(visibleBefore), [visibleBefore]);
+
+  const variation = (now: number, before: number) => (before ? ((now - before) / before) * 100 : null);
+  const delta = (value: number | null) =>
+    value === null
+      ? { delta: "Sin comparación", positive: true }
+      : { delta: `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} %`, positive: value >= 0 };
+
+  const currentMargin = bucketMargin(current);
+  const previousMargin = bucketMargin(previous);
+  const withoutCostShare = current.costNet > 0 ? (current.withoutCost / current.costNet) * 100 : 0;
+  /** Venta del periodo que se queda fuera del margen por venir de las series viejas. */
+  const netBeforeSeriesChange = current.net - current.costNet;
+  const marginCoversEverything = netBeforeSeriesChange <= 0;
+
+  const monthly = useMemo(() => {
+    const byMonth = (list: SummaryRow[]) => {
+      const map = new Map<string, Bucket>();
+      for (const row of list) {
+        const bucket = map.get(row.month) ?? emptyBucket();
+        addRow(bucket, row);
+        map.set(row.month, bucket);
+      }
+      return map;
+    };
+    const now = byMonth(visible);
+    const before = byMonth(filtered.visibleFullBefore);
+    // Un año en curso se corta en el mes de hoy: si se pintan los doce, la
+    // línea cae a cero en octubre y parece que la empresa se ha hundido.
+    const today = new Date();
+    const lastMonth = year === today.getFullYear() ? today.getMonth() : 11;
+    const months = Array.from({ length: lastMonth + 1 }, (_, index) => {
+      const suffix = String(index + 1).padStart(2, "0");
+      const bucket = now.get(`${year}-${suffix}`) ?? emptyBucket();
+      return {
+        index,
+        label: monthNames[index],
+        bucket,
+        margin: bucketMargin(bucket),
+        beforeNet: (before.get(`${year - 1}-${suffix}`) ?? emptyBucket()).net,
+      };
+    });
+    return {
+      points: months.map((month) => ({
+        label: month.label,
+        ventas: Math.round(month.bucket.net),
+        anterior: Math.round(month.beforeNet),
+        margen: Math.round(month.margin?.amount ?? 0),
+      })),
+      // La línea de margen solo se dibuja si la tienen todos los meses con venta:
+      // si no, caería a cero en los de las series viejas y parecería un desplome.
+      marginComplete: months.every((month) => month.bucket.net === 0 || month.margin !== null),
+      hasBefore: months.some((month) => month.beforeNet > 0),
+      months,
+    };
+  }, [visible, filtered.visibleFullBefore, year]);
+
+  const byCompany = useMemo(() => {
+    const map = new Map<number, Bucket>();
+    for (const row of rows) {
+      const bucket = map.get(row.company_code) ?? emptyBucket();
+      addRow(bucket, row);
+      map.set(row.company_code, bucket);
+    }
+    return [...map].map(([code, bucket]) => ({
+      code,
+      name: companies.find((company) => company.code === code)?.name ?? `Sociedad ${code}`,
+      bucket,
+      margin: bucketMargin(bucket),
+    })).sort((a, b) => b.bucket.net - a.bucket.net);
+  }, [rows, companies]);
+
   const byRep = useMemo(() => {
-    const map = new Map<string, { name: string; assigned: boolean; bucket: Bucket }>();
-    for (const row of visible) {
-      const rep = row.rep_code === null ? null : reps.find((item) => item.company_code === row.company_code && item.code === row.rep_code);
-      const identity = rep ? repIdentities.get(rep.name) : undefined;
-      const name = row.rep_code === null ? "Sin comercial asignado" : identity?.label ?? `Código ${row.rep_code}`;
-      const key = row.rep_code === null ? "sin" : identity?.key ?? `${row.company_code}-${row.rep_code}`;
-      const entry = map.get(key) ?? { name, assigned: row.rep_code !== null, bucket: emptyBucket() };
+    const map = new Map<string, { name: string; assigned: boolean; isPerson: boolean; bucket: Bucket }>();
+    for (const row of filtered.forReps) {
+      const who = repOf(row);
+      const entry = map.get(who.key) ?? { name: who.label, assigned: who.assigned, isPerson: who.isPerson, bucket: emptyBucket() };
       addRow(entry.bucket, row);
-      map.set(key, entry);
+      map.set(who.key, entry);
+    }
+    const before = new Map<string, number>();
+    for (const row of filtered.forRepsBefore) {
+      const who = repOf(row);
+      before.set(who.key, (before.get(who.key) ?? 0) + Number(row.net_amount));
     }
     return [...map]
-      .map(([key, value]) => ({ key, ...value, margin: bucketMargin(value.bucket) }))
+      .map(([key, value]) => ({
+        key,
+        ...value,
+        margin: bucketMargin(value.bucket),
+        beforeNet: before.get(key) ?? 0,
+      }))
       .sort((a, b) => b.bucket.net - a.bucket.net);
-  }, [visible, reps, repIdentities]);
+  }, [filtered.forReps, filtered.forRepsBefore, repOf]);
 
   /** Cuántos canales caben en la rosquilla antes de que las etiquetas se corten. */
   const TOP_CHANNELS = 8;
 
   const byChannel = useMemo(() => {
     const map = new Map<string, number>();
-    for (const row of visible) {
-      const label = channelNames[row.series] ?? (row.series || "Sin serie");
+    for (const row of filtered.forChannels) {
+      const label = channelLabel(row.series);
       map.set(label, (map.get(label) ?? 0) + Number(row.net_amount));
     }
     // Los abonos van en negativo y una rosquilla no los puede dibujar, así que
@@ -301,20 +375,104 @@ export function SalesDashboardView() {
     const positive = [...map].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
     const refunds = [...map].reduce((sum, [, value]) => (value < 0 ? sum + value : sum), 0);
     // Con 19 series las etiquetas salen cortadas a "Cré...", así que la cola se
-    // junta en una sola porción.
+    // junta en una sola porción, que no es pulsable porque no es un canal.
     const head = positive.slice(0, TOP_CHANNELS);
     const tail = positive.slice(TOP_CHANNELS);
     const shown = tail.length > 0
       ? [...head, [`Otras ${tail.length} series`, tail.reduce((sum, [, value]) => sum + value, 0)] as [string, number]]
       : head;
-    return { shown, refunds };
-  }, [visible]);
+    return { shown, refunds, real: new Set(positive.map(([label]) => label)) };
+  }, [filtered.forChannels]);
 
   const channelItems: DonutItem[] = byChannel.shown.map(([label, value], index) => ({
     label,
     value: Math.round(value),
     color: channelColors[index % channelColors.length],
   }));
+
+  /**
+   * Lo que el panel señala solo. La idea es que Dirección no tenga que buscar:
+   * si algo se está torciendo, sale escrito con su número al lado.
+   */
+  const findings = useMemo<Finding[]>(() => {
+    if (current.net <= 0) return [];
+
+    // Solo se compara a quien ya vendía el año pasado: el que empezó este año
+    // no "cae" ni "sube", es que antes no estaba.
+    const comparables = byRep
+      .filter((rep) => rep.isPerson && rep.beforeNet > 50000)
+      .map((rep) => ({ rep, change: ((rep.bucket.net - rep.beforeNet) / rep.beforeNet) * 100 }));
+    const desde = comparisonIsPartial ? `el mismo tramo de ${year - 1}` : String(year - 1);
+
+    const caidas: Finding[] = comparables
+      .filter((item) => item.change <= -15)
+      .sort((a, b) => a.change - b.change)
+      .slice(0, 2)
+      .map(({ rep, change }) => ({
+        tone: "bad",
+        text: `${rep.name} vende un ${formatPercent(Math.abs(change))} menos que en ${desde}: ${currencyFormatter.format(rep.bucket.net)} frente a ${currencyFormatter.format(rep.beforeNet)}.`,
+      }));
+
+    const subidas: Finding[] = comparables
+      .filter((item) => item.change >= 25)
+      .sort((a, b) => b.change - a.change)
+      .slice(0, 1)
+      .map(({ rep, change }) => ({
+        tone: "good",
+        text: `${rep.name} es quien más sube: un ${formatPercent(change)} más que en ${desde}, hasta ${currencyFormatter.format(rep.bucket.net)}.`,
+      }));
+
+    // Vender mucho con poco margen es justo lo que el PDF pide vigilar.
+    const media = currentMargin?.percent ?? null;
+    const flojos: Finding[] = media === null ? [] : byRep
+      .flatMap((rep) => (rep.isPerson && rep.margin && rep.bucket.net > current.net * 0.03
+        ? [{ rep, percent: rep.margin.percent }]
+        : []))
+      .filter((item) => item.percent <= media - 8)
+      .sort((a, b) => a.percent - b.percent)
+      .slice(0, 2)
+      .map(({ rep, percent }) => ({
+        tone: "warn",
+        text: `${rep.name} vende ${currencyFormatter.format(rep.bucket.net)} al ${formatPercent(percent)} de margen, ${formatPercent(media - percent)} por debajo de la media.`,
+      }));
+
+    // Si tres personas son media empresa, eso es un riesgo, no un dato.
+    const personas = byRep.filter((rep) => rep.isPerson);
+    const top3 = personas.slice(0, 3).reduce((sum, rep) => sum + rep.bucket.net, 0);
+    const totalPersonas = personas.reduce((sum, rep) => sum + rep.bucket.net, 0);
+    const concentracion: Finding[] = totalPersonas > 0 && personas.length > 4 && top3 / totalPersonas >= 0.55
+      ? [{
+          tone: "warn",
+          text: `Tres comerciales concentran el ${formatPercent((top3 / totalPersonas) * 100)} de lo que venden las personas: ${personas.slice(0, 3).map((rep) => rep.name.split(" ").slice(0, 2).join(" ")).join(", ")}.`,
+        }]
+      : [];
+
+    // Venta que no se sabe de quién es.
+    const sinAsignar = byRep.find((rep) => rep.key === "sin");
+    const huerfana: Finding[] = sinAsignar && sinAsignar.bucket.net > current.net * 0.08
+      ? [{
+          tone: "warn",
+          text: `${currencyFormatter.format(sinAsignar.bucket.net)} de venta no tienen comercial asignado en Sage, el ${formatPercent((sinAsignar.bucket.net / current.net) * 100)} del total.`,
+        }]
+      : [];
+
+    // Decir que agosto es el mes más flojo no es un hallazgo, lo es todos los
+    // años. Lo que importa es el mes que vende menos que ese mismo mes del año
+    // pasado. El mes en curso se deja fuera porque va por la mitad.
+    const mesEnCurso = year === new Date().getFullYear() ? new Date().getMonth() : 12;
+    const caidaMes = monthly.months
+      .filter((month) => month.index < mesEnCurso && month.beforeNet > 0 && month.bucket.net > 0)
+      .map((month) => ({ month, change: ((month.bucket.net - month.beforeNet) / month.beforeNet) * 100 }))
+      .filter((item) => item.change <= -15)
+      .sort((a, b) => a.change - b.change)
+      .slice(0, 1);
+    const mesFlojo: Finding[] = caidaMes.map(({ month, change }) => ({
+      tone: "bad",
+      text: `En ${month.label} se vendió un ${formatPercent(Math.abs(change))} menos que en ${month.label} de ${year - 1}: ${currencyFormatter.format(month.bucket.net)} frente a ${currencyFormatter.format(month.beforeNet)}.`,
+    }));
+
+    return [...caidas, ...subidas, ...flojos, ...concentracion, ...huerfana, ...mesFlojo];
+  }, [byRep, current.net, currentMargin, monthly.months, comparisonIsPartial, year]);
 
   if (stage === "denied") {
     return (
@@ -354,6 +512,12 @@ export function SalesDashboardView() {
   const isCurrentYear = year === new Date().getFullYear();
   const comparisonHelper = comparisonIsPartial ? `frente al mismo tramo de ${year - 1}` : `frente a ${year - 1}`;
   const companyLabel = companyCode === "all" ? "todas las sociedades" : byCompany.find((item) => item.code === companyCode)?.name ?? "";
+  const repRankMax = Math.max(...byRep.map((rep) => rep.bucket.net), 1);
+  const activeFilters = [
+    companyCode !== "all" ? { label: companyLabel, clear: () => setCompanyCode("all") } : null,
+    channel !== null ? { label: `Canal: ${channel}`, clear: () => setChannel(null) } : null,
+    repKey !== null ? { label: `Comercial: ${byRep.find((rep) => rep.key === repKey)?.name ?? repKey}`, clear: () => setRepKey(null) } : null,
+  ].filter((item): item is { label: string; clear: () => void } => item !== null);
 
   return (
     <div className="page-stack">
@@ -374,12 +538,34 @@ export function SalesDashboardView() {
           <select className="panel-heading-select" value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Año">
             {years.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
+          <select className="panel-heading-select" value={channel ?? "all"} onChange={(event) => setChannel(event.target.value === "all" ? null : event.target.value)} aria-label="Canal">
+            <option value="all">Todos los canales</option>
+            {[...byChannel.real].sort().map((label) => <option key={label} value={label}>{label}</option>)}
+          </select>
           <select className="panel-heading-select" value={basis} onChange={(event) => setBasis(event.target.value as "albaran" | "factura")} aria-label="Qué fecha manda">
             <option value="albaran">Por fecha de albarán</option>
             <option value="factura">Por fecha de factura</option>
           </select>
         </div>
       </section>
+
+      {activeFilters.length > 0 ? (
+        <section className="sales-chips" aria-label="Filtros puestos">
+          {activeFilters.map((filter) => (
+            <button key={filter.label} type="button" className="sales-chip" onClick={filter.clear}>
+              {filter.label}<span aria-hidden="true">×</span>
+              <span className="sr-only">Quitar este filtro</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className="sales-chip sales-chip-clear"
+            onClick={() => { setCompanyCode("all"); setChannel(null); setRepKey(null); }}
+          >
+            Quitar todos
+          </button>
+        </section>
+      ) : null}
 
       {basis === "factura" ? (
         <section className="panel notice">
@@ -391,7 +577,7 @@ export function SalesDashboardView() {
         </section>
       ) : null}
 
-      <section className="kpi-grid kpi-grid-main">
+      <section className="kpi-grid kpi-grid-sales">
         <KpiCard
           label="Ventas"
           value={currencyFormatter.format(current.net)}
@@ -403,14 +589,23 @@ export function SalesDashboardView() {
         <KpiCard
           label="Margen"
           value={currentMargin ? currencyFormatter.format(currentMargin.amount) : "No disponible"}
-          helper={currentMargin
-            ? `${formatPercent(currentMargin.percent)} sobre lo que tiene coste${marginCoversEverything ? "" : ", solo desde el cambio de series"}`
-            : "el coste de las series antiguas no sirve"}
+          helper={currentMargin && !marginCoversEverything ? "solo desde el cambio de series" : "en euros"}
           icon={<ConversionIcon />}
           tone={currentMargin ? "emerald" : "amber"}
           {...(currentMargin && previousMargin
             ? delta(variation(currentMargin.amount, previousMargin.amount))
             : { delta: "Sin comparación", positive: true })}
+        />
+        <KpiCard
+          label="Margen %"
+          value={currentMargin ? formatPercent(currentMargin.percent) : "—"}
+          helper={currentMargin ? "sobre lo que tiene coste" : "el coste de las series antiguas no sirve"}
+          icon={<ConversionIcon />}
+          tone={currentMargin ? "emerald" : "amber"}
+          delta={currentMargin && previousMargin
+            ? `${currentMargin.percent - previousMargin.percent >= 0 ? "+" : ""}${(currentMargin.percent - previousMargin.percent).toFixed(1).replace(".", ",")} pts`
+            : "Sin comparación"}
+          positive={currentMargin && previousMargin ? currentMargin.percent >= previousMargin.percent : true}
         />
         <KpiCard
           label="Albaranes"
@@ -426,7 +621,10 @@ export function SalesDashboardView() {
           helper="por albarán"
           icon={<UsuariosIcon />}
           tone="amber"
-          delta="Sin comparación"
+          {...delta(variation(
+            current.documents ? current.net / current.documents : 0,
+            previous.documents ? previous.net / previous.documents : 0,
+          ))}
         />
       </section>
 
@@ -460,56 +658,90 @@ export function SalesDashboardView() {
         </section>
       ) : null}
 
-      <section className="panel chart-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Evolución del año</h2>
-            <p className="panel-subtitle">
-              {monthly.marginComplete ? "Ventas y margen por mes, en euros" : "Ventas por mes, en euros"}
-            </p>
-          </div>
-        </div>
-        <TrendChart
-          data={monthly.points}
-          series={monthly.marginComplete
-            ? [{ key: "ventas", label: "Ventas", color: "#4f46e5" }, { key: "margen", label: "Margen", color: "#10b981" }]
-            : [{ key: "ventas", label: "Ventas", color: "#4f46e5" }]}
-          ariaLabel={monthly.marginComplete
-            ? `Evolución mensual de ventas y margen en ${year}`
-            : `Evolución mensual de ventas en ${year}`}
-        />
-      </section>
-
-      <section className="dashboard-grid">
-        <article className="panel table-panel">
+      <section className="sales-board">
+        <article className="panel chart-panel sales-board-wide">
           <div className="panel-heading">
-            <div><h2>Por comercial</h2><p className="panel-subtitle">{companyLabel}, año {year}</p></div>
+            <div>
+              <h2>Evolución del año</h2>
+              <p className="panel-subtitle">
+                {monthly.marginComplete ? "Ventas y margen por mes" : "Ventas por mes"}
+                {monthly.hasBefore ? `, con ${year - 1} detrás en gris` : ""}
+              </p>
+            </div>
           </div>
-          <div className="table-scroll">
-            <table className="sales-rep-table">
-              <thead><tr><th>Comercial</th><th>Albaranes</th><th>Ventas</th><th>Margen</th></tr></thead>
-              <tbody>
-                {byRep.map((rep) => (
-                  <tr key={rep.key} className={rep.assigned ? undefined : "row-muted"}>
-                    <td><strong>{rep.name}</strong></td>
-                    <td>{numberFormatter.format(rep.bucket.documents)}</td>
-                    <td>{currencyFormatter.format(rep.bucket.net)}</td>
-                    <td>{rep.margin ? formatPercent(rep.margin.percent) : <span className="muted">—</span>}</td>
-                  </tr>
-                ))}
-                {byRep.length === 0 ? <tr><td colSpan={4} className="muted">Sin ventas en este periodo.</td></tr> : null}
-              </tbody>
-            </table>
-          </div>
+          <TrendChart
+            data={monthly.points}
+            series={[
+              ...(monthly.hasBefore ? [{ key: "anterior", label: String(year - 1), color: "#cbd5e1" }] : []),
+              { key: "ventas", label: "Ventas", color: "#4f46e5" },
+              ...(monthly.marginComplete ? [{ key: "margen", label: "Margen", color: "#10b981" }] : []),
+            ]}
+            ariaLabel={`Evolución mensual de ventas en ${year}`}
+          />
         </article>
 
-        <article className="panel chart-panel sales-channel">
+        <article className="panel sales-board-narrow">
+          <div className="panel-heading">
+            <div>
+              <h2>Lo que hay que mirar</h2>
+              <p className="panel-subtitle">Lo saca el panel solo, con los datos de arriba</p>
+            </div>
+          </div>
+          {findings.length === 0 ? (
+            <p className="muted">Nada que destacar en este periodo: ni caídas fuertes ni márgenes fuera de sitio.</p>
+          ) : (
+            <ul className="sales-findings">
+              {findings.map((finding) => (
+                <li key={finding.text} className={`sales-finding sales-finding-${finding.tone}`}>{finding.text}</li>
+              ))}
+            </ul>
+          )}
+        </article>
+
+        <article className="panel sales-board-half">
+          <div className="panel-heading">
+            <div>
+              <h2>Ranking de comerciales</h2>
+              <p className="panel-subtitle">Pulsa uno para filtrar todo el panel</p>
+            </div>
+          </div>
+          {byRep.length === 0 ? (
+            <p className="muted">Sin ventas en este periodo.</p>
+          ) : (
+            <ol className="sales-rank">
+              {byRep.map((rep) => (
+                <li key={rep.key}>
+                  <button
+                    type="button"
+                    className={`sales-rank-row${repKey === rep.key ? " is-active" : ""}${rep.assigned ? "" : " is-muted"}`}
+                    onClick={() => setRepKey(repKey === rep.key ? null : rep.key)}
+                    aria-pressed={repKey === rep.key}
+                  >
+                    <span className="sales-rank-name" title={rep.name}>{rep.name}</span>
+                    <span className="sales-rank-track">
+                      <span
+                        className="sales-rank-fill"
+                        style={{ width: `${Math.max(1.5, (Math.max(rep.bucket.net, 0) / repRankMax) * 100)}%` }}
+                      />
+                    </span>
+                    <strong className="sales-rank-value">{currencyFormatter.format(rep.bucket.net)}</strong>
+                    <span className="sales-rank-margin">
+                      {rep.margin ? formatPercent(rep.margin.percent) : "—"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </article>
+
+        <article className="panel chart-panel sales-channel sales-board-quarter">
           <div className="panel-heading">
             <div>
               <h2>Por canal</h2>
               <p className="panel-subtitle">
-                Según la serie del albarán
-                {byChannel.refunds < 0 ? `, sin los ${currencyFormatter.format(-byChannel.refunds)} de abonos` : ""}
+                Pulsa uno para filtrar
+                {byChannel.refunds < 0 ? `. Sin los ${currencyFormatter.format(-byChannel.refunds)} de abonos` : ""}
               </p>
             </div>
           </div>
@@ -519,30 +751,41 @@ export function SalesDashboardView() {
             ariaLabel="Reparto de las ventas por canal"
             emptyMessage="Sin datos en este periodo."
           />
+          <div className="sales-channel-picks">
+            {byChannel.shown.filter(([label]) => byChannel.real.has(label)).map(([label]) => (
+              <button
+                key={label}
+                type="button"
+                className={`sales-chip sales-chip-pick${channel === label ? " is-active" : ""}`}
+                onClick={() => setChannel(channel === label ? null : label)}
+                aria-pressed={channel === label}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </article>
-      </section>
 
-      <section className="panel table-panel">
-        <div className="panel-heading">
-          <div><h2>Por sociedad</h2><p className="panel-subtitle">Año {year}, todas las sociedades</p></div>
-        </div>
-        <div className="table-scroll">
-          <table>
-            <thead><tr><th>Sociedad</th><th>Albaranes</th><th>Ventas</th><th>Margen €</th><th>Margen %</th></tr></thead>
-            <tbody>
-              {byCompany.map((company) => (
-                <tr key={company.code}>
-                  <td><strong>{company.name}</strong></td>
-                  <td>{numberFormatter.format(company.bucket.documents)}</td>
-                  <td>{currencyFormatter.format(company.bucket.net)}</td>
-                  <td>{company.margin ? currencyFormatter.format(company.margin.amount) : <span className="muted">—</span>}</td>
-                  <td>{company.margin ? formatPercent(company.margin.percent) : <span className="muted">—</span>}</td>
-                </tr>
-              ))}
-              {byCompany.length === 0 ? <tr><td colSpan={5} className="muted">Sin ventas en este periodo.</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
+        <article className="panel table-panel sales-board-third">
+          <div className="panel-heading">
+            <div><h2>Por sociedad</h2><p className="panel-subtitle">Año {year}, sin filtrar</p></div>
+          </div>
+          <div className="table-scroll">
+            <table className="sales-rep-table">
+              <thead><tr><th>Sociedad</th><th>Ventas</th><th>Margen</th></tr></thead>
+              <tbody>
+                {byCompany.map((company) => (
+                  <tr key={company.code}>
+                    <td><strong>{company.name}</strong></td>
+                    <td>{currencyFormatter.format(company.bucket.net)}</td>
+                    <td>{company.margin ? formatPercent(company.margin.percent) : <span className="muted">—</span>}</td>
+                  </tr>
+                ))}
+                {byCompany.length === 0 ? <tr><td colSpan={3} className="muted">Sin ventas en este periodo.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section className="panel sales-footnote">
