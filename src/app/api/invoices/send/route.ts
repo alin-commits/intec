@@ -1,0 +1,105 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { EXPENSES_EDIT_ROLES, hasAnyRole } from "@/lib/constants";
+import { buildInvoiceEmail } from "@/lib/email-templates";
+import { isEmailConfigured, sendEmail } from "@/lib/email";
+import { expenseCategoryLabels, type ExpenseCategory } from "@/lib/expenses";
+import { currencyFormatter, formatDate } from "@/lib/format";
+import { INVOICE_BUCKET, INVOICE_MAX_BYTES, INVOICE_PATH_PATTERN } from "@/lib/invoices";
+import { createClient } from "@/lib/supabase/server";
+import type { AppRole } from "@/lib/types";
+
+// Manda una factura ya guardada a contabilidad, con el PDF adjunto. Siempre a
+// la dirección configurada: nunca a una que venga en la petición, para que
+// esto no pueda usarse para enviar documentos a donde sea.
+const DEFAULT_RECIPIENT = "alin@suministrointec.com";
+
+const requestSchema = z.object({ id: z.string().uuid() });
+
+function recipient(): string {
+  return process.env.INVOICE_EMAIL_TO?.trim() || DEFAULT_RECIPIENT;
+}
+
+/** Para que la pantalla pueda decir a dónde va la factura antes de mandarla. */
+export async function GET() {
+  const supabase = await createClient();
+  if (!supabase) return NextResponse.json({ error: "Supabase no está configurado." }, { status: 503 });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
+  const { data: profile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
+  if (!profile?.is_active || !hasAnyRole(profile.roles as AppRole[], EXPENSES_EDIT_ROLES)) {
+    return NextResponse.json({ error: "No tienes permiso." }, { status: 403 });
+  }
+  return NextResponse.json({ to: recipient(), configured: isEmailConfigured() }, { headers: { "Cache-Control": "no-store" } });
+}
+
+export async function POST(request: Request) {
+  const supabase = await createClient();
+  if (!supabase) return NextResponse.json({ error: "Supabase no está configurado." }, { status: 503 });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
+  const { data: profile } = await supabase.from("profiles").select("full_name, roles, is_active").eq("id", user.id).maybeSingle();
+  if (!profile?.is_active || !hasAnyRole(profile.roles as AppRole[], EXPENSES_EDIT_ROLES)) {
+    return NextResponse.json({ error: "No tienes permiso para enviar facturas." }, { status: 403 });
+  }
+  if (!isEmailConfigured()) {
+    return NextResponse.json({ error: "El envío de correo no está configurado. Avisa al administrador." }, { status: 503 });
+  }
+
+  let id: string;
+  try {
+    const parsed = requestSchema.safeParse(await request.json());
+    if (!parsed.success) return NextResponse.json({ error: "Factura no válida." }, { status: 400 });
+    id = parsed.data.id;
+  } catch {
+    return NextResponse.json({ error: "No se pudo leer la solicitud." }, { status: 400 });
+  }
+
+  // Se lee con la sesión de quien envía: si no puede ver la factura, no la manda.
+  const { data: invoice } = await supabase
+    .from("marketing_invoices")
+    .select("supplier, invoice_number, concept, invoice_date, base_amount, vat_amount, total_amount, category, business_unit_id, notes, file_path, file_name")
+    .eq("id", id)
+    .maybeSingle();
+  if (!invoice) return NextResponse.json({ error: "Esa factura no existe." }, { status: 404 });
+  if (!invoice.file_path || !INVOICE_PATH_PATTERN.test(String(invoice.file_path))) {
+    return NextResponse.json({ error: "Esa factura no tiene PDF que adjuntar." }, { status: 400 });
+  }
+
+  const { data: file, error: downloadError } = await supabase.storage.from(INVOICE_BUCKET).download(String(invoice.file_path));
+  if (downloadError || !file) return NextResponse.json({ error: "No se encontró el PDF de la factura." }, { status: 404 });
+  if (file.size > INVOICE_MAX_BYTES) return NextResponse.json({ error: "El PDF supera los 10 MB y no se puede enviar por correo." }, { status: 413 });
+
+  let unitName: string | null = null;
+  if (invoice.business_unit_id) {
+    const { data: unit } = await supabase.from("business_units").select("name").eq("id", invoice.business_unit_id).maybeSingle();
+    unitName = (unit?.name as string | null) ?? null;
+  }
+
+  const fileName = String(invoice.file_name ?? "factura.pdf");
+  const { subject, html } = buildInvoiceEmail({
+    supplier: String(invoice.supplier),
+    invoiceNumber: (invoice.invoice_number as string | null) ?? null,
+    concept: (invoice.concept as string | null) ?? null,
+    invoiceDate: formatDate(String(invoice.invoice_date)),
+    baseAmount: currencyFormatter.format(Number(invoice.base_amount ?? 0)),
+    vatAmount: currencyFormatter.format(Number(invoice.vat_amount ?? 0)),
+    totalAmount: currencyFormatter.format(Number(invoice.total_amount ?? 0)),
+    category: expenseCategoryLabels[invoice.category as ExpenseCategory] ?? String(invoice.category),
+    businessUnit: unitName,
+    notes: (invoice.notes as string | null) ?? null,
+    uploadedBy: (profile.full_name as string | null) ?? user.email ?? "alguien del equipo",
+    fileName,
+  });
+
+  const to = recipient();
+  const sent = await sendEmail({
+    to,
+    subject,
+    html,
+    attachments: [{ filename: fileName, content: Buffer.from(await file.arrayBuffer()) }],
+  });
+  if (!sent) return NextResponse.json({ error: "No se pudo enviar el correo. Inténtalo de nuevo." }, { status: 502 });
+
+  return NextResponse.json({ ok: true, to });
+}

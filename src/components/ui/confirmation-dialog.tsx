@@ -7,6 +7,9 @@ export type ConfirmationDialogProps = {
   title: string;
   children: ReactNode;
   confirmLabel: string;
+  /** Para cuando "Cancelar" y "Guardando…" no son lo que está pasando. */
+  cancelLabel?: string;
+  busyLabel?: string;
   busy?: boolean;
   destructive?: boolean;
   onCancel: () => void;
@@ -18,6 +21,8 @@ export function ConfirmationDialog({
   title,
   children,
   confirmLabel,
+  cancelLabel = "Cancelar",
+  busyLabel = "Guardando…",
   busy = false,
   destructive = false,
   onCancel,
@@ -46,9 +51,9 @@ export function ConfirmationDialog({
         </div>
         <div className="confirmation-content">{children}</div>
         <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button type="button" className="button button-secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
           <button type="button" className={destructive ? "button button-danger" : "button button-primary"} onClick={onConfirm} disabled={busy}>
-            {busy ? "Guardando…" : confirmLabel}
+            {busy ? busyLabel : confirmLabel}
           </button>
         </div>
       </section>

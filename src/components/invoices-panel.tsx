@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
@@ -16,6 +16,8 @@ import type { BusinessUnit } from "@/lib/types";
 
 type InvoiceDraft = Omit<MarketingInvoice, "id">;
 type UploadStep = "idle" | "uploading" | "reading";
+/** Una factura recién guardada esperando a que se decida si se manda a contabilidad. */
+type PendingSend = { id: string; supplier: string };
 
 export function mapInvoiceRow(row: Record<string, unknown>): MarketingInvoice {
   return {
@@ -98,6 +100,9 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MarketingInvoice | null>(null);
+  const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
+  /** A qué dirección se mandan las facturas; la decide el servidor. */
+  const [mailbox, setMailbox] = useState("");
 
   const subscriptions = expenses.filter((expense) => expense.kind === "subscription");
   const unitName = (id: string | null) => (id ? units.find((unit) => unit.id === id)?.name ?? "—" : "General");
@@ -258,15 +263,27 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
         createdExpenseId = created.id;
         payload.expense_id = created.id;
       }
-      const { error } = editingId ? await supabase.from("marketing_invoices").update(payload).eq("id", editingId) : await supabase.from("marketing_invoices").insert(payload);
-      if (error) {
-        if (createdExpenseId) await supabase.from("marketing_expenses").delete().eq("id", createdExpenseId);
-        throw error;
+      let savedId = editingId;
+      if (editingId) {
+        const { error } = await supabase.from("marketing_invoices").update(payload).eq("id", editingId);
+        if (error) {
+          if (createdExpenseId) await supabase.from("marketing_expenses").delete().eq("id", createdExpenseId);
+          throw error;
+        }
+      } else {
+        const { data: created, error } = await supabase.from("marketing_invoices").insert(payload).select("id").single();
+        if (error) {
+          if (createdExpenseId) await supabase.from("marketing_expenses").delete().eq("id", createdExpenseId);
+          throw error;
+        }
+        savedId = created.id;
       }
       setEditorOpen(false);
       setNewSubscription(null);
       await onChanged();
       onMessage(createdExpenseId ? `Factura guardada y suscripción «${payload.supplier}» creada.` : editingId ? "Factura actualizada." : "Factura guardada.");
+      // Solo se pregunta al subir una nueva con PDF: al editar ya se decidió en su día.
+      if (!editingId && savedId && payload.file_path) setPendingSend({ id: savedId, supplier: payload.supplier });
     } catch (cause) {
       onMessage(reportSafeError(cause, "No se pudo guardar la factura."));
     } finally {
@@ -290,6 +307,35 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
       onMessage(reportSafeError(cause, "No se pudo eliminar la factura."));
     } finally {
       setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const response = await fetch("/api/invoices/send", { cache: "no-store" });
+      if (!active || !response.ok) return;
+      const result = (await response.json().catch(() => ({}))) as { to?: string };
+      if (active && result.to) setMailbox(result.to);
+    })();
+    return () => { active = false; };
+  }, []);
+
+  async function sendInvoice(id: string) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/invoices/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { to?: string; error?: string };
+      onMessage(response.ok ? `Factura enviada a ${result.to ?? "contabilidad"}.` : result.error ?? "No se pudo enviar la factura.");
+    } catch {
+      onMessage("No hay conexión con el servidor.");
+    } finally {
+      setBusy(false);
+      setPendingSend(null);
     }
   }
 
@@ -406,6 +452,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <td>
                     <div className="table-actions">
                       {invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => void viewPdf(invoice.filePath as string)}>PDF</button> : null}
+                      {canEdit && invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingSend({ id: invoice.id, supplier: invoice.supplier })} title="Enviar esta factura por correo a contabilidad">Enviar</button> : null}
                       <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(invoice)}>{canEdit ? "Editar" : "Ver"}</button>
                     </div>
                   </td>
@@ -421,6 +468,25 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
           </table>
         </div>
       </section>
+
+      <ConfirmationDialog
+        open={Boolean(pendingSend)}
+        title="¿Enviar la factura por correo?"
+        confirmLabel="Sí, enviar"
+        cancelLabel="Ahora no"
+        busyLabel="Enviando…"
+        busy={busy}
+        onCancel={() => setPendingSend(null)}
+        onConfirm={() => pendingSend && void sendInvoice(pendingSend.id)}
+      >
+        {pendingSend ? (
+          <div className="confirmation-summary">
+            <span>Factura</span><strong>{pendingSend.supplier}</strong>
+            <span>Se envía a</span><strong>{mailbox || "la dirección configurada para facturas"}</strong>
+            <span>Qué lleva</span><strong>El PDF adjunto y un resumen con proveedor, número, fecha, base, IVA y total.</strong>
+          </div>
+        ) : null}
+      </ConfirmationDialog>
 
       <ConfirmationDialog open={Boolean(pendingDelete)} title="¿Eliminar la factura?" confirmLabel="Eliminar" destructive busy={busy} onCancel={() => setPendingDelete(null)} onConfirm={() => void confirmDelete()}>
         {pendingDelete ? <div className="confirmation-summary"><span>Factura</span><strong>{pendingDelete.supplier}{pendingDelete.invoiceNumber ? ` · ${pendingDelete.invoiceNumber}` : ""}</strong><span>Efecto</span><strong>Se borran el registro y el PDF. No se puede deshacer.</strong></div> : null}
