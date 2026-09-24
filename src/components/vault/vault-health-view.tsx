@@ -123,44 +123,54 @@ export function VaultHealthView() {
         <article className="panel">
           <div className="panel-heading"><div><h2>Qué conviene hacer</h2><p className="panel-subtitle">Por dónde empezar</p></div></div>
           <ol className="vault-health-steps">
-            <li><strong>Las repetidas primero.</strong> Si una se filtra, caen todas las de su grupo. Empieza por bancos, Microsoft 365, hosting, NAS y VPN.</li>
-            <li><strong>Luego las débiles.</strong> Cámbialas con el generador del gestor, que crea contraseñas de 20 caracteres.</li>
-            <li><strong>Al cambiar una, edítala aquí también.</strong> Así el gestor queda al día y la fecha de cambio empieza a contar.</li>
+            <li>
+              <span className="vault-step-number">1</span>
+              <div><strong>Las repetidas primero</strong><p>Si una se filtra, caen todas las de su grupo. Empieza por bancos, Microsoft 365, hosting, NAS y VPN.</p></div>
+            </li>
+            <li>
+              <span className="vault-step-number">2</span>
+              <div><strong>Luego las débiles</strong><p>Usa el botón «Cambiar» de cada una: genera una contraseña de 20 caracteres.</p></div>
+            </li>
+            <li>
+              <span className="vault-step-number">3</span>
+              <div><strong>Cámbiala antes en el servicio</strong><p>El gestor solo guarda la contraseña. Primero cámbiala en la web o la aplicación, y luego guárdala aquí.</p></div>
+            </li>
           </ol>
           {health.unknown > 0 ? <p className="muted invoice-hint">{health.unknown} credenciales no tienen huella calculada todavía.</p> : null}
         </article>
       </section>
 
-      <section className="panel table-panel">
+      <section className="panel">
         <div className="panel-heading">
-          <div><h2>Contraseñas repetidas</h2><p className="panel-subtitle">{health.reused.length} grupos comparten contraseña · pulsa una para abrirla</p></div>
+          <div>
+            <h2>Contraseñas repetidas</h2>
+            <p className="panel-subtitle">{health.reusedCount} credenciales repiten contraseña, en {health.reused.length} grupos · abre un grupo para ver cuáles son</p>
+          </div>
         </div>
         {health.reused.length === 0 ? (
           <p className="muted"><CheckCircleIcon /> Ninguna contraseña se repite. Bien.</p>
         ) : (
-          <div className="table-scroll vault-health-scroll">
-            <table>
-              <thead><tr><th>Credenciales que comparten contraseña</th><th>Cuántas</th></tr></thead>
-              <tbody>
-                {health.reused.map((group) => (
-                  <tr key={group.entries.map((entry) => entry.id).join("-")}>
-                    <td>
-                      <div className="vault-health-group">
-                        {group.entries.map((entry) => (
-                          <span key={entry.id} className="vault-health-chip-wrap">
-                            <Link href={`/contrasenas?entry=${entry.id}`} className="vault-health-chip" title={`Abrir ${entry.name}`}>
-                              <strong>{entry.name}</strong><small>{entry.folder}</small>
-                            </Link>
-                            <button type="button" className="vault-health-fix" onClick={() => startFix(entry)} title={`Cambiar la contraseña de ${entry.name}`}>Cambiar</button>
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="vault-health-count">{group.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="vault-reused">
+            {health.reused.map((group, index) => (
+              <details key={group.entries.map((entry) => entry.id).join("-")} className="vault-reused-group" open={index === 0}>
+                <summary>
+                  <span className="vault-reused-count">{group.count}</span>
+                  <span className="vault-reused-title">
+                    <strong>{group.count} credenciales usan la misma contraseña</strong>
+                    <small>{group.entries.map((entry) => entry.name).join(" · ")}</small>
+                  </span>
+                </summary>
+                <ul className="vault-reused-items">
+                  {group.entries.map((entry) => (
+                    <li key={entry.id}>
+                      <Link href={`/contrasenas?entry=${entry.id}`} className="vault-reused-name" title={`Abrir ${entry.name}`}>{entry.name}</Link>
+                      <span className="vault-reused-folder">{entry.folder}</span>
+                      <button type="button" className="button button-compact button-secondary" onClick={() => startFix(entry)}>Cambiar</button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ))}
           </div>
         )}
       </section>

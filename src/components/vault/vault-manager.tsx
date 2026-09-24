@@ -288,13 +288,14 @@ export function VaultManager() {
     void loadTeam();
   }
 
-  function openEdit(entry: VaultEntrySummary) {
+  /** `withNewPassword` is the shortcut from a weak credential: the form opens with a strong one ready. */
+  function openEdit(entry: VaultEntrySummary, withNewPassword = false) {
     setEditingId(entry.id);
     setDraft({
       name: entry.name,
       url: entry.url ?? "",
       username: entry.username ?? "",
-      password: "",
+      password: withNewPassword ? generatePassword(generator) : "",
       notes: "",
       categoryId: entry.categoryId ?? "",
       visibility: entry.visibility,
@@ -585,9 +586,22 @@ export function VaultManager() {
               <strong>{detail.entry.url ? <a href={detail.entry.url} target="_blank" rel="noopener noreferrer" className="text-link">{detail.entry.url}</a> : "—"}</strong>
               <span>Carpeta</span><strong>{categoryName(detail.entry.categoryId)}</strong>
               <span>Ámbito</span><strong>{visibilityLabels[detail.entry.visibility]}</strong>
-              <span>Fuerza</span><strong>{detail.entry.strength ? strengthLabels[detail.entry.strength] : "—"}</strong>
+              <span>Fuerza</span>
+              <strong>{detail.entry.strength ? <em className={`vault-strength vault-strength-${detail.entry.strength}`}>{strengthLabels[detail.entry.strength]}</em> : "—"}</strong>
               <span>Contraseña cambiada</span><strong>{formatDate(detail.entry.lastPasswordChangeAt)}</strong>
             </div>
+
+            {detail.entry.strength === "weak" && detail.can.edit ? (
+              <div className="notice vault-weak-notice">
+                <div>
+                  <strong>Esta contraseña es débil.</strong>
+                  <span>Es corta o poco variada. Cámbiala primero en el servicio y guarda aquí la nueva.</span>
+                </div>
+                <button type="button" className="button button-compact button-primary" onClick={() => openEdit(detail.entry, true)}>
+                  <RefreshIcon /> Cambiarla ahora
+                </button>
+              </div>
+            ) : null}
 
             {detail.entry.hasNotes ? (
               <div className="vault-notes">
