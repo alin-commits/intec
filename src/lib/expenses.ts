@@ -107,6 +107,8 @@ export type InvoiceCharge = { expenseId: string | null; invoiceDate: string; bas
 
 // How far an invoice date may be from a charge date and still be "that month's/quarter's/year's" invoice.
 const MATCH_TOLERANCE_DAYS: Record<BillingPeriod, number> = { monthly: 16, quarterly: 46, yearly: 183 };
+/** Qué parte de la cuota tiene que alcanzar una factura para pasar por ser esa cuota. */
+const CHARGE_LIKENESS = 0.6;
 
 /**
  * What a subscription cost between two dates: real invoices linked to it count
@@ -132,11 +134,15 @@ export function subscriptionSpend(expense: MarketingExpense, invoices: InvoiceCh
     if (best === -1) uncovered++;
     else unused.splice(best, 1);
   }
-  // Una factura enlazada que no ha casado con ningún cargo sigue siendo un cargo
-  // de esta suscripción, solo que con la fecha corrida (la cuota de diciembre
-  // facturada en enero, por ejemplo). Si no descontara, se sumaría encima de la
-  // estimación y el año saldría con un cargo de más.
-  uncovered = Math.max(0, uncovered - unused.length);
+  // Una factura enlazada que no ha casado con ningún cargo puede ser ese mismo
+  // cargo con la fecha corrida: la cuota de diciembre facturada en enero. Cuenta
+  // como cargo si su importe se parece al de la cuota; si es mucho menor, es un
+  // extra (un puesto de más, un consumo suelto) y no sustituye a ninguna.
+  const looksLikeACharge = unused.filter((date) => {
+    const invoice = linked.find((item) => item.invoiceDate === date);
+    return invoice !== undefined && invoice.baseAmount >= expense.amount * CHARGE_LIKENESS;
+  }).length;
+  uncovered = Math.max(0, uncovered - looksLikeACharge);
   return { actual, estimated: uncovered * expense.amount };
 }
 

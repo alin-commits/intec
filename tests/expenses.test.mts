@@ -78,3 +78,21 @@ test("an extra invoice still counts but never cancels two charges", () => {
   assert.equal(result.actual, 130);
   assert.equal(result.estimated, 100);
 });
+
+test("a charge invoiced late still replaces its estimate instead of adding to it", () => {
+  // La cuota de diciembre de 2025, facturada el 3 de enero: no casa con ningún
+  // cargo de 2026 por fecha, pero es una cuota y no debe sumarse encima.
+  const hosting = expense({ id: "hosting", startDate: "2026-01-28", amount: 50 });
+  const invoices = [{ expenseId: "hosting", invoiceDate: "2026-01-03", baseAmount: 50 }];
+  const result = subscriptionSpend(hosting, invoices, "2026-01-01", "2026-03-31");
+  assert.equal(result.actual, 50);
+  // Cargos en enero, febrero y marzo; la factura cubre uno, quedan dos.
+  assert.equal(result.estimated, 100);
+});
+
+test("a subscription that has not started yet costs nothing today", () => {
+  const future = expense({ id: "future", startDate: "2026-12-01", amount: 100 });
+  assert.equal(monthlyCost(future, "2026-09-24"), 0);
+  assert.equal(monthlyCost(future, "2026-12-01"), 100);
+  assert.equal(monthlyCost(future), 100);
+});
