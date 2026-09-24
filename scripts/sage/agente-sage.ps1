@@ -46,6 +46,9 @@ param(
   [string]$Clave = $env:INTEC_SAGE_DB_PASSWORD,
   [string]$BaseDeDatos = "Sage",
   [int]$Dias = 90,
+  # Cuántos días van en cada envío. Con años de histórico, mandarlo todo junto
+  # no cabe ni en la ruta ni en el tamaño máximo del servidor.
+  [int]$DiasPorEnvio = 45,
   [string]$Destino = "https://app.suministrointec.com/api/sage/ingest",
   [string]$Token = $env:INTEC_SAGE_TOKEN,
   [string]$Registro = "",
@@ -189,7 +192,7 @@ where CodigoEmpresa not in ($excluidas);
 # Las devoluciones vienen en negativo y se suman tal cual, que es lo correcto:
 # restan de la venta del día.
 # ---------------------------------------------------------------------------
-function Sql-Ventas($campoFecha, $filtro) {
+function Sql-Ventas($campoFecha, $filtro, $desdeBloque, $hastaBloque) {
   return @"
 select
   a.CodigoEmpresa,
@@ -204,7 +207,7 @@ select
   -- costara nada, el margen saldría más alto de lo que es.
   sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste
 from CabeceraAlbaranCliente a
-where a.$campoFecha >= convert(datetime, '$desdeSql', 112) and a.$campoFecha < convert(datetime, '$hastaSql', 112)
+where a.$campoFecha >= convert(datetime, '$desdeBloque', 112) and a.$campoFecha < convert(datetime, '$hastaBloque', 112)
   and a.CodigoEmpresa not in ($excluidas)
   $filtro
 group by
@@ -215,16 +218,6 @@ group by
 "@
 }
 
-$porAlbaran = Consultar $servidorBueno (Sql-Ventas "FechaAlbaran" "")
-# Solo los albaranes ya facturados tienen fecha de factura. En Sage el sí/no se
-# guarda como -1, no como 1.
-$porFactura = Consultar $servidorBueno (Sql-Ventas "FechaFactura" "and a.StatusFacturado = -1")
-
-Apuntar "leido: $($empresas.Rows.Count) sociedades, $($comerciales.Rows.Count) comerciales, $($porAlbaran.Rows.Count)+$($porFactura.Rows.Count) filas de venta"
-
-# ---------------------------------------------------------------------------
-# Montar el envío
-# ---------------------------------------------------------------------------
 function Filas-Venta($tabla, $base) {
   $lista = @()
   foreach ($fila in $tabla.Rows) {
@@ -243,10 +236,6 @@ function Filas-Venta($tabla, $base) {
   }
   return $lista
 }
-
-$ventas = @()
-$ventas += Filas-Venta $porAlbaran "albaran"
-$ventas += Filas-Venta $porFactura "factura"
 
 $sociedades = @()
 foreach ($fila in $empresas.Rows) {
@@ -267,37 +256,76 @@ foreach ($fila in $comerciales.Rows) {
   }
 }
 
-$envio = [PSCustomObject]@{
-  coveredFrom = $desde
-  coveredTo   = (Get-Date).ToString("yyyy-MM-dd")
-  companies   = $sociedades
-  reps        = $vendedores
-  sales       = $ventas
+# ---------------------------------------------------------------------------
+# Se envía por bloques de días, no todo de una vez.
+#
+# Con años de histórico son decenas de miles de filas, y un envío así no cabe:
+# ni en el tope de la ruta ni en el tamaño máximo que admite el servidor. Cada
+# bloque lleva su propia ventana de fechas, y el Hub reescribe justo esa, así
+# que partirlo no cambia el resultado.
+# ---------------------------------------------------------------------------
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$inicioVentana = (Get-Date).AddDays(-$Dias).Date
+$finVentana = (Get-Date).AddDays(1).Date
+$totalEnviado = 0
+$bloques = 0
+
+$cursor = $inicioVentana
+while ($cursor -lt $finVentana) {
+  $corte = $cursor.AddDays($DiasPorEnvio)
+  if ($corte -gt $finVentana) { $corte = $finVentana }
+
+  $desdeSql = $cursor.ToString("yyyyMMdd")
+  $hastaSql = $corte.ToString("yyyyMMdd")
+
+  $porAlbaran = Consultar $servidorBueno (Sql-Ventas "FechaAlbaran" "" $desdeSql $hastaSql)
+  # Solo los albaranes ya facturados tienen fecha de factura. En Sage el sí/no
+  # se guarda como -1, no como 1.
+  $porFactura = Consultar $servidorBueno (Sql-Ventas "FechaFactura" "and a.StatusFacturado = -1" $desdeSql $hastaSql)
+
+  $ventas = @()
+  $ventas += Filas-Venta $porAlbaran "albaran"
+  $ventas += Filas-Venta $porFactura "factura"
+
+  $etiqueta = "$($cursor.ToString('yyyy-MM-dd')) a $($corte.AddDays(-1).ToString('yyyy-MM-dd'))"
+  $bloques++
+
+  $envio = [PSCustomObject]@{
+    coveredFrom = $cursor.ToString("yyyy-MM-dd")
+    coveredTo   = $corte.AddDays(-1).ToString("yyyy-MM-dd")
+    companies   = $sociedades
+    reps        = $vendedores
+    sales       = $ventas
+  }
+
+  if ($SoloProbar) {
+    $muestra = Join-Path (Split-Path -Parent $Registro) "agente-sage-muestra.json"
+    $envio | ConvertTo-Json -Depth 6 | Set-Content -Path $muestra -Encoding UTF8
+    Apuntar "prueba: no se ha enviado nada. Lo del bloque $etiqueta esta en $muestra"
+    exit 0
+  }
+
+  try {
+    $json = $envio | ConvertTo-Json -Depth 6 -Compress
+    # El cuerpo va como UTF-8 explícito: con acentos, dejarlo al azar rompe los
+    # nombres de las sociedades.
+    $cuerpo = [System.Text.Encoding]::UTF8.GetBytes($json)
+    $respuesta = Invoke-RestMethod -Uri $Destino -Method Post -Body $cuerpo `
+      -ContentType "application/json; charset=utf-8" `
+      -Headers @{ Authorization = "Bearer $Token" } `
+      -TimeoutSec 300
+    $totalEnviado += [int]$respuesta.rowsWritten
+    Apuntar "  $etiqueta -> $($respuesta.rowsWritten) filas ($($ventas.Count) enviadas)"
+  } catch {
+    Apuntar "ERROR al enviar el bloque $etiqueta : $($_.Exception.Message)"
+    if ($_.ErrorDetails -and $_.ErrorDetails.Message) { Apuntar "respuesta: $($_.ErrorDetails.Message)" }
+    exit 1
+  }
+
+  $cursor = $corte
 }
 
-if ($SoloProbar) {
-  $muestra = Join-Path (Split-Path -Parent $Registro) "agente-sage-muestra.json"
-  $envio | ConvertTo-Json -Depth 6 | Set-Content -Path $muestra -Encoding UTF8
-  Apuntar "prueba: no se ha enviado nada. Lo que se mandaria esta en $muestra"
-  exit 0
-}
+Apuntar "enviado correctamente: $totalEnviado filas guardadas en $bloques bloque(s)"
+exit 0
 
-# ---------------------------------------------------------------------------
-# Enviar
-# ---------------------------------------------------------------------------
-try {
-  $json = $envio | ConvertTo-Json -Depth 6 -Compress
-  # El cuerpo va como UTF-8 explícito: con acentos, dejarlo al azar rompe los
-  # nombres de las sociedades.
-  $cuerpo = [System.Text.Encoding]::UTF8.GetBytes($json)
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  $respuesta = Invoke-RestMethod -Uri $Destino -Method Post -Body $cuerpo `
-    -ContentType "application/json; charset=utf-8" `
-    -Headers @{ Authorization = "Bearer $Token" } `
-    -TimeoutSec 180
-  Apuntar "enviado correctamente: $($respuesta.rowsWritten) filas guardadas"
-} catch {
-  Apuntar "ERROR al enviar: $($_.Exception.Message)"
-  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { Apuntar "respuesta: $($_.ErrorDetails.Message)" }
-  exit 1
-}
