@@ -136,8 +136,14 @@ if ($servidorBueno -eq "") {
 }
 Apuntar "conectado a $servidorBueno"
 
+# Dos formatos para las mismas fechas. El de SQL Server va sin guiones y se
+# convierte con el estilo 112: con guiones, un servidor configurado en español
+# lee "2026-09-17" como día 2026 y revienta. El otro, con guiones, es el que
+# entiende el Hub.
 $desde = (Get-Date).AddDays(-$Dias).ToString("yyyy-MM-dd")
 $hasta = (Get-Date).AddDays(1).ToString("yyyy-MM-dd")
+$desdeSql = (Get-Date).AddDays(-$Dias).ToString("yyyyMMdd")
+$hastaSql = (Get-Date).AddDays(1).ToString("yyyyMMdd")
 $excluidas = $EmpresasExcluidas -join ", "
 
 # ---------------------------------------------------------------------------
@@ -195,7 +201,7 @@ select
   sum(isnull(a.ImporteCoste, 0))               as Coste,
   sum(isnull(a.TotalCuotaIva, 0))              as Iva
 from CabeceraAlbaranCliente a
-where a.$campoFecha >= '$desde' and a.$campoFecha < '$hasta'
+where a.$campoFecha >= convert(datetime, '$desdeSql', 112) and a.$campoFecha < convert(datetime, '$hastaSql', 112)
   and a.CodigoEmpresa not in ($excluidas)
   $filtro
 group by
