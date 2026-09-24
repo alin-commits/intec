@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { Modal } from "@/components/ui/modal";
+import { Toast } from "@/components/ui/toast";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
 import { CheckCircleIcon, ClockIcon, KeyIcon, RefreshIcon, XCircleIcon } from "@/components/icons";
 import { VaultTabs } from "@/components/vault/vault-tabs";
 import { formatDate } from "@/lib/format";
+import { DEFAULT_GENERATOR, generatePassword, passwordStrength } from "@/lib/vault/password-generator";
 
 type HealthItem = { id: string; name: string; folder: string };
 type HealthPayload = {
@@ -26,6 +30,14 @@ type HealthPayload = {
 export function VaultHealthView() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  /** Credential being fixed: the new password is only in memory until it is saved. */
+  const [fixing, setFixing] = useState<{ entry: HealthItem; password: string; changedOutside: boolean } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const reload = useCallback(() => setReloadTick((tick) => tick + 1), []);
 
   useEffect(() => {
     let active = true;
@@ -37,7 +49,31 @@ export function VaultHealthView() {
       else setHealth(payload);
     })();
     return () => { active = false; };
-  }, []);
+  }, [reloadTick]);
+
+  function startFix(entry: HealthItem) {
+    setFixing({ entry, password: generatePassword(DEFAULT_GENERATOR), changedOutside: false });
+  }
+
+  async function saveNewPassword() {
+    if (!fixing) return;
+    setBusy(true);
+    const response = await fetch(`/api/vault/entries/${fixing.entry.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: fixing.password }),
+    });
+    setBusy(false);
+    setConfirming(false);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      setMessage(payload.error ?? "No se pudo guardar la nueva contraseña.");
+      return;
+    }
+    setMessage(`Contraseña de «${fixing.entry.name}» actualizada en el gestor.`);
+    setFixing(null);
+    reload();
+  }
 
   const strengthItems = useMemo<DonutItem[]>(() => {
     if (!health) return [];
@@ -97,7 +133,7 @@ export function VaultHealthView() {
 
       <section className="panel table-panel">
         <div className="panel-heading">
-          <div><h2>Contraseñas repetidas</h2><p className="panel-subtitle">{health.reused.length} grupos comparten contraseña</p></div>
+          <div><h2>Contraseñas repetidas</h2><p className="panel-subtitle">{health.reused.length} grupos comparten contraseña · pulsa una para abrirla</p></div>
         </div>
         {health.reused.length === 0 ? (
           <p className="muted"><CheckCircleIcon /> Ninguna contraseña se repite. Bien.</p>
@@ -111,7 +147,12 @@ export function VaultHealthView() {
                     <td>
                       <div className="vault-health-group">
                         {group.entries.map((entry) => (
-                          <span key={entry.id} className="vault-health-chip"><strong>{entry.name}</strong><small>{entry.folder}</small></span>
+                          <span key={entry.id} className="vault-health-chip-wrap">
+                            <Link href={`/contrasenas?entry=${entry.id}`} className="vault-health-chip" title={`Abrir ${entry.name}`}>
+                              <strong>{entry.name}</strong><small>{entry.folder}</small>
+                            </Link>
+                            <button type="button" className="vault-health-fix" onClick={() => startFix(entry)} title={`Cambiar la contraseña de ${entry.name}`}>Cambiar</button>
+                          </span>
                         ))}
                       </div>
                     </td>
@@ -126,17 +167,21 @@ export function VaultHealthView() {
 
       <section className="panel table-panel">
         <div className="panel-heading">
-          <div><h2>Contraseñas débiles</h2><p className="panel-subtitle">Cortas o poco variadas</p></div>
+          <div><h2>Contraseñas débiles</h2><p className="panel-subtitle">Cortas o poco variadas · pulsa una para abrirla</p></div>
         </div>
         {health.weak.length === 0 ? (
           <p className="muted"><CheckCircleIcon /> Ninguna contraseña débil.</p>
         ) : (
           <div className="table-scroll vault-health-scroll">
             <table>
-              <thead><tr><th>Credencial</th><th>Carpeta</th></tr></thead>
+              <thead><tr><th>Credencial</th><th>Carpeta</th><th>Acciones</th></tr></thead>
               <tbody>
                 {health.weak.map((entry) => (
-                  <tr key={entry.id}><td><strong>{entry.name}</strong></td><td className="muted vault-health-folder">{entry.folder}</td></tr>
+                  <tr key={entry.id} className="vault-health-row">
+                    <td><Link href={`/contrasenas?entry=${entry.id}`} className="vault-health-link">{entry.name}</Link></td>
+                    <td className="muted vault-health-folder">{entry.folder}</td>
+                    <td><button type="button" className="button button-compact button-secondary" onClick={() => startFix(entry)}>Cambiar contraseña</button></td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -151,16 +196,70 @@ export function VaultHealthView() {
           </div>
           <div className="table-scroll vault-health-scroll">
             <table>
-              <thead><tr><th>Credencial</th><th>Carpeta</th><th>Último cambio</th></tr></thead>
+              <thead><tr><th>Credencial</th><th>Carpeta</th><th>Último cambio</th><th>Acciones</th></tr></thead>
               <tbody>
                 {health.stale.map((entry) => (
-                  <tr key={entry.id}><td><strong>{entry.name}</strong></td><td className="muted">{entry.folder}</td><td>{formatDate(entry.changedAt)}</td></tr>
+                  <tr key={entry.id} className="vault-health-row">
+                    <td><Link href={`/contrasenas?entry=${entry.id}`} className="vault-health-link">{entry.name}</Link></td>
+                    <td className="muted vault-health-folder">{entry.folder}</td>
+                    <td>{formatDate(entry.changedAt)}</td>
+                    <td><button type="button" className="button button-compact button-secondary" onClick={() => startFix(entry)}>Cambiar contraseña</button></td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </section>
       ) : null}
+      <Toast message={message} onDismiss={() => setMessage(null)} />
+
+      <Modal open={Boolean(fixing)} title="Poner una contraseña nueva" eyebrow={fixing?.entry.name ?? ""} onClose={() => setFixing(null)}>
+        {fixing ? (
+          <div className="vault-fix">
+            <div className="notice">
+              <strong>Ojo: esto solo cambia lo que hay guardado aquí.</strong>
+              <span>Primero cámbiala en el sitio o servicio ({fixing.entry.folder}). Cuando allí funcione la nueva, guárdala en el gestor.</span>
+            </div>
+
+            <label className="vault-fix-field">
+              <span>Contraseña nueva</span>
+              <input value={fixing.password} onChange={(event) => setFixing({ ...fixing, password: event.target.value })} spellCheck={false} autoComplete="new-password" />
+            </label>
+            <div className="vault-fix-actions">
+              <span className={`vault-strength vault-strength-${passwordStrength(fixing.password).level}`}>{passwordStrength(fixing.password).label}</span>
+              <button type="button" className="button button-compact button-secondary" onClick={() => setFixing({ ...fixing, password: generatePassword(DEFAULT_GENERATOR) })}>Generar otra</button>
+              <button type="button" className="button button-compact button-secondary" onClick={() => void navigator.clipboard.writeText(fixing.password).then(() => setMessage("Contraseña nueva copiada."), () => setMessage("Tu navegador no ha permitido copiar."))}>Copiar</button>
+            </div>
+
+            <label className="announcement-email">
+              <input type="checkbox" checked={fixing.changedOutside} onChange={(event) => setFixing({ ...fixing, changedOutside: event.target.checked })} />
+              Ya he cambiado esta contraseña en el servicio y la nueva funciona
+            </label>
+
+            <div className="modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setFixing(null)}>Cancelar</button>
+              <button type="button" className="button button-primary" disabled={!fixing.changedOutside || fixing.password.length < 8} onClick={() => setConfirming(true)}>Guardar en el gestor</button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <ConfirmationDialog
+        open={confirming}
+        title="¿Guardar la contraseña nueva?"
+        confirmLabel="Sí, guardar"
+        busy={busy}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => void saveNewPassword()}
+      >
+        {fixing ? (
+          <div className="confirmation-summary">
+            <span>Credencial</span><strong>{fixing.entry.name}</strong>
+            <span>Carpeta</span><strong>{fixing.entry.folder}</strong>
+            <span>Efecto</span><strong>La contraseña guardada se sustituye por la nueva. La anterior no se podrá recuperar.</strong>
+          </div>
+        ) : null}
+      </ConfirmationDialog>
     </div>
   );
 }

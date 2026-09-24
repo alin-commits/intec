@@ -1110,7 +1110,16 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .vault-health-scroll { max-height: 420px; overflow-y: auto; }
 .vault-health-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
 .vault-health-group { display: flex; flex-wrap: wrap; gap: 6px; }
-.vault-health-chip { display: inline-grid; padding: 5px 10px; border-radius: 9px; background: var(--surface-muted); font-size: 12.5px; }
+.vault-health-chip { display: inline-grid; padding: 6px 11px; border-radius: 9px; background: var(--surface-muted); border: 1px solid transparent; font-size: 12.5px; color: inherit; text-decoration: none; transition: border-color .12s ease, background-color .12s ease; }
+.vault-health-chip:hover { background: var(--primary-soft); border-color: var(--primary); }
+.vault-health-chip:hover strong { color: var(--primary); }
+.vault-health-link { font-weight: 700; color: var(--text); text-decoration: none; }
+.vault-health-link:hover { color: var(--primary); text-decoration: underline; }
+.vault-health-row:hover { background: var(--surface-muted); }
+/* Two columns, the name taking the room it needs and the folder next to it. */
+.vault-health-scroll table { table-layout: fixed; }
+.vault-health-scroll th:first-child { width: 62%; }
+.vault-health-folder { font-size: 12.5px; }
 .vault-health-chip strong { font-size: 12.5px; }
 .vault-health-chip small { color: var(--muted); font-size: 11px; }
 .vault-health-count { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; width: 90px; }
@@ -1162,3 +1171,11 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
   .vault-access-scroll td { border: 0; padding: 3px 0; white-space: normal; }
   .vault-access-scroll { max-height: none; overflow: visible; }
 }
+.vault-health-chip-wrap { display: inline-flex; align-items: stretch; border-radius: 9px; overflow: hidden; background: var(--surface-muted); }
+.vault-health-chip-wrap .vault-health-chip { border-radius: 9px 0 0 9px; }
+.vault-health-fix { border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--primary); font-size: 11.5px; font-weight: 700; padding: 0 10px; cursor: pointer; }
+.vault-health-fix:hover { background: var(--primary-soft); }
+.vault-fix { display: grid; gap: 14px; }
+.vault-fix-field { display: grid; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.vault-fix-field input { min-height: 44px; border: 1px solid var(--border); border-radius: 9px; padding: 0 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; letter-spacing: .02em; }
+.vault-fix-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

@@ -145,6 +145,16 @@ export function VaultManager() {
     return () => { active = false; };
   }, [searchTerm, scope, page, reloadTick]);
 
+  // Arriving from another page with ?entry=<id> opens that credential straight away.
+  useEffect(() => {
+    if (stage !== "ready") return;
+    const requested = new URLSearchParams(window.location.search).get("entry");
+    if (!requested) return;
+    window.history.replaceState(null, "", "/contrasenas");
+    void openDetail(requested);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the vault becomes usable
+  }, [stage]);
+
   // A revealed secret lives in this state and nowhere else, and only for 30 seconds.
   useEffect(() => {
     if (!revealed) return;
