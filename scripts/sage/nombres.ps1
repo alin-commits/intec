@@ -25,11 +25,22 @@ param(
   [string]$Usuario = "",
   [string]$Clave = "",
   [string]$BaseDeDatos = "Sage",
-  [string]$Salida = "$env:USERPROFILE\Desktop\sage-nombres"
+  [string]$Salida = ""
 )
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Data
+
+# El Escritorio de verdad, que con OneDrive no es "$env:USERPROFILE\Desktop"
+# sino una carpeta redirigida. Si aun así no se puede escribir, se deja al lado
+# del propio script, que es donde seguro que hay permiso.
+if ($Salida -eq "") {
+  $escritorio = [Environment]::GetFolderPath('Desktop')
+  if ($escritorio -eq "" -or -not (Test-Path $escritorio)) {
+    $escritorio = Split-Path -Parent $MyInvocation.MyCommand.Path
+  }
+  $Salida = Join-Path $escritorio "sage-nombres"
+}
 
 function Buscar-Instancias {
   $encontradas = @()
@@ -140,6 +151,8 @@ try {
 }
 
 Write-Host ""
-Write-Host "Tambien guardado en: $Salida" -ForegroundColor Green
+Write-Host "=======================================================" -ForegroundColor Green
+Write-Host " Guardado en: $Salida" -ForegroundColor Green
+Write-Host "=======================================================" -ForegroundColor Green
 Write-Host ""
 Read-Host "Pulsa Intro para cerrar"
