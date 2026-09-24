@@ -50,6 +50,7 @@ const pageTitles: Record<string, string> = {
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
   "/tarjetas": "Tarjetas de visita",
+  "/contrasenas": "Gestor de contraseñas",
   "/usuarios": "Usuarios",
 };
 

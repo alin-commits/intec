@@ -97,6 +97,7 @@ export function VaultManager() {
   const [searchTerm, setSearchTerm] = useState("");
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [page, setPage] = useState(0);
+  const [openFolders, setOpenFolders] = useState<string[]>([]);
   const [reloadTick, setReloadTick] = useState(0);
 
   const [detail, setDetail] = useState<DetailPayload | null>(null);
@@ -238,6 +239,17 @@ export function VaultManager() {
   function selectScope(next: Scope) {
     setScope(next);
     setPage(0);
+  }
+
+  function toggleFolder(name: string) {
+    setOpenFolders((current) => (current.includes(name) ? current.filter((item) => item !== name) : [...current, name]));
+  }
+
+  /** In the list the parent is already known from the tree, so only the leaf is shown. */
+  function shortFolder(id: string | null): string {
+    const full = categoryName(id);
+    const parts = full.split(" / ");
+    return parts[parts.length - 1];
   }
 
   // ---------- actions ----------
@@ -453,10 +465,6 @@ export function VaultManager() {
 
       <div className="vault-layout">
         <aside className="panel vault-tree">
-          <label className="search-field vault-search">
-            <SearchIcon />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar credencial…" aria-label="Buscar credencial" />
-          </label>
           <ul className="vault-tree-list">
             <li><button type="button" className={scope.kind === "all" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "all" })}>Todas<span>{data?.visibleTotal ?? 0}</span></button></li>
             <li><button type="button" className={scope.kind === "favorites" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "favorites" })}>★ Favoritas<span>{favorites.size}</span></button></li>
@@ -467,15 +475,22 @@ export function VaultManager() {
           <ul className="vault-tree-list">
             {tree.map((node) => (
               <li key={node.name}>
-                <button
-                  type="button"
-                  className={scope.kind === "category" && scope.id === node.category?.id ? "vault-tree-item active" : "vault-tree-item"}
-                  onClick={() => node.category && selectScope({ kind: "category", id: node.category.id })}
-                  disabled={!node.category}
-                >
-                  {node.name}<span>{node.total}</span>
-                </button>
-                {node.children.length > 0 ? (
+                <div className="vault-tree-row">
+                  {node.children.length > 0 ? (
+                    <button type="button" className="vault-tree-toggle" onClick={() => toggleFolder(node.name)} aria-expanded={openFolders.includes(node.name)} aria-label={openFolders.includes(node.name) ? `Cerrar ${node.name}` : `Abrir ${node.name}`}>
+                      {openFolders.includes(node.name) ? "▾" : "▸"}
+                    </button>
+                  ) : <span className="vault-tree-toggle vault-tree-toggle-empty" />}
+                  <button
+                    type="button"
+                    className={scope.kind === "category" && scope.id === node.category?.id ? "vault-tree-item active" : "vault-tree-item"}
+                    onClick={() => node.category && selectScope({ kind: "category", id: node.category.id })}
+                    disabled={!node.category}
+                  >
+                    {node.name}<span>{node.total}</span>
+                  </button>
+                </div>
+                {node.children.length > 0 && openFolders.includes(node.name) ? (
                   <ul className="vault-tree-children">
                     {node.children.map((child) => (
                       <li key={child.id}>
@@ -495,45 +510,55 @@ export function VaultManager() {
         </aside>
 
         <section className="panel table-panel vault-list">
-          <div className="panel-heading">
+          <div className="panel-heading vault-list-heading">
             <div>
               <h2>{scopeTitle}</h2>
               <p className="panel-subtitle">{searchTerm ? `Resultados de «${searchTerm}»` : `${data?.total ?? 0} credenciales`}</p>
             </div>
-            {isVaultAdmin && scope.kind === "category" && scope.id ? (
-              <button type="button" className="button button-compact button-secondary" onClick={() => void openFolderAccess(scope.id as string, scopeTitle)}>Quién ve esta carpeta</button>
-            ) : null}
+            <div className="vault-list-tools">
+              <label className="search-field vault-search">
+                <SearchIcon />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar credencial…" aria-label="Buscar credencial" />
+              </label>
+              {isVaultAdmin && scope.kind === "category" && scope.id ? (
+                <button type="button" className="button button-compact button-secondary" onClick={() => void openFolderAccess(scope.id as string, scopeTitle)}>Quién ve esta carpeta</button>
+              ) : null}
+            </div>
           </div>
           <div className="table-scroll">
             <table>
-              <thead><tr><th aria-label="Favorita"></th><th>Credencial</th><th>Usuario</th><th>Carpeta</th><th>Ámbito</th><th>Acciones</th></tr></thead>
+              <thead><tr><th aria-label="Favorita"></th><th>Credencial</th><th>Usuario</th><th>Carpeta</th><th>Acciones</th></tr></thead>
               <tbody>
                 {visibleEntries.map((entry) => (
                   <tr key={entry.id}>
                     <td>
                       <button type="button" className={favorites.has(entry.id) ? "vault-star active" : "vault-star"} onClick={() => void toggleFavorite(entry.id)} aria-label={favorites.has(entry.id) ? "Quitar de favoritas" : "Marcar como favorita"} title="Favorita">★</button>
                     </td>
-                    <td>
-                      <strong>{entry.name}</strong>
-                      <small>{entry.strength === "weak" ? <em className="vault-strength vault-strength-weak">Contraseña débil</em> : entry.url ? entry.url.replace(/^https?:\/\//, "").slice(0, 44) : "—"}</small>
+                    <td className="vault-name-cell">
+                      <div className="vault-cell">
+                      <strong title={entry.name}>{entry.name}</strong>
+                      {entry.visibility !== "shared" ? <span className={entry.visibility === "personal" ? "badge badge-offer_sent" : "badge badge-lost"}>{visibilityLabels[entry.visibility]}</span> : null}
+                      {entry.strength === "weak" ? <span className="vault-strength vault-strength-weak">Débil</span> : null}
+                      </div>
                     </td>
-                    <td className="vault-user-cell">
-                      {entry.username || "—"}
-                      {entry.username ? <button type="button" className="button button-compact button-secondary" onClick={() => void copyText(entry.username as string, "Usuario")}>Copiar</button> : null}
+                    <td className="vault-user-cell" title={entry.username ?? ""}>
+                      <div className="vault-cell">
+                        <span>{entry.username || "—"}</span>
+                        {entry.username ? <button type="button" className="vault-icon-button" onClick={() => void copyText(entry.username as string, "Usuario")} title="Copiar usuario" aria-label={`Copiar el usuario de ${entry.name}`}>⧉</button> : null}
+                      </div>
                     </td>
-                    <td>{categoryName(entry.categoryId)}</td>
-                    <td><span className={entry.visibility === "personal" ? "badge badge-offer_sent" : entry.visibility === "restricted" ? "badge badge-lost" : "badge"}>{visibilityLabels[entry.visibility]}</span></td>
+                    <td className="vault-folder-cell" title={categoryName(entry.categoryId)}>{shortFolder(entry.categoryId)}</td>
                     <td>
-                      <div className="table-actions">
-                        <button type="button" className="button button-compact button-primary" onClick={() => void copySecret(entry.id)}>Copiar clave</button>
-                        {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer">Abrir web</a> : null}
+                      <div className="table-actions vault-row-actions">
+                        <button type="button" className="button button-compact button-primary" onClick={() => void copySecret(entry.id)} title="Copiar la contraseña">Copiar</button>
+                        {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer" title="Abrir la web">Abrir</a> : null}
                         <button type="button" className="button button-compact button-secondary" onClick={() => void openDetail(entry.id)}>Ver</button>
                       </div>
                     </td>
                   </tr>
                 ))}
                 {visibleEntries.length === 0 ? (
-                  <tr><td colSpan={6} className="muted">{searchTerm ? "Ninguna credencial coincide con la búsqueda." : "No hay credenciales en esta carpeta."}</td></tr>
+                  <tr><td colSpan={5} className="muted">{searchTerm ? "Ninguna credencial coincide con la búsqueda." : "No hay credenciales en esta carpeta."}</td></tr>
                 ) : null}
               </tbody>
             </table>
