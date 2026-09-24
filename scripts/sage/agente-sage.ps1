@@ -199,7 +199,10 @@ select
   count(*)                                     as Documentos,
   sum(isnull(a.BaseImponible, 0))              as Neto,
   sum(isnull(a.ImporteCoste, 0))               as Coste,
-  sum(isnull(a.TotalCuotaIva, 0))              as Iva
+  sum(isnull(a.TotalCuotaIva, 0))              as Iva,
+  -- La venta cuyos albaranes no llevan coste: si se contara como si no
+  -- costara nada, el margen saldría más alto de lo que es.
+  sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste
 from CabeceraAlbaranCliente a
 where a.$campoFecha >= convert(datetime, '$desdeSql', 112) and a.$campoFecha < convert(datetime, '$hastaSql', 112)
   and a.CodigoEmpresa not in ($excluidas)
@@ -235,6 +238,7 @@ function Filas-Venta($tabla, $base) {
       netAmount   = [double]$fila["Neto"]
       costAmount  = [double]$fila["Coste"]
       vatAmount   = [double]$fila["Iva"]
+      netWithoutCost = [double]$fila["NetoSinCoste"]
     }
   }
   return $lista

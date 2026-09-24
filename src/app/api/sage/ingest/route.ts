@@ -29,6 +29,9 @@ const salesRow = z.object({
   netAmount: amount,
   costAmount: amount,
   vatAmount: amount,
+  /** Parte de netAmount sin coste grabado. Por defecto cero, para que un agente
+      antiguo que todavía no lo manda siga funcionando. */
+  netWithoutCost: amount.default(0),
 });
 
 const bodySchema = z.object({
@@ -130,6 +133,7 @@ export async function POST(request: Request) {
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       vat_amount: row.vatAmount,
+      net_without_cost: row.netWithoutCost,
     }));
     const { error } = await admin.from("sage_sales_daily").insert(chunk);
     if (error) return fail(`No se pudieron guardar las ventas: ${error.message}`, 500);
