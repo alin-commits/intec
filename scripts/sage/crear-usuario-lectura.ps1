@@ -34,6 +34,12 @@ param(
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Data
 
+# Una variable recién puesta con setx no existe en la consola donde se escribió,
+# solo en las que se abran después. Así que si no está en el entorno, se lee
+# directamente de donde setx la dejó guardada y nos ahorramos reabrir la ventana.
+if ([string]::IsNullOrWhiteSpace($Cuenta)) { $Cuenta = [Environment]::GetEnvironmentVariable("INTEC_SAGE_DB_USER", "Machine") }
+if ([string]::IsNullOrWhiteSpace($Contrasena)) { $Contrasena = [Environment]::GetEnvironmentVariable("INTEC_SAGE_DB_PASSWORD", "Machine") }
+
 if ([string]::IsNullOrWhiteSpace($Cuenta) -or [string]::IsNullOrWhiteSpace($Contrasena)) {
   Write-Host ""
   Write-Host "Faltan las variables del sistema. Ponlas primero, como administrador:" -ForegroundColor Red

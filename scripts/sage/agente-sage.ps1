@@ -55,6 +55,12 @@ param(
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Data
 
+# Lo mismo que en el script de alta: una variable recién puesta con setx no
+# existe en la consola donde se escribió. Se lee de donde quedó guardada.
+if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironmentVariable("INTEC_SAGE_TOKEN", "Machine") }
+if ([string]::IsNullOrWhiteSpace($Usuario)) { $Usuario = [Environment]::GetEnvironmentVariable("INTEC_SAGE_DB_USER", "Machine") }
+if ([string]::IsNullOrWhiteSpace($Clave)) { $Clave = [Environment]::GetEnvironmentVariable("INTEC_SAGE_DB_PASSWORD", "Machine") }
+
 if ($Registro -eq "") {
   $Registro = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "agente-sage.log"
 }
