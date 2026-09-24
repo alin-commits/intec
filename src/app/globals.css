@@ -1091,7 +1091,7 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
   /* minmax(0, …) so the track can shrink below the table content width. */
   .vault-layout { grid-template-columns: minmax(0, 1fr); height: auto; }
   .vault-tree { max-height: 240px; }
-  .vault-list .table-scroll { overflow-x: hidden; overflow-y: visible; }
+  .vault-list .table-scroll { overflow-x: visible; overflow-y: visible; margin: 0; padding: 0; }
   /* Cards instead of a table: each credential becomes its own block. */
   .vault-list table, .vault-list tbody, .vault-list tr, .vault-list td { display: block; width: auto; }
   .vault-list thead { display: none; }
@@ -1119,3 +1119,46 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .vault-audit-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
 .vault-audit-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .view-tabs a.view-tab { text-decoration: none; }
+.vault-access-picker { display: grid; gap: 8px; }
+.vault-access-title { color: var(--muted); font-size: 12px; font-weight: 700; }
+.vault-access-picker .announcement-people { max-height: 180px; }
+
+/* Gestor de contraseñas en móvil: nada de tablas cortadas ni letra diminuta */
+@media (max-width: 600px) {
+  .kpi-footer, .kpi-footer span { font-size: 12px; }
+  .panel-subtitle { font-size: 12.5px; }
+  .badge { font-size: 11.5px; }
+  .search-group-title, .vault-tree-title { font-size: 11.5px; }
+  th { font-size: 11.5px; }
+  /* Zonas de toque cómodas para el dedo */
+  .notice-clear-all, .vault-link-button { min-height: 34px; padding: 6px 8px; }
+  .vault-detail a, .vault-detail .text-link { display: inline-block; min-height: 32px; line-height: 32px; }
+  .vault-tree-item { padding: 10px 8px; }
+  .vault-tree-toggle { width: 30px; height: 34px; }
+
+  /* Las tablas de salud y auditoría se convierten en tarjetas */
+  .vault-health-scroll table, .vault-health-scroll tbody, .vault-health-scroll tr, .vault-health-scroll td,
+  .vault-audit-scroll table, .vault-audit-scroll tbody, .vault-audit-scroll tr, .vault-audit-scroll td { display: block; width: auto; }
+  .vault-health-scroll thead, .vault-audit-scroll thead { display: none; }
+  .vault-health-scroll tr, .vault-audit-scroll tr { position: relative; border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .vault-health-scroll td, .vault-audit-scroll td { border: 0; padding: 2px 0; white-space: normal; }
+  .vault-health-count { position: absolute; top: 10px; right: 12px; width: auto; font-size: 15px; }
+  .vault-health-chip { width: 100%; }
+  .vault-audit-when { color: var(--muted); font-size: 12px; }
+  .vault-health-chip small, .vault-strength, .eyebrow { font-size: 11.5px; }
+  .vault-health-scroll, .vault-audit-scroll { max-height: none; overflow: visible; }
+  /* Sin el ancho mínimo global, que aquí las tablas ya son tarjetas. */
+  .vault-list table, .vault-health-scroll table, .vault-audit-scroll table, .vault-access-scroll table { min-width: 0; }
+}
+.vault-access-scroll { max-height: 60vh; overflow-y: auto; }
+.vault-access-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.vault-access-count { font-variant-numeric: tabular-nums; font-weight: 700; }
+.vault-access-people { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vault-access-chip { padding: 3px 9px; border-radius: 999px; background: var(--surface-muted); font-size: 12px; }
+@media (max-width: 600px) {
+  .vault-access-scroll table, .vault-access-scroll tbody, .vault-access-scroll tr, .vault-access-scroll td { display: block; width: auto; }
+  .vault-access-scroll thead { display: none; }
+  .vault-access-scroll tr { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .vault-access-scroll td { border: 0; padding: 3px 0; white-space: normal; }
+  .vault-access-scroll { max-height: none; overflow: visible; }
+}

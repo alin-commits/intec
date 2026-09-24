@@ -136,7 +136,7 @@ export function VaultHealthView() {
               <thead><tr><th>Credencial</th><th>Carpeta</th></tr></thead>
               <tbody>
                 {health.weak.map((entry) => (
-                  <tr key={entry.id}><td><strong>{entry.name}</strong></td><td className="muted">{entry.folder}</td></tr>
+                  <tr key={entry.id}><td><strong>{entry.name}</strong></td><td className="muted vault-health-folder">{entry.folder}</td></tr>
                 ))}
               </tbody>
             </table>

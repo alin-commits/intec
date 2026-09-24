@@ -81,6 +81,9 @@ export function VaultManager() {
   const [draft, setDraft] = useState<EntryDraft>(blankDraft);
   const [generator, setGenerator] = useState<GeneratorOptions>(DEFAULT_GENERATOR);
   const [generatorOpen, setGeneratorOpen] = useState(false);
+  /** Who will have access when the credential is restricted, and who had it before. */
+  const [accessUserIds, setAccessUserIds] = useState<string[]>([]);
+  const [baselineAccess, setBaselineAccess] = useState<string[]>([]);
   const [revealed, setRevealed] = useState<{ entryId: string; field: "password" | "notes"; value: string; seconds: number } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<VaultEntrySummary | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -267,9 +270,12 @@ export function VaultManager() {
   function openNew() {
     setEditingId(null);
     setDraft({ ...blankDraft(), categoryId: scope.kind === "category" ? scope.id ?? "" : "" });
+    setAccessUserIds([]);
+    setBaselineAccess([]);
     setError(null);
     setGeneratorOpen(false);
     setEditorOpen(true);
+    void loadTeam();
   }
 
   function openEdit(entry: VaultEntrySummary) {
@@ -283,7 +289,11 @@ export function VaultManager() {
       categoryId: entry.categoryId ?? "",
       visibility: entry.visibility,
     });
+    const current = (detail?.entry.id === entry.id ? detail.sharedWith : []).map((permission) => permission.userId);
+    setAccessUserIds(current);
+    setBaselineAccess(current);
     setError(null);
+    void loadTeam();
     setGeneratorOpen(false);
     setEditorOpen(true);
   }
@@ -303,14 +313,30 @@ export function VaultManager() {
     if (draft.password) body.password = draft.password;
     if (draft.notes) body.notes = draft.notes;
     const result = editingId
-      ? await vaultRequest(`/api/vault/entries/${editingId}`, { method: "PATCH", body: JSON.stringify(body) })
-      : await vaultRequest("/api/vault/entries", { method: "POST", body: JSON.stringify({ ...body, password: draft.password }) });
-    setBusy(false);
+      ? await vaultRequest<{ ok: boolean }>(`/api/vault/entries/${editingId}`, { method: "PATCH", body: JSON.stringify(body) })
+      : await vaultRequest<{ entry: VaultEntrySummary }>("/api/vault/entries", { method: "POST", body: JSON.stringify({ ...body, password: draft.password }) });
     if (!result.ok) {
+      setBusy(false);
       if (result.lock) return handleLock(result.lock);
       setError(result.error);
       return;
     }
+
+    // Apply the access list of a restricted credential: what was added and what was taken away.
+    const entryId = editingId ?? (result.data as { entry?: VaultEntrySummary }).entry?.id;
+    if (entryId) {
+      const wanted = draft.visibility === "restricted" ? accessUserIds : [];
+      for (const userId of wanted.filter((id) => !baselineAccess.includes(id))) {
+        await vaultRequest(`/api/vault/entries/${entryId}/permissions`, {
+          method: "POST",
+          body: JSON.stringify({ userId, canView: true, canEdit: false, canDelete: false, canManagePermissions: false }),
+        });
+      }
+      for (const userId of baselineAccess.filter((id) => !wanted.includes(id))) {
+        await vaultRequest(`/api/vault/entries/${entryId}/permissions?userId=${userId}`, { method: "DELETE" });
+      }
+    }
+    setBusy(false);
     setEditorOpen(false);
     setMessage(editingId ? "Credencial actualizada." : "Credencial guardada.");
     if (editingId && detail?.entry.id === editingId) await openDetail(editingId);
@@ -599,6 +625,25 @@ export function VaultManager() {
               <option value="personal">Personal (solo yo)</option>
               <option value="restricted">Restringida (solo a quien le dé acceso)</option>
             </select></label>
+            {draft.visibility === "restricted" ? (
+              <div className="form-field-wide vault-access-picker">
+                <span className="vault-access-title">¿Quién puede verla? {accessUserIds.length ? <strong>({accessUserIds.length})</strong> : null}</span>
+                <div className="announcement-people">
+                  {team.filter((member) => member.id !== userId).map((member) => (
+                    <label key={member.id} className="announcement-person">
+                      <input
+                        type="checkbox"
+                        checked={accessUserIds.includes(member.id)}
+                        onChange={() => setAccessUserIds((current) => (current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id]))}
+                      />
+                      <span>{member.fullName}</span>
+                    </label>
+                  ))}
+                  {team.length === 0 ? <p className="muted">Cargando el equipo…</p> : null}
+                </div>
+                <p className="muted invoice-hint">Tú siempre la ves, por ser quien la crea. Los administradores del gestor también.</p>
+              </div>
+            ) : null}
             <label className="form-field-wide">
               <span>{editingId ? "Notas (vacío = no cambiar)" : "Notas"}</span>
               <textarea rows={3} value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} placeholder="Datos de acceso adicionales, contacto del proveedor…" />

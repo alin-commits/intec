@@ -28,6 +28,7 @@ export function VaultTabs() {
   const tabs = [
     { href: "/contrasenas", label: "Gestor", adminOnly: false },
     { href: "/contrasenas/salud", label: "Salud", adminOnly: true },
+    { href: "/contrasenas/accesos", label: "Accesos", adminOnly: true },
     { href: "/contrasenas/auditoria", label: "Auditoría", adminOnly: true },
   ].filter((tab) => !tab.adminOnly || isVaultAdmin);
 

@@ -51,6 +51,7 @@ const pageTitles: Record<string, string> = {
   "/tickets": "Tickets informáticos",
   "/tarjetas": "Tarjetas de visita",
   "/contrasenas/salud": "Salud del gestor",
+  "/contrasenas/accesos": "Accesos al gestor",
   "/contrasenas/auditoria": "Auditoría del gestor",
   "/contrasenas": "Gestor de contraseñas",
   "/usuarios": "Usuarios",
