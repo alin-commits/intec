@@ -64,6 +64,8 @@ export function SalesDashboardView() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
   const [lastRun, setLastRun] = useState<SyncRun | null>(null);
+  /** True cuando se compara contra el mismo tramo del año anterior, no el año entero. */
+  const [comparisonIsPartial, setComparisonIsPartial] = useState(false);
 
   // Quién entra y qué años hay con datos. Solo una vez.
   useEffect(() => {
@@ -107,11 +109,22 @@ export function SalesDashboardView() {
     void (async () => {
       try {
         const supabase = createClient();
+        // Un año en curso se compara contra el mismo tramo del anterior, no
+        // contra el año entero: si no, en septiembre siempre parecería que se
+        // ha vendido un 30 % menos.
+        const today = new Date();
+        const partial = year === today.getFullYear();
+        const sameDay = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
         const [{ data: current }, { data: before }] = await Promise.all([
           supabase.rpc("sage_sales_summary", { p_from: `${year}-01-01`, p_to: `${year}-12-31`, p_basis: basis }),
-          supabase.rpc("sage_sales_summary", { p_from: `${year - 1}-01-01`, p_to: `${year - 1}-12-31`, p_basis: basis }),
+          supabase.rpc("sage_sales_summary", {
+            p_from: `${year - 1}-01-01`,
+            p_to: partial ? `${year - 1}-${sameDay}` : `${year - 1}-12-31`,
+            p_basis: basis,
+          }),
         ]);
         if (!active) return;
+        setComparisonIsPartial(partial);
         setRows((current ?? []) as SummaryRow[]);
         setPreviousRows((before ?? []) as SummaryRow[]);
       } catch (cause) {
@@ -156,6 +169,12 @@ export function SalesDashboardView() {
   const costedNet = current.net - current.withoutCost;
   const reliableMargin = costedNet > 0 ? ((costedNet - current.cost) / costedNet) * 100 : 0;
   const withoutCostShare = current.net > 0 ? (current.withoutCost / current.net) * 100 : 0;
+  /**
+   * Una empresa que vende no tiene un margen negativo en todo un año: si sale,
+   * es que el coste que graba Sage no significa lo mismo en ese periodo. Antes
+   * de enseñar una cifra que diría que se pierde dinero, se avisa.
+   */
+  const marginIsBroken = current.net > 0 && reliableMargin < 0;
 
   const monthly = useMemo(() => {
     const map = new Map<string, { net: number; cost: number }>();
@@ -203,7 +222,7 @@ export function SalesDashboardView() {
       entry.documents += Number(row.documents);
       map.set(key, entry);
     }
-    return [...map.values()].sort((a, b) => b.net - a.net);
+    return [...map].map(([key, value]) => ({ key, ...value })).sort((a, b) => b.net - a.net);
   }, [visible, reps]);
 
   const byChannel = useMemo(() => {
@@ -259,6 +278,7 @@ export function SalesDashboardView() {
   }
 
   const isCurrentYear = year === new Date().getFullYear();
+  const comparisonHelper = comparisonIsPartial ? `frente al mismo tramo de ${year - 1}` : `frente a ${year - 1}`;
   const companyLabel = companyCode === "all" ? "todas las sociedades" : byCompany.find((item) => item.code === companyCode)?.name ?? "";
 
   return (
@@ -301,23 +321,24 @@ export function SalesDashboardView() {
         <KpiCard
           label="Ventas"
           value={currencyFormatter.format(current.net)}
-          helper={`frente a ${year - 1}`}
+          helper={comparisonHelper}
           icon={<EuroIcon />}
           tone="indigo"
           {...delta(variation(current.net, previous.net))}
         />
         <KpiCard
           label="Margen"
-          value={currencyFormatter.format(costedNet - current.cost)}
-          helper={`${formatPercent(reliableMargin)} sobre lo que tiene coste`}
+          value={marginIsBroken ? "No fiable" : currencyFormatter.format(costedNet - current.cost)}
+          helper={marginIsBroken ? "el coste de Sage no cuadra en este periodo" : `${formatPercent(reliableMargin)} sobre lo que tiene coste`}
           icon={<ConversionIcon />}
-          tone="emerald"
-          {...delta(variation(current.net - current.cost, previous.net - previous.cost))}
+          tone={marginIsBroken ? "rose" : "emerald"}
+          delta={marginIsBroken ? "Sin comparación" : delta(variation(current.net - current.cost, previous.net - previous.cost)).delta}
+          positive={marginIsBroken ? false : delta(variation(current.net - current.cost, previous.net - previous.cost)).positive}
         />
         <KpiCard
           label="Albaranes"
           value={numberFormatter.format(current.documents)}
-          helper={`frente a ${year - 1}`}
+          helper={comparisonHelper}
           icon={<ConsultasIcon />}
           tone="sky"
           {...delta(variation(current.documents, previous.documents))}
@@ -332,7 +353,20 @@ export function SalesDashboardView() {
         />
       </section>
 
-      {current.withoutCost > 0 ? (
+      {marginIsBroken ? (
+        <section className="panel sales-broken">
+          <div>
+            <strong>El margen de este periodo no se puede calcular</strong>
+            <span>
+              El coste que Sage guarda en estos albaranes suma más que la propia venta, lo que daría un margen
+              negativo imposible. No es que se haya perdido dinero: es que ese campo no significa lo mismo en todos
+              los años. Está en revisión, y hasta entonces aquí no se enseña ninguna cifra de margen.
+            </span>
+          </div>
+        </section>
+      ) : null}
+
+      {!marginIsBroken && current.withoutCost > 0 ? (
         <section className="panel sales-warning">
           <div>
             <strong>{currencyFormatter.format(current.withoutCost)} de venta no tienen coste grabado en Sage</strong>
@@ -366,7 +400,7 @@ export function SalesDashboardView() {
               <thead><tr><th>Comercial</th><th>Albaranes</th><th>Ventas</th><th>Margen</th></tr></thead>
               <tbody>
                 {byRep.map((rep) => (
-                  <tr key={rep.name} className={rep.assigned ? undefined : "row-muted"}>
+                  <tr key={rep.key} className={rep.assigned ? undefined : "row-muted"}>
                     <td><strong>{rep.name}</strong></td>
                     <td>{numberFormatter.format(rep.documents)}</td>
                     <td>{currencyFormatter.format(rep.net)}</td>

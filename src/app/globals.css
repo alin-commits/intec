@@ -1270,3 +1270,6 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sales-warning span { display: block; margin-top: 4px; color: #6b5a33; font-size: 13.5px; line-height: 1.55; }
 .sales-footnote { padding: 14px 18px; }
 .sales-footnote p { margin: 0; font-size: 12.5px; line-height: 1.55; }
+.sales-broken { padding: 16px 18px; border-color: #f0b1b4; background: linear-gradient(90deg, #fdeaeb, #fff 70%); }
+.sales-broken strong { display: block; font-size: 15px; color: #8c1d22; }
+.sales-broken span { display: block; margin-top: 4px; color: #6f3438; font-size: 13.5px; line-height: 1.55; }
