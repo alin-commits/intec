@@ -9,12 +9,14 @@ type SendEmailInput = {
   to: string | string[];
   subject: string;
   html: string;
+  /** Otro remitente del mismo dominio verificado. Sin esto se usa el general. */
+  from?: string;
   attachments?: { filename: string; content: Buffer }[];
 };
 
-export async function sendEmail({ to, subject, html, attachments }: SendEmailInput): Promise<boolean> {
+export async function sendEmail({ to, subject, html, from: sender, attachments }: SendEmailInput): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
+  const from = sender?.trim() || process.env.EMAIL_FROM;
   if (!apiKey || !from) return false;
 
   const resend = new Resend(apiKey);

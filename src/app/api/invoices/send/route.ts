@@ -20,6 +20,15 @@ function recipient(): string {
   return process.env.INVOICE_EMAIL_TO?.trim() || DEFAULT_RECIPIENT;
 }
 
+/**
+ * Outlook manda a "Otros" casi todo lo que viene de un no-reply, así que estos
+ * correos pueden salir desde una dirección de verdad. Cualquiera del dominio
+ * verificado vale; sin configurar nada se usa el remitente general.
+ */
+function sender(): string | undefined {
+  return process.env.INVOICE_EMAIL_FROM?.trim() || undefined;
+}
+
 /** Para que la pantalla pueda decir a dónde va la factura antes de mandarla. */
 export async function GET() {
   const supabase = await createClient();
@@ -95,6 +104,7 @@ export async function POST(request: Request) {
   const to = recipient();
   const sent = await sendEmail({
     to,
+    from: sender(),
     subject,
     html,
     attachments: [{ filename: fileName, content: Buffer.from(await file.arrayBuffer()) }],
