@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { encryptSecret } from "@/lib/security/vault-key";
-import { guardVault, logVault, vaultError } from "@/lib/vault/server";
+import { encryptSecret, fingerprintSecret } from "@/lib/security/vault-key";
+import { guardVault, logVault, passwordMetadata, vaultError } from "@/lib/vault/server";
 import { createEntrySchema } from "@/lib/vault/validation";
 import { mapVaultEntry, VAULT_ENTRY_COLUMNS } from "@/lib/vault/types";
 import { sanitizeSearchTerm } from "@/lib/search-term";
@@ -30,10 +30,27 @@ export async function GET(request: Request) {
   if (category) query = query.eq("category_id", category);
   if (visibility === "personal") query = query.eq("created_by", guard.userId);
   else if (visibility === "shared") query = query.eq("visibility", "shared");
+  if (url.searchParams.get("uncategorised") === "1") query = query.is("category_id", null);
+  const onlyFavorites = url.searchParams.get("favorites") === "1";
+  if (onlyFavorites) {
+    const { data: favoriteIds } = await guard.supabase.from("vault_favorites").select("vault_entry_id").eq("user_id", guard.userId);
+    query = query.in("id", (favoriteIds ?? []).map((row) => row.vault_entry_id));
+  }
 
-  const [{ data, error, count }, categories] = await Promise.all([
+  const [{ data, error, count }, categories, allVisible, favorites, recentLog] = await Promise.all([
     query,
     guard.supabase.from("vault_categories").select("id, name, description").order("sort_order"),
+    // One column for every entry this person may see: enough to count per folder.
+    guard.supabase.from("vault_entries").select("category_id").eq("is_active", true),
+    guard.supabase.from("vault_favorites").select("vault_entry_id").eq("user_id", guard.userId),
+    guard.admin
+      .from("vault_audit_log")
+      .select("vault_entry_id")
+      .eq("user_id", guard.userId)
+      .in("action", ["PASSWORD_REVEAL", "PASSWORD_COPY"])
+      .not("vault_entry_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(60),
   ]);
   if (error) {
     console.error("No se pudieron listar las credenciales:", error.message);
@@ -42,11 +59,34 @@ export async function GET(request: Request) {
 
   await logVault(guard.admin, { userId: guard.userId, action: "ENTRY_LIST", metadata: { count: data?.length ?? 0, page } });
 
+  const counts = new Map<string, number>();
+  for (const row of allVisible.data ?? []) {
+    const key = row.category_id ? String(row.category_id) : "none";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  // Most recently revealed first, without repeating.
+  const recent: string[] = [];
+  for (const row of recentLog.data ?? []) {
+    const id = String(row.vault_entry_id);
+    if (!recent.includes(id)) recent.push(id);
+    if (recent.length >= 8) break;
+  }
+
   return NextResponse.json(
     {
       entries: (data ?? []).map((row) => mapVaultEntry(row as Record<string, unknown>)),
-      categories: (categories.data ?? []).map((row) => ({ id: row.id, name: row.name, description: row.description })),
+      categories: (categories.data ?? []).map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        count: counts.get(String(row.id)) ?? 0,
+      })),
+      uncategorised: counts.get("none") ?? 0,
+      visibleTotal: allVisible.data?.length ?? 0,
+      favorites: (favorites.data ?? []).map((row) => String(row.vault_entry_id)),
+      recent,
       total: count ?? 0,
+      page,
       pageSize: PAGE_SIZE,
       isVaultAdmin: guard.actor.isVaultAdmin,
     },
@@ -90,6 +130,7 @@ export async function POST(request: Request) {
       tags: input.tags,
       created_by: guard.userId,
       encryption_version: password.version,
+      ...passwordMetadata(input.password, fingerprintSecret(input.password)),
     })
     .select(VAULT_ENTRY_COLUMNS)
     .single();

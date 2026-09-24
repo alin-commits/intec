@@ -19,6 +19,7 @@ export type VaultEntrySummary = {
   createdAt: string;
   updatedAt: string;
   lastPasswordChangeAt: string;
+  strength: "weak" | "fair" | "strong" | null;
 };
 
 export type VaultCategory = { id: string; name: string; description: string | null };
@@ -49,7 +50,7 @@ export type VaultAuditAction =
 export type VaultDeniedReason = "signed_out" | "inactive" | "mfa_enrollment_required" | "mfa_required" | "locked" | "forbidden" | "not_configured" | "rate_limited";
 
 export const VAULT_ENTRY_COLUMNS =
-  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at";
+  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at, password_strength";
 
 export function mapVaultEntry(row: Record<string, unknown>): VaultEntrySummary {
   return {
@@ -67,5 +68,6 @@ export function mapVaultEntry(row: Record<string, unknown>): VaultEntrySummary {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     lastPasswordChangeAt: String(row.last_password_change_at),
+    strength: (row.password_strength as "weak" | "fair" | "strong" | null) ?? null,
   };
 }

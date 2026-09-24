@@ -1026,3 +1026,25 @@ tr.row-muted td { opacity: .6; }
 .vault-audit-table { max-height: 50vh; overflow-y: auto; margin-top: 12px; }
 .vault-audit-table table { font-size: 13px; }
 tr.vault-audit-secret td:nth-child(3) { color: #b45309; font-weight: 700; }
+/* Gestor: árbol de carpetas y utilidades */
+.vault-layout { display: grid; grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.vault-tree { padding: 16px; display: grid; gap: 12px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.vault-search { width: 100%; }
+.vault-tree-title { padding-left: 4px; }
+.vault-tree-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.vault-tree-children { list-style: none; margin: 2px 0 6px; padding-left: 12px; display: grid; gap: 2px; border-left: 1px solid var(--border); }
+.vault-tree-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.vault-tree-item:hover { background: var(--surface-muted); }
+.vault-tree-item.active { background: var(--primary-soft); color: var(--primary); }
+.vault-tree-item span { color: var(--muted); font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vault-tree-item.active span { color: var(--primary); }
+.vault-tree-item:disabled { cursor: default; opacity: .75; }
+.vault-list { padding: 18px; }
+.vault-star { border: 0; background: transparent; color: #cbd5e1; font-size: 17px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.vault-star:hover { color: #f59e0b; }
+.vault-star.active { color: #f59e0b; }
+.vault-user-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vault-health { display: grid; gap: 14px; }
+.vault-health-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; max-height: 32vh; overflow-y: auto; }
+.vault-health-list li { padding: 7px 10px; border-radius: 9px; background: var(--surface-muted); overflow-wrap: anywhere; }
+@media (max-width: 900px) { .vault-layout { grid-template-columns: 1fr; } .vault-tree { position: static; max-height: none; } }

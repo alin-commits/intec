@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { encryptSecret } from "@/lib/security/vault-key";
+import { encryptSecret, fingerprintSecret } from "@/lib/security/vault-key";
 import { canDeleteEntry, canEditEntry, canManagePermissions, canViewEntry } from "@/lib/vault/authorization";
-import { guardVault, loadEntryForActor, logVault, vaultError } from "@/lib/vault/server";
+import { guardVault, loadEntryForActor, logVault, passwordMetadata, vaultError } from "@/lib/vault/server";
 import { mapVaultEntry } from "@/lib/vault/types";
 import { updateEntrySchema } from "@/lib/vault/validation";
 
@@ -97,6 +97,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     patch.password_tag = password.tag;
     patch.encryption_version = password.version;
     patch.last_password_change_at = new Date().toISOString();
+    Object.assign(patch, passwordMetadata(input.password, fingerprintSecret(input.password)));
   }
   if (Object.keys(patch).length === 0) return vaultError("No hay cambios que guardar.", 400);
 

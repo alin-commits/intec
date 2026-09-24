@@ -1,7 +1,7 @@
 // AES-256-GCM for the password vault. Pure functions only (the key is passed in),
 // so they can be unit tested; `vault-key.ts` is what reads the secret from the
 // environment. Standard primitives from Node's crypto — nothing home-made.
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /** Bumped only if the algorithm or key derivation changes, so old rows stay readable. */
 export const VAULT_ENCRYPTION_VERSION = 1;
@@ -78,6 +78,17 @@ export function decryptWithKey(key: Buffer, value: EncryptedValue, field: VaultF
     // The original error can leak details about the key material.
     throw new VaultCryptoError("No se pudo descifrar el dato: la clave o el contenido no son válidos.");
   }
+}
+
+/**
+ * Keyed fingerprint of a password, so the app can say "these two entries share a
+ * password" without storing anything readable. It is an HMAC under a key derived
+ * from the master key: without that key the fingerprint cannot be reversed or
+ * tested against a guessed password.
+ */
+export function passwordFingerprint(key: Buffer, plaintext: string): string {
+  const fingerprintKey = createHmac("sha256", key).update("intec-vault-fingerprint-v1").digest();
+  return createHmac("sha256", fingerprintKey).update(plaintext, "utf8").digest("base64url");
 }
 
 /** Constant-time comparison for secrets that are checked rather than decrypted. */

@@ -33,11 +33,14 @@ export function VaultUnlock({ reason, onUnlocked }: { reason: UnlockReason; onUn
           if (active) setFactor({ kind: "verified", factorId: verified.id });
           return;
         }
-        // A half-finished enrolment cannot show its QR again, so it is replaced.
-        for (const pending of factors?.totp ?? []) await supabase.auth.mfa.unenroll({ factorId: pending.id });
+        // `all` also lists half-finished enrolments, which `totp` hides. They cannot
+        // show their QR again and would block a new one, so they are removed first.
+        const leftovers = (factors?.all ?? []).filter((item) => item.factor_type === "totp");
+        for (const pending of leftovers) await supabase.auth.mfa.unenroll({ factorId: pending.id });
         const { data, error: enrollError } = await supabase.auth.mfa.enroll({
           factorType: "totp",
-          friendlyName: `Intec ${new Date().toLocaleDateString("es-ES")}`,
+          // Unique name: Supabase rejects a second factor with a name already in use.
+          friendlyName: `Intec ${new Date().toISOString().slice(0, 19).replace("T", " ")}`,
         });
         if (enrollError) throw enrollError;
         if (active) setFactor({ kind: "enroll", factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });

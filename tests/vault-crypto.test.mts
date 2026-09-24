@@ -62,3 +62,17 @@ test("empty secrets are rejected and comparisons are length-safe", () => {
   assert.ok(!safeEquals("abc123", "abc124"));
   assert.ok(!safeEquals("abc", "abcd"));
 });
+
+test("the fingerprint spots reuse without revealing anything", async () => {
+  const { passwordFingerprint } = await import("../src/lib/security/vault-crypto.ts");
+  const first = passwordFingerprint(key, "misma-contraseña");
+  const second = passwordFingerprint(key, "misma-contraseña");
+  const other = passwordFingerprint(key, "otra-contraseña");
+  assert.equal(first, second, "la misma contraseña debe dar la misma huella");
+  assert.notEqual(first, other);
+  // With a different master key the fingerprint changes: it cannot be checked from outside.
+  assert.notEqual(first, passwordFingerprint(otherKey, "misma-contraseña"));
+  // And it is a hash: nothing of the password is visible in it.
+  assert.ok(!first.includes("contraseña"));
+  assert.equal(Buffer.from(first, "base64url").length, 32);
+});

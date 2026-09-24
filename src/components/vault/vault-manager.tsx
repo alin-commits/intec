@@ -4,12 +4,11 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
-import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
-import { EyeIcon, RefreshIcon, SearchIcon } from "@/components/icons";
+import { EyeIcon, KeyIcon, RefreshIcon, SearchIcon } from "@/components/icons";
 import { MyTicketButton } from "@/components/tickets/my-ticket-button";
 import { VaultUnlock } from "@/components/vault/vault-unlock";
 import { DEFAULT_GENERATOR, generatePassword, MAX_LENGTH, MIN_LENGTH, passwordStrength, type GeneratorOptions } from "@/lib/vault/password-generator";
-import type { VaultCategory, VaultEntrySummary, VaultPermission, VaultVisibility } from "@/lib/vault/types";
+import type { VaultEntrySummary, VaultPermission, VaultVisibility } from "@/lib/vault/types";
 import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import type { AppRole } from "@/lib/types";
@@ -18,38 +17,8 @@ const REVEAL_SECONDS = 30;
 const LOCK_REASONS = ["mfa_enrollment_required", "mfa_required", "locked"] as const;
 type LockReason = (typeof LOCK_REASONS)[number];
 
-const visibilityLabels: Record<VaultVisibility, string> = {
-  shared: "Compartida",
-  personal: "Personal",
-  restricted: "Restringida",
-};
-
-type EntryDraft = {
-  name: string;
-  url: string;
-  username: string;
-  password: string;
-  notes: string;
-  categoryId: string;
-  visibility: VaultVisibility;
-};
-
-type DetailPayload = {
-  entry: VaultEntrySummary;
-  can: { edit: boolean; delete: boolean; managePermissions: boolean };
-  sharedWith: VaultPermission[];
-};
-
-type TeamMember = { id: string; fullName: string };
-
-type AuditEvent = {
-  id: string;
-  userName: string;
-  entryName: string | null;
-  action: string;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-};
+const visibilityLabels: Record<VaultVisibility, string> = { shared: "Compartida", personal: "Personal", restricted: "Restringida" };
+const strengthLabels = { weak: "Débil", fair: "Aceptable", strong: "Fuerte" } as const;
 
 const auditActionLabels: Record<string, string> = {
   VAULT_OPEN: "Abrió el gestor",
@@ -66,7 +35,35 @@ const auditActionLabels: Record<string, string> = {
   IMPORT: "Importó credenciales",
 };
 
-const auditDateFormatter = new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", dateStyle: "short", timeStyle: "short" });
+type Category = { id: string; name: string; description: string | null; count: number };
+type Scope = { kind: "all" | "favorites" | "recent" | "personal" | "uncategorised" | "category"; id?: string };
+type EntryDraft = { name: string; url: string; username: string; password: string; notes: string; categoryId: string; visibility: VaultVisibility };
+type DetailPayload = { entry: VaultEntrySummary; can: { edit: boolean; delete: boolean; managePermissions: boolean }; sharedWith: VaultPermission[] };
+type TeamMember = { id: string; fullName: string };
+type AuditEvent = { id: string; userName: string; entryName: string | null; action: string; createdAt: string };
+type ListPayload = {
+  entries: VaultEntrySummary[];
+  categories: Category[];
+  uncategorised: number;
+  visibleTotal: number;
+  favorites: string[];
+  recent: string[];
+  total: number;
+  page: number;
+  pageSize: number;
+  isVaultAdmin: boolean;
+};
+type HealthPayload = {
+  total: number;
+  personalCount: number;
+  reused: string[][];
+  reusedCount: number;
+  weak: string[];
+  stale: { name: string; changedAt: string }[];
+  staleCount: number;
+  staleYears: number;
+  unknown: number;
+};
 
 function blankDraft(): EntryDraft {
   return { name: "", url: "", username: "", password: "", notes: "", categoryId: "", visibility: "shared" };
@@ -91,17 +88,16 @@ async function vaultRequest<T>(path: string, init?: RequestInit): Promise<{ ok: 
 export function VaultManager() {
   const [stage, setStage] = useState<"loading" | "locked" | "ready">("loading");
   const [lockReason, setLockReason] = useState<LockReason>("mfa_required");
-  const [entries, setEntries] = useState<VaultEntrySummary[]>([]);
-  const [categories, setCategories] = useState<VaultCategory[]>([]);
-  const [isVaultAdmin, setIsVaultAdmin] = useState(false);
+  const [data, setData] = useState<ListPayload | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
 
   const [query, setQuery] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [categoryId, setCategoryId] = useState("all");
-  const [scope, setScope] = useState<"all" | "mine">("all");
+  const [scope, setScope] = useState<Scope>({ kind: "all" });
+  const [page, setPage] = useState(0);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const [detail, setDetail] = useState<DetailPayload | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -113,50 +109,50 @@ export function VaultManager() {
   const [pendingDelete, setPendingDelete] = useState<VaultEntrySummary | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [team, setTeam] = useState<TeamMember[]>([]);
-  const [reloadTick, setReloadTick] = useState(0);
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
-  const [auditAction, setAuditAction] = useState("all");
-  const [auditUser, setAuditUser] = useState("all");
-  const [auditPeople, setAuditPeople] = useState<TeamMember[]>([]);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [health, setHealth] = useState<HealthPayload | null>(null);
+  const [folderAccess, setFolderAccess] = useState<{ id: string; name: string; userIds: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isEmployee = roles.includes("employee");
+  const isVaultAdmin = data?.isVaultAdmin ?? false;
+  const reload = useCallback(() => setReloadTick((tick) => tick + 1), []);
 
-  // Identity for the greeting and the "only mine" filter; the server never trusts it.
   useEffect(() => {
     let active = true;
     void (async () => {
       const supabase = createClient();
       const { data: auth } = await supabase.auth.getUser();
       if (!active || !auth.user) return;
-      setUserId(auth.user.id);
       const { data: profile } = await supabase.from("profiles").select("full_name, roles").eq("id", auth.user.id).maybeSingle();
-      setUserName((profile?.full_name as string | null) ?? auth.user.email ?? "");
       if (!active) return;
-      setRoles(((profile?.roles ?? []) as AppRole[]));
+      setUserId(auth.user.id);
+      setUserName((profile?.full_name as string | null) ?? auth.user.email ?? "");
+      setRoles((profile?.roles ?? []) as AppRole[]);
     })();
     return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setSearchTerm(query.trim()), 300);
+    const timer = setTimeout(() => { setSearchTerm(query.trim()); setPage(0); }, 300);
     return () => clearTimeout(timer);
   }, [query]);
-
-
-  const reload = useCallback(() => setReloadTick((tick) => tick + 1), []);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       const params = new URLSearchParams();
       if (searchTerm.length >= 2) params.set("q", searchTerm);
-      if (categoryId !== "all") params.set("category", categoryId);
-      if (scope === "mine") params.set("visibility", "personal");
-      const result = await vaultRequest<{ entries: VaultEntrySummary[]; categories: VaultCategory[]; isVaultAdmin: boolean }>(`/api/vault/entries?${params}`);
+      if (scope.kind === "category" && scope.id) params.set("category", scope.id);
+      if (scope.kind === "personal") params.set("visibility", "personal");
+      if (scope.kind === "uncategorised") params.set("uncategorised", "1");
+      if (scope.kind === "favorites") params.set("favorites", "1");
+      params.set("page", String(page));
+      const result = await vaultRequest<ListPayload>(`/api/vault/entries?${params}`);
       if (!active) return;
       if (!result.ok) {
         if (result.lock) {
@@ -168,34 +164,11 @@ export function VaultManager() {
         setStage("ready");
         return;
       }
-      setEntries(result.data.entries);
-      setCategories(result.data.categories);
-      setIsVaultAdmin(result.data.isVaultAdmin);
+      setData(result.data);
       setStage("ready");
     })();
     return () => { active = false; };
-  }, [searchTerm, categoryId, scope, reloadTick]);
-
-  // Audit trail, loaded only while its window is open (vault admins only).
-  useEffect(() => {
-    if (!auditOpen) return;
-    let active = true;
-    void (async () => {
-      const params = new URLSearchParams();
-      if (auditAction !== "all") params.set("action", auditAction);
-      if (auditUser !== "all") params.set("user", auditUser);
-      const result = await vaultRequest<{ events: AuditEvent[]; people: { id: string; name: string }[] }>(`/api/vault/audit?${params}`);
-      if (!active) return;
-      if (!result.ok) {
-        setMessage(result.error);
-        setAuditEvents([]);
-        return;
-      }
-      setAuditEvents(result.data.events);
-      setAuditPeople(result.data.people.map((person) => ({ id: person.id, fullName: person.name })));
-    })();
-    return () => { active = false; };
-  }, [auditOpen, auditAction, auditUser]);
+  }, [searchTerm, scope, page, reloadTick]);
 
   // A revealed secret lives in this state and nowhere else, and only for 30 seconds.
   useEffect(() => {
@@ -204,6 +177,28 @@ export function VaultManager() {
     return () => clearTimeout(timer);
   }, [revealed]);
 
+  useEffect(() => {
+    if (!auditOpen) return;
+    let active = true;
+    void (async () => {
+      const result = await vaultRequest<{ events: AuditEvent[] }>("/api/vault/audit");
+      if (active && result.ok) setAuditEvents(result.data.events ?? []);
+    })();
+    return () => { active = false; };
+  }, [auditOpen]);
+
+  useEffect(() => {
+    if (!healthOpen) return;
+    let active = true;
+    void (async () => {
+      const result = await vaultRequest<HealthPayload>("/api/vault/health");
+      if (!active) return;
+      if (result.ok) setHealth(result.data);
+      else setMessage(result.error);
+    })();
+    return () => { active = false; };
+  }, [healthOpen]);
+
   function handleLock(lock: LockReason) {
     setRevealed(null);
     setDetail(null);
@@ -211,6 +206,41 @@ export function VaultManager() {
     setLockReason(lock);
     setStage("locked");
   }
+
+  // ---------- folder tree ----------
+
+  const tree = useMemo(() => {
+    const roots = new Map<string, { name: string; category?: Category; total: number; children: Category[] }>();
+    for (const category of data?.categories ?? []) {
+      const [parent, child] = category.name.split(" / ");
+      const node = roots.get(parent) ?? { name: parent, total: 0, children: [] };
+      if (child) node.children.push({ ...category, name: child });
+      else node.category = category;
+      node.total += category.count;
+      roots.set(parent, node);
+    }
+    return [...roots.values()].sort((a, b) => b.total - a.total);
+  }, [data?.categories]);
+
+  const entries = useMemo(() => data?.entries ?? [], [data?.entries]);
+  const favorites = useMemo(() => new Set(data?.favorites ?? []), [data?.favorites]);
+  const categoryName = useMemo(() => {
+    const map = new Map((data?.categories ?? []).map((category) => [category.id, category.name]));
+    return (id: string | null) => (id ? map.get(id) ?? "—" : "Sin carpeta");
+  }, [data?.categories]);
+  const visibleEntries = useMemo(() => {
+    if (scope.kind !== "recent") return entries;
+    const order = data?.recent ?? [];
+    return entries.filter((entry) => order.includes(entry.id)).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  }, [scope.kind, data?.recent, entries]);
+  const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / (data?.pageSize ?? 100)));
+
+  function selectScope(next: Scope) {
+    setScope(next);
+    setPage(0);
+  }
+
+  // ---------- actions ----------
 
   async function openDetail(entryId: string) {
     setRevealed(null);
@@ -223,25 +253,26 @@ export function VaultManager() {
     setDetail(result.data);
   }
 
-  async function reveal(entryId: string, field: "password" | "notes") {
-    const result = await vaultRequest<{ value: string }>(`/api/vault/entries/${entryId}/reveal`, { method: "POST", body: JSON.stringify({ field, intent: "view" }) });
+  async function secretOf(entryId: string, field: "password" | "notes", intent: "view" | "copy") {
+    const result = await vaultRequest<{ value: string }>(`/api/vault/entries/${entryId}/reveal`, { method: "POST", body: JSON.stringify({ field, intent }) });
     if (!result.ok) {
-      if (result.lock) return handleLock(result.lock);
-      setMessage(result.error);
-      return;
+      if (result.lock) handleLock(result.lock);
+      else setMessage(result.error);
+      return null;
     }
-    setRevealed({ entryId, field, value: result.data.value, seconds: REVEAL_SECONDS });
+    return result.data.value;
+  }
+
+  async function reveal(entryId: string, field: "password" | "notes") {
+    const value = await secretOf(entryId, field, "view");
+    if (value !== null) setRevealed({ entryId, field, value, seconds: REVEAL_SECONDS });
   }
 
   async function copySecret(entryId: string, field: "password" | "notes" = "password") {
-    const result = await vaultRequest<{ value: string }>(`/api/vault/entries/${entryId}/reveal`, { method: "POST", body: JSON.stringify({ field, intent: "copy" }) });
-    if (!result.ok) {
-      if (result.lock) return handleLock(result.lock);
-      setMessage(result.error);
-      return;
-    }
+    const value = await secretOf(entryId, field, "copy");
+    if (value === null) return;
     try {
-      await navigator.clipboard.writeText(result.data.value);
+      await navigator.clipboard.writeText(value);
       setMessage(`${field === "notes" ? "Notas copiadas" : "Contraseña copiada"}. Se intentará borrar del portapapeles en ${REVEAL_SECONDS} segundos.`);
       // Best effort only: the browser may refuse if the tab is not focused.
       setTimeout(() => { void navigator.clipboard.writeText("").catch(() => {}); }, REVEAL_SECONDS * 1000);
@@ -250,15 +281,37 @@ export function VaultManager() {
     }
   }
 
+  async function copyText(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(`${label} copiado.`);
+    } catch {
+      setMessage("Tu navegador no ha permitido copiar.");
+    }
+  }
+
+  async function toggleFavorite(entryId: string) {
+    if (!userId) return;
+    const supabase = createClient();
+    const { error: favoriteError } = favorites.has(entryId)
+      ? await supabase.from("vault_favorites").delete().eq("user_id", userId).eq("vault_entry_id", entryId)
+      : await supabase.from("vault_favorites").insert({ user_id: userId, vault_entry_id: entryId });
+    if (favoriteError) {
+      setMessage("No se pudo cambiar el favorito.");
+      return;
+    }
+    reload();
+  }
+
   function openNew() {
     setEditingId(null);
-    setDraft(blankDraft());
+    setDraft({ ...blankDraft(), categoryId: scope.kind === "category" ? scope.id ?? "" : "" });
     setError(null);
     setGeneratorOpen(false);
     setEditorOpen(true);
   }
 
-  async function openEdit(entry: VaultEntrySummary) {
+  function openEdit(entry: VaultEntrySummary) {
     setEditingId(entry.id);
     setDraft({
       name: entry.name,
@@ -319,13 +372,10 @@ export function VaultManager() {
     reload();
   }
 
-  async function openPermissions() {
-    if (!detail) return;
-    if (team.length === 0) {
-      const { data } = await createClient().rpc("list_team_members");
-      setTeam(((data ?? []) as { id: string; full_name: string | null }[]).map((row) => ({ id: row.id, fullName: row.full_name || "Usuario" })));
-    }
-    setPermissionsOpen(true);
+  async function loadTeam() {
+    if (team.length > 0) return;
+    const { data: members } = await createClient().rpc("list_team_members");
+    setTeam(((members ?? []) as { id: string; full_name: string | null }[]).map((row) => ({ id: row.id, fullName: row.full_name || "Usuario" })));
   }
 
   async function grantAccess(targetId: string, permission: Partial<VaultPermission>) {
@@ -353,15 +403,39 @@ export function VaultManager() {
     await openDetail(detail.entry.id);
   }
 
-  const categoryName = useMemo(() => {
-    const map = new Map(categories.map((category) => [category.id, category.name]));
-    return (id: string | null) => (id ? map.get(id) ?? "—" : "Sin categoría");
-  }, [categories]);
+  async function openFolderAccess(categoryId: string, name: string) {
+    await loadTeam();
+    const result = await vaultRequest<{ userIds: string[] }>(`/api/vault/categories/${categoryId}/access`);
+    if (!result.ok) {
+      setMessage(result.error);
+      return;
+    }
+    setFolderAccess({ id: categoryId, name, userIds: result.data.userIds });
+  }
+
+  async function saveFolderAccess(userIds: string[]) {
+    if (!folderAccess) return;
+    const result = await vaultRequest<{ userIds: string[] }>(`/api/vault/categories/${folderAccess.id}/access`, { method: "PUT", body: JSON.stringify({ userIds }) });
+    if (!result.ok) {
+      setMessage(result.error);
+      return;
+    }
+    setFolderAccess(null);
+    setMessage(userIds.length ? `Carpeta restringida a ${result.data.userIds.length} personas.` : "Carpeta abierta a todo el equipo.");
+    reload();
+  }
 
   if (stage === "loading") return <div className="page-stack" />;
   if (stage === "locked") return <VaultUnlock reason={lockReason} onUnlocked={() => { setStage("loading"); reload(); }} />;
 
   const strength = draft.password ? passwordStrength(draft.password) : null;
+  const scopeTitle =
+    scope.kind === "all" ? "Todas las credenciales"
+      : scope.kind === "favorites" ? "Favoritas"
+        : scope.kind === "recent" ? "Usadas recientemente"
+          : scope.kind === "personal" ? "Mis credenciales personales"
+            : scope.kind === "uncategorised" ? "Sin carpeta"
+              : categoryName(scope.id ?? null);
 
   return (
     <div className="page-stack">
@@ -369,6 +443,7 @@ export function VaultManager() {
         <div><p>Credenciales de la empresa, cifradas. Para mostrar o copiar una contraseña se pide el código de tu app de autenticación, una vez al día.</p></div>
         <div className="panel-heading-trailing">
           {isEmployee ? <MyTicketButton userName={userName} /> : null}
+          {isVaultAdmin ? <button type="button" className="button button-secondary" onClick={() => { setHealth(null); setHealthOpen(true); }}>Salud</button> : null}
           {isVaultAdmin ? <button type="button" className="button button-secondary" onClick={() => { setAuditEvents(null); setAuditOpen(true); }}>Auditoría</button> : null}
           <button type="button" className="button button-primary" onClick={openNew}>+ Nueva credencial</button>
         </div>
@@ -376,55 +451,102 @@ export function VaultManager() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
-      <CollapsibleFilters
-        hasActiveFilters={query !== "" || categoryId !== "all" || scope !== "all"}
-        onClear={() => { setQuery(""); setCategoryId("all"); setScope("all"); }}
-        resultCount={entries.length}
-        resultLabel="Credenciales"
-      >
-        <div className="filter-bar lead-filters">
-          <label><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nombre, usuario o web" /></label>
-          <label><span>Categoría</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="all">Todas</option>
-            {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-          </select></label>
-          <label><span>Ámbito</span><select value={scope} onChange={(event) => setScope(event.target.value as "all" | "mine")}>
-            <option value="all">Todas las que puedo ver</option>
-            <option value="mine">Solo las mías</option>
-          </select></label>
-        </div>
-      </CollapsibleFilters>
+      <div className="vault-layout">
+        <aside className="panel vault-tree">
+          <label className="search-field vault-search">
+            <SearchIcon />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar credencial…" aria-label="Buscar credencial" />
+          </label>
+          <ul className="vault-tree-list">
+            <li><button type="button" className={scope.kind === "all" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "all" })}>Todas<span>{data?.visibleTotal ?? 0}</span></button></li>
+            <li><button type="button" className={scope.kind === "favorites" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "favorites" })}>★ Favoritas<span>{favorites.size}</span></button></li>
+            <li><button type="button" className={scope.kind === "recent" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "recent" })}>Recientes<span>{data?.recent.length ?? 0}</span></button></li>
+            <li><button type="button" className={scope.kind === "personal" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "personal" })}>Mías (personales)</button></li>
+          </ul>
+          <span className="search-group-title vault-tree-title">Carpetas</span>
+          <ul className="vault-tree-list">
+            {tree.map((node) => (
+              <li key={node.name}>
+                <button
+                  type="button"
+                  className={scope.kind === "category" && scope.id === node.category?.id ? "vault-tree-item active" : "vault-tree-item"}
+                  onClick={() => node.category && selectScope({ kind: "category", id: node.category.id })}
+                  disabled={!node.category}
+                >
+                  {node.name}<span>{node.total}</span>
+                </button>
+                {node.children.length > 0 ? (
+                  <ul className="vault-tree-children">
+                    {node.children.map((child) => (
+                      <li key={child.id}>
+                        <button type="button" className={scope.kind === "category" && scope.id === child.id ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "category", id: child.id })}>
+                          {child.name}<span>{child.count}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            ))}
+            {data?.uncategorised ? (
+              <li><button type="button" className={scope.kind === "uncategorised" ? "vault-tree-item active" : "vault-tree-item"} onClick={() => selectScope({ kind: "uncategorised" })}>Sin carpeta<span>{data.uncategorised}</span></button></li>
+            ) : null}
+          </ul>
+        </aside>
 
-      <section className="panel table-panel">
-        <div className="table-scroll">
-          <table>
-            <thead><tr><th>Credencial</th><th>Usuario</th><th>Categoría</th><th>Ámbito</th><th>Actualizada</th><th>Acciones</th></tr></thead>
-            <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td>
-                    <strong>{entry.name}</strong>
-                    {entry.url ? <small><a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-link">{entry.url.replace(/^https?:\/\//, "").slice(0, 40)}</a></small> : null}
-                  </td>
-                  <td>{entry.username || "—"}</td>
-                  <td>{categoryName(entry.categoryId)}</td>
-                  <td><span className={entry.visibility === "personal" ? "badge badge-offer_sent" : entry.visibility === "restricted" ? "badge badge-lost" : "badge"}>{visibilityLabels[entry.visibility]}</span></td>
-                  <td>{formatDate(entry.updatedAt)}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button type="button" className="button button-compact button-secondary" onClick={() => void copySecret(entry.id)}>Copiar</button>
-                      <button type="button" className="button button-compact button-secondary" onClick={() => void openDetail(entry.id)}>Ver</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {entries.length === 0 ? (
-                <tr><td colSpan={6} className="muted">{searchTerm ? "Ninguna credencial coincide con la búsqueda." : "Todavía no hay credenciales guardadas."}</td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+        <section className="panel table-panel vault-list">
+          <div className="panel-heading">
+            <div>
+              <h2>{scopeTitle}</h2>
+              <p className="panel-subtitle">{searchTerm ? `Resultados de «${searchTerm}»` : `${data?.total ?? 0} credenciales`}</p>
+            </div>
+            {isVaultAdmin && scope.kind === "category" && scope.id ? (
+              <button type="button" className="button button-compact button-secondary" onClick={() => void openFolderAccess(scope.id as string, scopeTitle)}>Quién ve esta carpeta</button>
+            ) : null}
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th aria-label="Favorita"></th><th>Credencial</th><th>Usuario</th><th>Carpeta</th><th>Ámbito</th><th>Acciones</th></tr></thead>
+              <tbody>
+                {visibleEntries.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>
+                      <button type="button" className={favorites.has(entry.id) ? "vault-star active" : "vault-star"} onClick={() => void toggleFavorite(entry.id)} aria-label={favorites.has(entry.id) ? "Quitar de favoritas" : "Marcar como favorita"} title="Favorita">★</button>
+                    </td>
+                    <td>
+                      <strong>{entry.name}</strong>
+                      <small>{entry.strength === "weak" ? <em className="vault-strength vault-strength-weak">Contraseña débil</em> : entry.url ? entry.url.replace(/^https?:\/\//, "").slice(0, 44) : "—"}</small>
+                    </td>
+                    <td className="vault-user-cell">
+                      {entry.username || "—"}
+                      {entry.username ? <button type="button" className="button button-compact button-secondary" onClick={() => void copyText(entry.username as string, "Usuario")}>Copiar</button> : null}
+                    </td>
+                    <td>{categoryName(entry.categoryId)}</td>
+                    <td><span className={entry.visibility === "personal" ? "badge badge-offer_sent" : entry.visibility === "restricted" ? "badge badge-lost" : "badge"}>{visibilityLabels[entry.visibility]}</span></td>
+                    <td>
+                      <div className="table-actions">
+                        <button type="button" className="button button-compact button-primary" onClick={() => void copySecret(entry.id)}>Copiar clave</button>
+                        {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer">Abrir web</a> : null}
+                        <button type="button" className="button button-compact button-secondary" onClick={() => void openDetail(entry.id)}>Ver</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {visibleEntries.length === 0 ? (
+                  <tr><td colSpan={6} className="muted">{searchTerm ? "Ninguna credencial coincide con la búsqueda." : "No hay credenciales en esta carpeta."}</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          {pageCount > 1 && scope.kind !== "recent" ? (
+            <div className="table-panel-footer table-panel-pagination">
+              <button type="button" className="button button-compact button-secondary" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Anterior</button>
+              <span className="muted">Página {page + 1} de {pageCount} · {data?.total} credenciales</span>
+              <button type="button" className="button button-compact button-secondary" disabled={page + 1 >= pageCount} onClick={() => setPage((current) => current + 1)}>Siguiente</button>
+            </div>
+          ) : null}
+        </section>
+      </div>
 
       {/* ---------- Detail ---------- */}
       <Modal open={Boolean(detail)} title={detail?.entry.name ?? ""} eyebrow="Credencial" onClose={() => { setDetail(null); setRevealed(null); }}>
@@ -434,7 +556,7 @@ export function VaultManager() {
               <span>Usuario</span>
               <strong className="vault-inline">
                 {detail.entry.username || "—"}
-                {detail.entry.username ? <button type="button" className="button button-compact button-secondary" onClick={() => void navigator.clipboard.writeText(detail.entry.username ?? "")}>Copiar</button> : null}
+                {detail.entry.username ? <button type="button" className="button button-compact button-secondary" onClick={() => void copyText(detail.entry.username as string, "Usuario")}>Copiar</button> : null}
               </strong>
               <span>Contraseña</span>
               <strong className="vault-inline">
@@ -451,9 +573,9 @@ export function VaultManager() {
               </strong>
               <span>Web</span>
               <strong>{detail.entry.url ? <a href={detail.entry.url} target="_blank" rel="noopener noreferrer" className="text-link">{detail.entry.url}</a> : "—"}</strong>
-              <span>Categoría</span><strong>{categoryName(detail.entry.categoryId)}</strong>
+              <span>Carpeta</span><strong>{categoryName(detail.entry.categoryId)}</strong>
               <span>Ámbito</span><strong>{visibilityLabels[detail.entry.visibility]}</strong>
-              <span>Última modificación</span><strong>{formatDate(detail.entry.updatedAt)}</strong>
+              <span>Fuerza</span><strong>{detail.entry.strength ? strengthLabels[detail.entry.strength] : "—"}</strong>
               <span>Contraseña cambiada</span><strong>{formatDate(detail.entry.lastPasswordChangeAt)}</strong>
             </div>
 
@@ -468,18 +590,16 @@ export function VaultManager() {
             ) : null}
 
             {detail.entry.visibility === "restricted" && detail.can.managePermissions ? (
-              <div className="vault-shared">
-                <div className="notice-section-head">
-                  <span className="search-group-title">Con acceso ({detail.sharedWith.length})</span>
-                  <button type="button" className="button button-compact button-secondary" onClick={() => void openPermissions()}>Gestionar acceso</button>
-                </div>
+              <div className="notice-section-head">
+                <span className="search-group-title">Con acceso ({detail.sharedWith.length})</span>
+                <button type="button" className="button button-compact button-secondary" onClick={() => { void loadTeam(); setPermissionsOpen(true); }}>Gestionar acceso</button>
               </div>
             ) : null}
 
             <div className="modal-actions">
               {detail.can.delete ? <button type="button" className="button button-secondary expenses-delete" onClick={() => setPendingDelete(detail.entry)}>Eliminar</button> : null}
               <button type="button" className="button button-secondary" onClick={() => { setDetail(null); setRevealed(null); }}>Cerrar</button>
-              {detail.can.edit ? <button type="button" className="button button-primary" onClick={() => void openEdit(detail.entry)}>Editar</button> : null}
+              {detail.can.edit ? <button type="button" className="button button-primary" onClick={() => openEdit(detail.entry)}>Editar</button> : null}
             </div>
           </div>
         ) : null}
@@ -494,18 +614,11 @@ export function VaultManager() {
             <label><span>Usuario</span><input value={draft.username} onChange={(event) => setDraft({ ...draft, username: event.target.value })} autoComplete="off" /></label>
             <label>
               <span>{editingId ? "Nueva contraseña (vacío = no cambiar)" : "Contraseña *"}</span>
-              <input
-                type="text"
-                value={draft.password}
-                onChange={(event) => setDraft({ ...draft, password: event.target.value })}
-                autoComplete="new-password"
-                spellCheck={false}
-                required={!editingId}
-              />
+              <input type="text" value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} autoComplete="new-password" spellCheck={false} required={!editingId} />
             </label>
-            <label><span>Categoría</span><select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>
-              <option value="">Sin categoría</option>
-              {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            <label><span>Carpeta</span><select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>
+              <option value="">Sin carpeta</option>
+              {(data?.categories ?? []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select></label>
             <label><span>¿Quién puede verla?</span><select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as VaultVisibility })}>
               <option value="shared">Compartida con el equipo</option>
@@ -546,7 +659,7 @@ export function VaultManager() {
         </form>
       </Modal>
 
-      {/* ---------- Permissions ---------- */}
+      {/* ---------- Access for one credential ---------- */}
       <Modal open={permissionsOpen} title="Quién puede ver esta credencial" eyebrow="Acceso" onClose={() => setPermissionsOpen(false)}>
         <div className="announcement-people">
           {team.filter((member) => member.id !== userId).map((member) => {
@@ -557,7 +670,7 @@ export function VaultManager() {
                 <span>{member.fullName}</span>
                 {granted ? (
                   <small>
-                    <button type="button" className="text-link vault-link-button" onClick={() => void grantAccess(member.id, { canEdit: !granted.canEdit, canView: true })}>
+                    <button type="button" className="vault-link-button" onClick={() => void grantAccess(member.id, { canEdit: !granted.canEdit, canView: true })}>
                       {granted.canEdit ? "Puede editar · quitar edición" : "Solo ver · permitir editar"}
                     </button>
                   </small>
@@ -568,6 +681,92 @@ export function VaultManager() {
         </div>
         <p className="muted invoice-hint">Cada cambio queda registrado en la auditoría. Nadie puede darse acceso a sí mismo.</p>
         <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setPermissionsOpen(false)}>Cerrar</button></div>
+      </Modal>
+
+      {/* ---------- Access for a whole folder ---------- */}
+      <Modal open={Boolean(folderAccess)} title={`Quién ve «${folderAccess?.name ?? ""}»`} eyebrow="Acceso por carpeta" onClose={() => setFolderAccess(null)}>
+        {folderAccess ? (
+          <>
+            <p className="muted">
+              {folderAccess.userIds.length === 0
+                ? "Ahora mismo la ve todo el equipo. Si marcas a alguien, pasará a verla solo esa gente."
+                : `Restringida a ${folderAccess.userIds.length} personas. Desmárcalas todas para volver a abrirla al equipo.`}
+            </p>
+            <div className="announcement-people">
+              {team.map((member) => (
+                <label key={member.id} className="announcement-person">
+                  <input
+                    type="checkbox"
+                    checked={folderAccess.userIds.includes(member.id)}
+                    onChange={() => {
+                      const next = folderAccess.userIds.includes(member.id)
+                        ? folderAccess.userIds.filter((id) => id !== member.id)
+                        : [...folderAccess.userIds, member.id];
+                      setFolderAccess({ ...folderAccess, userIds: next });
+                    }}
+                  />
+                  <span>{member.fullName}</span>
+                </label>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setFolderAccess(null)}>Cancelar</button>
+              <button type="button" className="button button-primary" onClick={() => void saveFolderAccess(folderAccess.userIds)}>Guardar acceso</button>
+            </div>
+          </>
+        ) : null}
+      </Modal>
+
+      {/* ---------- Health ---------- */}
+      <Modal open={healthOpen} title="Salud del gestor" eyebrow="Revisión" onClose={() => setHealthOpen(false)}>
+        {health === null ? <p className="muted">Calculando…</p> : (
+          <div className="vault-health">
+            <div className="confirmation-summary">
+              <span>Credenciales revisadas</span><strong>{health.total}</strong>
+              <span>Repetidas</span><strong>{health.reusedCount} en {health.reused.length} grupos</strong>
+              <span>Débiles</span><strong>{health.weak.length}</strong>
+              <span>Sin cambiar en {health.staleYears} años</span><strong>{health.staleCount}</strong>
+            </div>
+            {health.reused.length > 0 ? (
+              <>
+                <span className="search-group-title">Contraseñas repetidas</span>
+                <ul className="vault-health-list">{health.reused.slice(0, 15).map((group) => <li key={group.join("|")}>{group.join(" · ")}</li>)}</ul>
+                <p className="muted invoice-hint">Si una se filtra, se filtran todas las de su grupo. Conviene ponerles contraseñas distintas.</p>
+              </>
+            ) : null}
+            {health.weak.length > 0 ? (
+              <>
+                <span className="search-group-title">Contraseñas débiles</span>
+                <ul className="vault-health-list">{health.weak.slice(0, 15).map((name) => <li key={name}>{name}</li>)}</ul>
+              </>
+            ) : null}
+            {health.personalCount > 0 ? <p className="muted invoice-hint">No se revisan {health.personalCount} credenciales personales: son privadas de cada persona.</p> : null}
+          </div>
+        )}
+        <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setHealthOpen(false)}>Cerrar</button></div>
+      </Modal>
+
+      {/* ---------- Audit ---------- */}
+      <Modal open={auditOpen} title="Auditoría del gestor" eyebrow="Registro de actividad" onClose={() => setAuditOpen(false)}>
+        <div className="table-scroll vault-audit-table">
+          <table>
+            <thead><tr><th>Cuándo</th><th>Quién</th><th>Qué hizo</th><th>Credencial</th></tr></thead>
+            <tbody>
+              {auditEvents === null ? <tr><td colSpan={4} className="muted">Cargando…</td></tr>
+                : auditEvents.length === 0 ? <tr><td colSpan={4} className="muted">Sin actividad registrada.</td></tr>
+                  : auditEvents.map((event) => (
+                    <tr key={event.id} className={event.action === "PASSWORD_REVEAL" || event.action === "PASSWORD_COPY" ? "vault-audit-secret" : undefined}>
+                      <td>{new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", dateStyle: "short", timeStyle: "short" }).format(new Date(event.createdAt))}</td>
+                      <td>{event.userName}</td>
+                      <td>{auditActionLabels[event.action] ?? event.action}</td>
+                      <td>{event.entryName ?? "—"}</td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted invoice-hint">El registro nunca guarda contraseñas: solo quién hizo qué y cuándo.</p>
+        <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setAuditOpen(false)}>Cerrar</button></div>
       </Modal>
 
       <ConfirmationDialog
@@ -587,41 +786,7 @@ export function VaultManager() {
         ) : null}
       </ConfirmationDialog>
 
-      <Modal open={auditOpen} title="Auditoría del gestor" eyebrow="Registro de actividad" onClose={() => setAuditOpen(false)}>
-        <div className="filter-bar lead-filters">
-          <label><span>Acción</span><select value={auditAction} onChange={(event) => setAuditAction(event.target.value)}>
-            <option value="all">Todas</option>
-            {Object.entries(auditActionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select></label>
-          <label><span>Persona</span><select value={auditUser} onChange={(event) => setAuditUser(event.target.value)}>
-            <option value="all">Todas</option>
-            {auditPeople.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}
-          </select></label>
-        </div>
-        <div className="table-scroll vault-audit-table">
-          <table>
-            <thead><tr><th>Cuándo</th><th>Quién</th><th>Qué hizo</th><th>Credencial</th></tr></thead>
-            <tbody>
-              {auditEvents === null ? (
-                <tr><td colSpan={4} className="muted">Cargando…</td></tr>
-              ) : auditEvents.length === 0 ? (
-                <tr><td colSpan={4} className="muted">Sin actividad registrada con estos filtros.</td></tr>
-              ) : auditEvents.map((event) => (
-                <tr key={event.id} className={event.action === "PASSWORD_REVEAL" || event.action === "PASSWORD_COPY" ? "vault-audit-secret" : undefined}>
-                  <td>{auditDateFormatter.format(new Date(event.createdAt))}</td>
-                  <td>{event.userName}</td>
-                  <td>{auditActionLabels[event.action] ?? event.action}</td>
-                  <td>{event.entryName ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="muted invoice-hint">El registro nunca guarda contraseñas: solo quién hizo qué y cuándo.</p>
-        <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setAuditOpen(false)}>Cerrar</button></div>
-      </Modal>
-
-      {isVaultAdmin ? <p className="muted vault-admin-note"><SearchIcon /> Eres administrador del gestor: puedes gestionar accesos y consultar la auditoría. Las credenciales personales de otras personas siguen siendo privadas.</p> : null}
+      {isVaultAdmin ? <p className="muted vault-admin-note"><KeyIcon /> Eres administrador del gestor: gestionas accesos y ves la auditoría. Las credenciales personales de otras personas siguen siendo privadas.</p> : null}
     </div>
   );
 }

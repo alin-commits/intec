@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isVaultConfigured } from "@/lib/security/vault-key";
+import { passwordStrength } from "@/lib/vault/password-generator";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { VaultActor, VaultEntryAccess } from "@/lib/vault/authorization";
@@ -138,9 +139,10 @@ export async function loadEntryForActor(
     admin.from("vault_permissions").select("user_id, can_view, can_edit, can_delete, can_manage_permissions").eq("vault_entry_id", entryId).eq("user_id", userId).maybeSingle(),
   ]);
   if (!row) return null;
+  const categoryAllowed = await categoryAllowsUser(admin, (row.category_id as string | null) ?? null, userId);
   return {
     row: row as Record<string, unknown>,
-    access: { createdBy: (row.created_by as string | null) ?? null, visibility: row.visibility as VaultVisibility },
+    access: { createdBy: (row.created_by as string | null) ?? null, visibility: row.visibility as VaultVisibility, categoryAllowed },
     grant: permission
       ? {
         userId: String(permission.user_id),
@@ -151,6 +153,19 @@ export async function loadEntryForActor(
       }
       : null,
   };
+}
+
+/** Folders with an access list are only reachable by the people on it (vault admins aside). */
+export async function categoryAllowsUser(admin: SupabaseClient, categoryId: string | null, userId: string): Promise<boolean> {
+  if (!categoryId) return true;
+  const { data } = await admin.from("vault_category_access").select("user_id").eq("category_id", categoryId);
+  if (!data || data.length === 0) return true;
+  return data.some((row) => row.user_id === userId);
+}
+
+/** What is stored alongside a password so the health check can work without secrets. */
+export function passwordMetadata(plaintext: string, fingerprint: string): { password_fingerprint: string; password_strength: string } {
+  return { password_fingerprint: fingerprint, password_strength: passwordStrength(plaintext).level };
 }
 
 export function vaultError(message: string, status: number, reason: VaultDeniedReason = "forbidden"): NextResponse {

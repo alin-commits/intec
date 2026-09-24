@@ -11,6 +11,8 @@ export type VaultActor = {
 export type VaultEntryAccess = {
   createdBy: string | null;
   visibility: VaultVisibility;
+  /** False when the entry's folder is restricted and this person is not on its list. */
+  categoryAllowed?: boolean;
 };
 
 /** The permission row for this actor on this entry, when there is one. */
@@ -33,8 +35,9 @@ function adminCanReach(entry: VaultEntryAccess, actor: VaultActor): boolean {
 export function canViewEntry(entry: VaultEntryAccess, actor: VaultActor, grant?: Grant): boolean {
   if (isOwner(entry, actor)) return true;
   if (entry.visibility === "personal") return false;
-  if (entry.visibility === "shared") return true;
-  return adminCanReach(entry, actor) || Boolean(grantFor(actor, grant)?.canView);
+  if (adminCanReach(entry, actor)) return true;
+  if (entry.visibility === "shared") return entry.categoryAllowed !== false;
+  return Boolean(grantFor(actor, grant)?.canView);
 }
 
 export function canEditEntry(entry: VaultEntryAccess, actor: VaultActor, grant?: Grant): boolean {
