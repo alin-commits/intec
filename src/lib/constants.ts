@@ -43,6 +43,8 @@ export const ANNOUNCEMENT_SENDER_ROLES: AppRole[] = ["admin", "direction", "mark
 export const CRM_EDIT_ROLES: AppRole[] = ["admin", "marketing", "commercial"];
 /** Marketing department expenses (apps, subscriptions, one-off spending). */
 export const EXPENSES_ROLES: AppRole[] = ["admin", "marketing", "direction"];
+/** Las ventas que llegan de Sage: cifras de negocio, solo dirección y administración. */
+export const SALES_ROLES: AppRole[] = ["admin", "direction"];
 export const EXPENSES_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
 /** Manages the password vault: permissions and audit log (not access to personal entries). */
 export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];

@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, KeyIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
+import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, KeyIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, EXPENSES_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, EXPENSES_ROLES, LEADS_ROLES, RRSS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -21,6 +21,7 @@ const departmentLabels: Record<DirectionDepartment, string> = {
 
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
+  { href: "/ventas", label: "Ventas", icon: EuroIcon, roles: SALES_ROLES },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
@@ -42,6 +43,7 @@ function nameFromEmail(email: string): string {
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
+  "/ventas": "Ventas de Sage",
   "/consultas": "Consultas",
   "/leads": "Leads",
   "/crm": "CRM",

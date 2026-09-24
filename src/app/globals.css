@@ -1263,3 +1263,10 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 
 /* Aviso de que lo que se ve no son datos reales */
 .dashboard-failed-notice { border-color: #fca5a5; background: linear-gradient(90deg, #fee2e2, #fff 70%); }
+
+/* Panel de ventas de Sage */
+.sales-warning { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-color: #f2d49b; background: linear-gradient(90deg, #fdf5e4, #fff 70%); }
+.sales-warning strong { display: block; font-size: 15px; }
+.sales-warning span { display: block; margin-top: 4px; color: #6b5a33; font-size: 13.5px; line-height: 1.55; }
+.sales-footnote { padding: 14px 18px; }
+.sales-footnote p { margin: 0; font-size: 12.5px; line-height: 1.55; }
