@@ -1273,3 +1273,17 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sales-broken { padding: 16px 18px; border-color: #f0b1b4; background: linear-gradient(90deg, #fdeaeb, #fff 70%); }
 .sales-broken strong { display: block; font-size: 15px; color: #8c1d22; }
 .sales-broken span { display: block; margin-top: 4px; color: #6f3438; font-size: 13.5px; line-height: 1.55; }
+
+/* La tabla de comerciales comparte fila con la rosquilla, y el min-width de 850
+   que llevan todas las tablas la sacaba del panel: la columna de margen quedaba
+   fuera de la vista. Aquí cabe entera y los números se alinean a la derecha. */
+.sales-rep-table { table-layout: fixed; width: 100%; min-width: 0; }
+.sales-rep-table th, .sales-rep-table td { padding-left: 8px; padding-right: 8px; }
+.sales-rep-table th:first-child, .sales-rep-table td:first-child { padding-left: 4px; overflow-wrap: anywhere; }
+.sales-rep-table th:not(:first-child), .sales-rep-table td:not(:first-child) { text-align: right; white-space: nowrap; width: 84px; }
+.sales-rep-table th:last-child, .sales-rep-table td:last-child { width: 66px; padding-right: 4px; }
+
+/* Al lado de la rosquilla solo quedan unos 60 px para el nombre del canal, y
+   "Crédito" salía como "C...". Se pone la leyenda debajo, a todo el ancho. */
+.sales-channel .donut-chart { flex-direction: column; align-items: stretch; gap: 16px; }
+.sales-channel .donut-figure { margin: 0 auto; }

@@ -48,8 +48,43 @@ const PROVISIONAL_DAYS = 7;
 
 const monthNames = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
-function marginPercent(net: number, cost: number): number {
-  return net > 0 ? ((net - cost) / net) * 100 : 0;
+/**
+ * El 16 de octubre de 2025 se cambio el sistema de series en Sage: las series
+ * viejas (IM0, IM2, IM5, IM75...) acaban el dia 15 y las nuevas (CRE, B2C, POS,
+ * B2B, TK, SAT, CON...) arrancan el 16.
+ *
+ * En las viejas el coste no vale: suma mas que la propia venta, con un coste de
+ * entre 1,1 y 1,9 veces la base imponible, lo que daria a la empresa un margen
+ * negativo del -45 % en 2024 y del -85 % en 2023. En las nuevas sale entre el
+ * 25 % y el 35 % todos los meses, que es lo que se espera de una distribuidora.
+ *
+ * Asi que la venta de los anos anteriores se ensena -esa si es buena- y el
+ * margen se calcula solo desde el primer mes completo con las series nuevas.
+ */
+const COST_TRUSTED_FROM_MONTH = "2025-11";
+
+/** Lo que se suma de un grupo de filas: la venta siempre, el coste solo si vale. */
+type Bucket = { net: number; documents: number; costNet: number; cost: number; withoutCost: number };
+const emptyBucket = (): Bucket => ({ net: 0, documents: 0, costNet: 0, cost: 0, withoutCost: 0 });
+
+function addRow(bucket: Bucket, row: SummaryRow): void {
+  bucket.net += Number(row.net_amount);
+  bucket.documents += Number(row.documents);
+  if (row.month < COST_TRUSTED_FROM_MONTH) return;
+  bucket.costNet += Number(row.net_amount);
+  bucket.cost += Number(row.cost_amount);
+  bucket.withoutCost += Number(row.net_without_cost);
+}
+
+/**
+ * El margen sobre la venta que tiene coste fiable, o null cuando no hay nada
+ * que medir. Deja fuera dos cosas: lo anterior al cambio de series y la venta
+ * sin coste grabado, que si se contara subiria el margen artificialmente.
+ */
+function bucketMargin(bucket: Bucket): { amount: number; percent: number } | null {
+  const base = bucket.costNet - bucket.withoutCost;
+  if (base <= 0) return null;
+  return { amount: base - bucket.cost, percent: ((base - bucket.cost) / base) * 100 };
 }
 
 export function SalesDashboardView() {
@@ -145,15 +180,11 @@ export function SalesDashboardView() {
   );
 
   const totals = useMemo(() => {
-    const sum = (list: SummaryRow[]) => list.reduce(
-      (acc, row) => ({
-        net: acc.net + Number(row.net_amount),
-        cost: acc.cost + Number(row.cost_amount),
-        withoutCost: acc.withoutCost + Number(row.net_without_cost),
-        documents: acc.documents + Number(row.documents),
-      }),
-      { net: 0, cost: 0, withoutCost: 0, documents: 0 },
-    );
+    const sum = (list: SummaryRow[]) => {
+      const bucket = emptyBucket();
+      for (const row of list) addRow(bucket, row);
+      return bucket;
+    };
     return { current: sum(visible), previous: sum(visibleBefore) };
   }, [visible, visibleBefore]);
 
@@ -164,66 +195,75 @@ export function SalesDashboardView() {
       ? { delta: "Sin comparación", positive: true }
       : { delta: `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} %`, positive: value >= 0 };
 
-  // El margen de verdad deja fuera la venta que no tiene coste grabado: si se
-  // contara, saldría más alto de lo que es.
-  const costedNet = current.net - current.withoutCost;
-  const reliableMargin = costedNet > 0 ? ((costedNet - current.cost) / costedNet) * 100 : 0;
-  const withoutCostShare = current.net > 0 ? (current.withoutCost / current.net) * 100 : 0;
-  /**
-   * Una empresa que vende no tiene un margen negativo en todo un año: si sale,
-   * es que el coste que graba Sage no significa lo mismo en ese periodo. Antes
-   * de enseñar una cifra que diría que se pierde dinero, se avisa.
-   */
-  const marginIsBroken = current.net > 0 && reliableMargin < 0;
+  const currentMargin = bucketMargin(current);
+  const previousMargin = bucketMargin(previous);
+  const withoutCostShare = current.costNet > 0 ? (current.withoutCost / current.costNet) * 100 : 0;
+  /** Venta del periodo que se queda fuera del margen por venir de las series viejas. */
+  const netBeforeSeriesChange = current.net - current.costNet;
+  const marginCoversEverything = netBeforeSeriesChange <= 0;
 
   const monthly = useMemo(() => {
-    const map = new Map<string, { net: number; cost: number }>();
+    const map = new Map<string, Bucket>();
     for (const row of visible) {
-      const entry = map.get(row.month) ?? { net: 0, cost: 0 };
-      entry.net += Number(row.net_amount);
-      entry.cost += Number(row.cost_amount);
-      map.set(row.month, entry);
+      const bucket = map.get(row.month) ?? emptyBucket();
+      addRow(bucket, row);
+      map.set(row.month, bucket);
     }
-    return Array.from({ length: 12 }, (_, index) => {
-      const key = `${year}-${String(index + 1).padStart(2, "0")}`;
-      const entry = map.get(key) ?? { net: 0, cost: 0 };
-      return { label: monthNames[index], ventas: Math.round(entry.net), margen: Math.round(entry.net - entry.cost) };
+    const months = Array.from({ length: 12 }, (_, index) => {
+      const bucket = map.get(`${year}-${String(index + 1).padStart(2, "0")}`) ?? emptyBucket();
+      return { label: monthNames[index], bucket, margin: bucketMargin(bucket) };
     });
+    return {
+      points: months.map((month) => ({
+        label: month.label,
+        ventas: Math.round(month.bucket.net),
+        margen: Math.round(month.margin?.amount ?? 0),
+      })),
+      // La linea de margen solo se dibuja si la tienen todos los meses con venta:
+      // si no, caeria a cero en los de las series viejas y pareceria un desplome.
+      marginComplete: months.every((month) => month.bucket.net === 0 || month.margin !== null),
+    };
   }, [visible, year]);
 
   const byCompany = useMemo(() => {
-    const map = new Map<number, { net: number; cost: number; documents: number }>();
+    const map = new Map<number, Bucket>();
     for (const row of rows) {
-      const entry = map.get(row.company_code) ?? { net: 0, cost: 0, documents: 0 };
-      entry.net += Number(row.net_amount);
-      entry.cost += Number(row.cost_amount);
-      entry.documents += Number(row.documents);
-      map.set(row.company_code, entry);
+      const bucket = map.get(row.company_code) ?? emptyBucket();
+      addRow(bucket, row);
+      map.set(row.company_code, bucket);
     }
-    return [...map].map(([code, value]) => ({
+    return [...map].map(([code, bucket]) => ({
       code,
       name: companies.find((company) => company.code === code)?.name ?? `Sociedad ${code}`,
-      ...value,
-    })).sort((a, b) => b.net - a.net);
+      bucket,
+      margin: bucketMargin(bucket),
+    })).sort((a, b) => b.bucket.net - a.bucket.net);
   }, [rows, companies]);
 
   const byRep = useMemo(() => {
-    const map = new Map<string, { name: string; net: number; cost: number; documents: number; assigned: boolean }>();
+    const map = new Map<string, { name: string; assigned: boolean; bucket: Bucket }>();
     for (const row of visible) {
-      const key = row.rep_code === null ? "sin" : `${row.company_code}-${row.rep_code}`;
       const rep = row.rep_code === null ? null : reps.find((item) => item.company_code === row.company_code && item.code === row.rep_code);
-      const entry = map.get(key) ?? {
-        name: row.rep_code === null ? "Sin comercial asignado" : rep?.name ?? `Código ${row.rep_code}`,
-        net: 0, cost: 0, documents: 0,
-        assigned: row.rep_code !== null,
-      };
-      entry.net += Number(row.net_amount);
-      entry.cost += Number(row.cost_amount);
-      entry.documents += Number(row.documents);
+      const name = row.rep_code === null ? "Sin comercial asignado" : rep?.name ?? `Código ${row.rep_code}`;
+      // El mismo comercial tiene un código distinto en cada sociedad, así que
+      // agrupar por código lo partía en tres filas con su nombre repetido. Se
+      // agrupa por nombre, sin tildes ni mayúsculas, que es la persona.
+      const key = row.rep_code === null
+        ? "sin"
+        : rep
+          ? name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim()
+          : `${row.company_code}-${row.rep_code}`;
+      const entry = map.get(key) ?? { name, assigned: row.rep_code !== null, bucket: emptyBucket() };
+      addRow(entry.bucket, row);
       map.set(key, entry);
     }
-    return [...map].map(([key, value]) => ({ key, ...value })).sort((a, b) => b.net - a.net);
+    return [...map]
+      .map(([key, value]) => ({ key, ...value, margin: bucketMargin(value.bucket) }))
+      .sort((a, b) => b.bucket.net - a.bucket.net);
   }, [visible, reps]);
+
+  /** Cuántos canales caben en la rosquilla antes de que las etiquetas se corten. */
+  const TOP_CHANNELS = 8;
 
   const byChannel = useMemo(() => {
     const map = new Map<string, number>();
@@ -231,12 +271,22 @@ export function SalesDashboardView() {
       const label = channelNames[row.series] ?? (row.series || "Sin serie");
       map.set(label, (map.get(label) ?? 0) + Number(row.net_amount));
     }
-    // Los abonos van en negativo: en una rosquilla no se pueden dibujar, así
-    // que se enseñan aparte en la tabla de al lado.
-    return [...map].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
+    // Los abonos van en negativo y una rosquilla no los puede dibujar, así que
+    // se apartan y se dicen debajo: si no, el total del centro no cuadraría con
+    // el de ventas de arriba y nadie sabría por qué.
+    const positive = [...map].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
+    const refunds = [...map].reduce((sum, [, value]) => (value < 0 ? sum + value : sum), 0);
+    // Con 19 series las etiquetas salen cortadas a "Cré...", así que la cola se
+    // junta en una sola porción.
+    const head = positive.slice(0, TOP_CHANNELS);
+    const tail = positive.slice(TOP_CHANNELS);
+    const shown = tail.length > 0
+      ? [...head, [`Otras ${tail.length} series`, tail.reduce((sum, [, value]) => sum + value, 0)] as [string, number]]
+      : head;
+    return { shown, refunds };
   }, [visible]);
 
-  const channelItems: DonutItem[] = byChannel.map(([label, value], index) => ({
+  const channelItems: DonutItem[] = byChannel.shown.map(([label, value], index) => ({
     label,
     value: Math.round(value),
     color: channelColors[index % channelColors.length],
@@ -328,12 +378,15 @@ export function SalesDashboardView() {
         />
         <KpiCard
           label="Margen"
-          value={marginIsBroken ? "No fiable" : currencyFormatter.format(costedNet - current.cost)}
-          helper={marginIsBroken ? "el coste de Sage no cuadra en este periodo" : `${formatPercent(reliableMargin)} sobre lo que tiene coste`}
+          value={currentMargin ? currencyFormatter.format(currentMargin.amount) : "No disponible"}
+          helper={currentMargin
+            ? `${formatPercent(currentMargin.percent)} sobre lo que tiene coste${marginCoversEverything ? "" : ", solo desde el cambio de series"}`
+            : "el coste de las series antiguas no sirve"}
           icon={<ConversionIcon />}
-          tone={marginIsBroken ? "rose" : "emerald"}
-          delta={marginIsBroken ? "Sin comparación" : delta(variation(current.net - current.cost, previous.net - previous.cost)).delta}
-          positive={marginIsBroken ? false : delta(variation(current.net - current.cost, previous.net - previous.cost)).positive}
+          tone={currentMargin ? "emerald" : "amber"}
+          {...(currentMargin && previousMargin
+            ? delta(variation(currentMargin.amount, previousMargin.amount))
+            : { delta: "Sin comparación", positive: true })}
         />
         <KpiCard
           label="Albaranes"
@@ -353,27 +406,31 @@ export function SalesDashboardView() {
         />
       </section>
 
-      {marginIsBroken ? (
+      {!marginCoversEverything ? (
         <section className="panel sales-broken">
           <div>
-            <strong>El margen de este periodo no se puede calcular</strong>
+            <strong>
+              {currentMargin
+                ? `El margen deja fuera ${currencyFormatter.format(netBeforeSeriesChange)} de venta anterior al cambio de series`
+                : "De este periodo no se puede sacar el margen"}
+            </strong>
             <span>
-              El coste que Sage guarda en estos albaranes suma más que la propia venta, lo que daría un margen
-              negativo imposible. No es que se haya perdido dinero: es que ese campo no significa lo mismo en todos
-              los años. Está en revisión, y hasta entonces aquí no se enseña ninguna cifra de margen.
+              El 16 de octubre de 2025 se cambió el sistema de series en Sage. En las series antiguas el coste está
+              mal grabado: suma más que la propia venta, lo que daría un margen negativo imposible. La venta de
+              entonces sí es buena y está contada arriba; el coste no, así que esa parte se queda fuera del margen.
             </span>
           </div>
         </section>
       ) : null}
 
-      {!marginIsBroken && current.withoutCost > 0 ? (
+      {current.withoutCost > 0 ? (
         <section className="panel sales-warning">
           <div>
             <strong>{currencyFormatter.format(current.withoutCost)} de venta no tienen coste grabado en Sage</strong>
             <span>
-              Es el {formatPercent(withoutCostShare)} del total. El margen de arriba deja esa parte fuera, porque
+              Es el {formatPercent(withoutCostShare)} de la venta con la que se mide el margen, que lo deja fuera porque
               contarla como si no costara nada lo subiría artificialmente. Con ella dentro saldría{" "}
-              {formatPercent(marginPercent(current.net, current.cost))}.
+              {formatPercent(((current.costNet - current.cost) / current.costNet) * 100)}.
             </span>
           </div>
         </section>
@@ -381,12 +438,21 @@ export function SalesDashboardView() {
 
       <section className="panel chart-panel">
         <div className="panel-heading">
-          <div><h2>Evolución del año</h2><p className="panel-subtitle">Ventas y margen por mes, en euros</p></div>
+          <div>
+            <h2>Evolución del año</h2>
+            <p className="panel-subtitle">
+              {monthly.marginComplete ? "Ventas y margen por mes, en euros" : "Ventas por mes, en euros"}
+            </p>
+          </div>
         </div>
         <TrendChart
-          data={monthly}
-          series={[{ key: "ventas", label: "Ventas", color: "#4f46e5" }, { key: "margen", label: "Margen", color: "#10b981" }]}
-          ariaLabel={`Evolución mensual de ventas y margen en ${year}`}
+          data={monthly.points}
+          series={monthly.marginComplete
+            ? [{ key: "ventas", label: "Ventas", color: "#4f46e5" }, { key: "margen", label: "Margen", color: "#10b981" }]
+            : [{ key: "ventas", label: "Ventas", color: "#4f46e5" }]}
+          ariaLabel={monthly.marginComplete
+            ? `Evolución mensual de ventas y margen en ${year}`
+            : `Evolución mensual de ventas en ${year}`}
         />
       </section>
 
@@ -396,15 +462,15 @@ export function SalesDashboardView() {
             <div><h2>Por comercial</h2><p className="panel-subtitle">{companyLabel}, año {year}</p></div>
           </div>
           <div className="table-scroll">
-            <table>
+            <table className="sales-rep-table">
               <thead><tr><th>Comercial</th><th>Albaranes</th><th>Ventas</th><th>Margen</th></tr></thead>
               <tbody>
                 {byRep.map((rep) => (
                   <tr key={rep.key} className={rep.assigned ? undefined : "row-muted"}>
                     <td><strong>{rep.name}</strong></td>
-                    <td>{numberFormatter.format(rep.documents)}</td>
-                    <td>{currencyFormatter.format(rep.net)}</td>
-                    <td>{formatPercent(marginPercent(rep.net, rep.cost))}</td>
+                    <td>{numberFormatter.format(rep.bucket.documents)}</td>
+                    <td>{currencyFormatter.format(rep.bucket.net)}</td>
+                    <td>{rep.margin ? formatPercent(rep.margin.percent) : <span className="muted">—</span>}</td>
                   </tr>
                 ))}
                 {byRep.length === 0 ? <tr><td colSpan={4} className="muted">Sin ventas en este periodo.</td></tr> : null}
@@ -413,9 +479,15 @@ export function SalesDashboardView() {
           </div>
         </article>
 
-        <article className="panel chart-panel">
+        <article className="panel chart-panel sales-channel">
           <div className="panel-heading">
-            <div><h2>Por canal</h2><p className="panel-subtitle">Según la serie del albarán</p></div>
+            <div>
+              <h2>Por canal</h2>
+              <p className="panel-subtitle">
+                Según la serie del albarán
+                {byChannel.refunds < 0 ? `, sin los ${currencyFormatter.format(-byChannel.refunds)} de abonos` : ""}
+              </p>
+            </div>
           </div>
           <DonutChart
             items={channelItems}
@@ -437,10 +509,10 @@ export function SalesDashboardView() {
               {byCompany.map((company) => (
                 <tr key={company.code}>
                   <td><strong>{company.name}</strong></td>
-                  <td>{numberFormatter.format(company.documents)}</td>
-                  <td>{currencyFormatter.format(company.net)}</td>
-                  <td>{currencyFormatter.format(company.net - company.cost)}</td>
-                  <td>{formatPercent(marginPercent(company.net, company.cost))}</td>
+                  <td>{numberFormatter.format(company.bucket.documents)}</td>
+                  <td>{currencyFormatter.format(company.bucket.net)}</td>
+                  <td>{company.margin ? currencyFormatter.format(company.margin.amount) : <span className="muted">—</span>}</td>
+                  <td>{company.margin ? formatPercent(company.margin.percent) : <span className="muted">—</span>}</td>
                 </tr>
               ))}
               {byCompany.length === 0 ? <tr><td colSpan={5} className="muted">Sin ventas en este periodo.</td></tr> : null}
