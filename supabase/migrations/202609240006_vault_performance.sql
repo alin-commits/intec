@@ -20,16 +20,12 @@ stable
 security definer
 set search_path = public
 as $$
-  select coalesce(
-    array_agg(distinct a.category_id) filter (
-      where not exists (
-        select 1 from public.vault_category_access mine
-        where mine.category_id = a.category_id and mine.user_id = auth.uid()
-      )
-    ),
-    '{}'::uuid[]
-  )
-  from public.vault_category_access a;
+  select coalesce(array_agg(distinct a.category_id), '{}'::uuid[])
+  from public.vault_category_access a
+  where not exists (
+    select 1 from public.vault_category_access mine
+    where mine.category_id = a.category_id and mine.user_id = auth.uid()
+  );
 $$;
 revoke execute on function public.vault_blocked_categories() from public, anon;
 grant execute on function public.vault_blocked_categories() to authenticated;
@@ -40,7 +36,9 @@ grant execute on function public.vault_blocked_categories() to authenticated;
 -- Es security invoker a propósito: se aplican las reglas de quien pregunta,
 -- así que cada uno cuenta solo lo que puede ver.
 create or replace function public.vault_folder_counts()
-returns table (category_id uuid, total bigint)
+-- Los nombres de salida no repiten los de las columnas a propósito, para que no
+-- haya ninguna duda de a qué se refiere cada uno dentro de la función.
+returns table (folder_id uuid, folder_total bigint)
 language sql
 stable
 security invoker
@@ -66,7 +64,9 @@ for select to authenticated
       or (
         visibility = 'shared'
         and (select public.current_user_roles()) is not null
-        and (category_id is null or not (category_id = any ((select public.vault_blocked_categories()))))
+        -- El casteo a uuid[] es obligatorio: sin él Postgres lee el (select ...)
+        -- como una subconsulta y compara uuid con uuid[].
+        and (category_id is null or not ((select public.vault_blocked_categories())::uuid[] @> array[category_id]))
       )
       or (visibility = 'restricted' and public.vault_has_permission(id, 'view'))
     )

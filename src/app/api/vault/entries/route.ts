@@ -77,10 +77,10 @@ export async function GET(request: Request) {
       visibleTotal++;
     }
   } else {
-    for (const row of (folderCounts.data ?? []) as { category_id: string | null; total: number }[]) {
-      const key = row.category_id ? String(row.category_id) : "none";
-      counts.set(key, Number(row.total));
-      visibleTotal += Number(row.total);
+    for (const row of (folderCounts.data ?? []) as { folder_id: string | null; folder_total: number }[]) {
+      const key = row.folder_id ? String(row.folder_id) : "none";
+      counts.set(key, Number(row.folder_total));
+      visibleTotal += Number(row.folder_total);
     }
   }
   // Most recently revealed first, without repeating.
