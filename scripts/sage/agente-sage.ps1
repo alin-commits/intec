@@ -40,8 +40,10 @@
 
 param(
   [string]$Servidor = "",
-  [string]$Usuario = "",
-  [string]$Clave = "",
+  # Salen de variables del sistema para que la contraseña no quede escrita en la
+  # tarea programada, donde la vería cualquiera que mire sus propiedades.
+  [string]$Usuario = $env:INTEC_SAGE_DB_USER,
+  [string]$Clave = $env:INTEC_SAGE_DB_PASSWORD,
   [string]$BaseDeDatos = "Sage",
   [int]$Dias = 90,
   [string]$Destino = "https://app.suministrointec.com/api/sage/ingest",
@@ -85,7 +87,10 @@ function Buscar-Instancias {
 
 function Nueva-Cadena($servidor) {
   $cadena = "Server=$servidor;Database=$BaseDeDatos;Connect Timeout=10;Application Name=Agente Intec;"
-  if ($Usuario -ne "") { return $cadena + "User ID=$Usuario;Password=$Clave;" }
+  # Si no hay usuario configurado se entra con la cuenta de Windows que ejecuta
+  # la tarea. Ojo: $env: devuelve nulo cuando la variable no existe, no cadena
+  # vacía, así que hay que comprobarlo así y no con -ne "".
+  if (-not [string]::IsNullOrWhiteSpace($Usuario)) { return $cadena + "User ID=$Usuario;Password=$Clave;" }
   return $cadena + "Integrated Security=SSPI;"
 }
 
@@ -108,7 +113,7 @@ function Consultar($servidor, $sql) {
 # ---------------------------------------------------------------------------
 Apuntar "----- arranque: ultimos $Dias dias -----"
 
-if (-not $SoloProbar -and ($Token -eq $null -or $Token -eq "")) {
+if (-not $SoloProbar -and [string]::IsNullOrWhiteSpace($Token)) {
   Apuntar "ERROR: falta la clave. Ponla con:  setx /M INTEC_SAGE_TOKEN ""...""  y vuelve a abrir la consola."
   exit 1
 }
