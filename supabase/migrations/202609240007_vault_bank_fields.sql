@@ -15,3 +15,7 @@ alter table public.vault_entries
 
 comment on column public.vault_entries.bank_details is
   'Datos del banco (nombre, código, titular, cuenta, IBAN) de las fichas de tipo bank. Nunca contiene contraseñas ni PIN.';
+
+-- A propósito no se da permiso de lectura de esta columna a `authenticated`: el
+-- listado no la necesita y la ficha la carga el servidor con permisos propios.
+-- El permiso de esta tabla se da columna a columna justamente para eso.

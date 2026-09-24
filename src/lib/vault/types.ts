@@ -60,7 +60,7 @@ export type VaultAuditAction =
 export type VaultDeniedReason = "signed_out" | "inactive" | "mfa_enrollment_required" | "mfa_required" | "locked" | "forbidden" | "not_configured" | "rate_limited";
 
 export const VAULT_ENTRY_COLUMNS =
-  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at, password_strength, bank_details";
+  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at, password_strength";
 
 /** Un valor vacío se guarda como null, para que la ficha no muestre huecos raros. */
 function mapBankDetails(row: Record<string, unknown>): VaultBankDetails {
@@ -74,6 +74,11 @@ function mapBankDetails(row: Record<string, unknown>): VaultBankDetails {
   };
 }
 
+/**
+ * `bank_details` no viaja en el listado: esa columna solo la lee el servidor al
+ * abrir una ficha, porque el permiso de lectura de la tabla se da columna a
+ * columna y la lista se consulta con la sesión de cada persona.
+ */
 export function mapVaultEntry(row: Record<string, unknown>): VaultEntrySummary {
   return {
     id: String(row.id),
