@@ -230,7 +230,7 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .unit-summary { padding: 20px; }
 .unit-summary h3 { margin: 14px 0 6px; }.unit-summary p { color: var(--muted); margin: 0; font-size: 13px; }
 .unit-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.unit-summary-actions { justify-content: flex-start; margin-top: 10px; }
+.unit-summary-actions { justify-content: flex-start; margin-top: 10px; flex-wrap: wrap; }
 .visibility-toggle-group { display: grid; gap: 8px; }
 .visibility-toggle-group-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .visibility-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); font-size: 14px; font-weight: 650; color: var(--text); cursor: pointer; }
@@ -285,13 +285,13 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .support-ticket-number { margin: 4px 0; font-size: 26px; font-weight: 800; color: var(--primary); }
 
 @media (max-width: 620px) {
-  .landing-grid { grid-template-columns: 1fr; }
+  .landing-grid { grid-template-columns: minmax(0, 1fr); }
   .support-header { flex-direction: column; }
 }
 
 @media (max-width: 1180px) {
   .kpi-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
   .units-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 820px) {
@@ -314,8 +314,8 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 }
 @media (max-width: 560px) {
   .topbar-actions .button { display: none; }.topbar h1 { font-size: 25px; }
-  .filter-bar, .lead-filters, .brand-picker, .units-grid { grid-template-columns: 1fr; }
-  .kpi-grid-3 { grid-template-columns: 1fr; }
+  .filter-bar, .lead-filters, .brand-picker, .units-grid { grid-template-columns: minmax(0, 1fr); }
+  .kpi-grid-3 { grid-template-columns: minmax(0, 1fr); }
   .chart-panel, .table-panel { padding: 16px; }.panel-heading { align-items: flex-start; flex-direction: column; }
 }
 
@@ -461,10 +461,10 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
   .inline-form { grid-template-columns: 1fr 1fr; }
   .inquiry-filters { grid-template-columns: 1fr 1fr; }
   .ticket-filters { grid-template-columns: 1fr 1fr; }
-  .ticket-detail-layout { grid-template-columns: 1fr; }
+  .ticket-detail-layout { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 620px) {
-  .form-grid, .inline-form, .inquiry-filters, .ticket-filters { grid-template-columns: 1fr; }
+  .form-grid, .inline-form, .inquiry-filters, .ticket-filters { grid-template-columns: minmax(0, 1fr); }
   .ticket-details-grid, .ticket-editable-grid, .add-note-form { grid-template-columns: 1fr; }
   .inquiry-card-row { flex-direction: column; align-items: flex-start; }
   .form-field-wide { grid-column: auto; }
@@ -706,6 +706,10 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .renewal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .renewal-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-muted); font-size: 13px; }
 .renewal-list li > span { display: grid; min-width: 0; }
+/* El nombre se recorta y el importe manda: sin esto la fila no bajaba de su
+   contenido y empujaba el ancho de toda la página en el móvil. */
+.renewal-list li > span > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.renewal-list li > strong { flex-shrink: 0; }
 .renewal-list li small { color: var(--muted); font-size: 12px; }
 .renewal-list li.renewal-soon { background: #fef2f2; }
 .renewal-list li.renewal-soon small { color: #b91c1c; font-weight: 600; }
@@ -714,7 +718,9 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .table-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 tr.row-muted td { opacity: .6; }
 .expenses-delete { margin-right: auto; color: #b91c1c; }
-@media (max-width: 900px) { .expenses-grid { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr) y no 1fr: con 1fr la columna nunca baja del contenido mínimo
+   de la tarjeta, y la página acababa desbordando a lo ancho en el móvil. */
+@media (max-width: 900px) { .expenses-grid { grid-template-columns: minmax(0, 1fr); } }
 .sort-header { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; white-space: nowrap; }
 .sort-header span { font-size: 11px; opacity: .35; }
 .sort-header:hover span { opacity: .8; }
@@ -1092,6 +1098,9 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
   .vault-layout { grid-template-columns: minmax(0, 1fr); height: auto; }
   .vault-tree { max-height: 240px; }
   .vault-list .table-scroll { overflow-x: visible; overflow-y: visible; margin: 0; padding: 0; }
+  /* Sin scroll y ya como tarjetas, el ancho mínimo general de las tablas solo
+     servía para que la página se fuera a 850px y desbordara. */
+  .vault-list table { min-width: 0; }
   /* Cards instead of a table: each credential becomes its own block. */
   .vault-list table, .vault-list tbody, .vault-list tr, .vault-list td { display: block; width: auto; }
   .vault-list thead { display: none; }

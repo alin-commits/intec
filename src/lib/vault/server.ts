@@ -158,7 +158,13 @@ export async function loadEntryForActor(
 /** Folders with an access list are only reachable by the people on it (vault admins aside). */
 export async function categoryAllowsUser(admin: SupabaseClient, categoryId: string | null, userId: string): Promise<boolean> {
   if (!categoryId) return true;
-  const { data } = await admin.from("vault_category_access").select("user_id").eq("category_id", categoryId);
+  const { data, error } = await admin.from("vault_category_access").select("user_id").eq("category_id", categoryId);
+  // Si la consulta falla no se puede saber quién tiene acceso, y en la ruta que
+  // descifra esta es la única comprobación de carpeta. Ante la duda, que no pase.
+  if (error) {
+    console.error("No se pudo comprobar el acceso a la carpeta:", error.message);
+    return false;
+  }
   if (!data || data.length === 0) return true;
   return data.some((row) => row.user_id === userId);
 }
