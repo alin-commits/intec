@@ -341,12 +341,17 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
     if (!pendingSend) return;
     let active = true;
     void (async () => {
-      const response = await fetch(`/api/invoices/send?id=${pendingSend.id}`, { cache: "no-store" });
-      if (!active) return;
-      const result = (await response.json().catch(() => ({}))) as { to?: string; sends?: InvoiceSend[] };
-      if (!response.ok) return;
-      if (result.to) setMailbox(result.to);
-      setSendLog({ id: pendingSend.id, sends: result.sends ?? [] });
+      try {
+        const response = await fetch(`/api/invoices/send?id=${pendingSend.id}`, { cache: "no-store" });
+        if (!active) return;
+        const result = (await response.json().catch(() => ({}))) as { to?: string; sends?: InvoiceSend[] };
+        if (result.to) setMailbox(result.to);
+        // Aunque falle hay que salir de "cargando": si no, el botón de enviar se
+        // quedaba desactivado para siempre y la factura no se podía mandar.
+        setSendLog({ id: pendingSend.id, sends: response.ok ? result.sends ?? [] : [] });
+      } catch {
+        if (active) setSendLog({ id: pendingSend.id, sends: [] });
+      }
     })();
     return () => { active = false; };
   }, [pendingSend]);
@@ -413,7 +418,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   }, [invoices, sort, units, expenses]);
 
   // Si cambian los filtros de arriba o el orden, se vuelve a la primera página.
-  const filterKey = `${year}|${invoices.length}|${sort?.key ?? ""}|${sort?.direction ?? ""}`;
+  const filterKey = `${year}|${invoices.map((invoice) => invoice.id).join(",")}|${sort?.key ?? ""}|${sort?.direction ?? ""}`;
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);
   if (filterKey !== lastFilterKey) {
     setLastFilterKey(filterKey);

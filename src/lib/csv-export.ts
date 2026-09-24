@@ -5,6 +5,17 @@ function escapeCsvValue(raw: string): string {
   return raw;
 }
 
+/**
+ * Un número se escribe con coma decimal. El separador de columnas es el punto y
+ * coma, así que no hay ambigüedad, y Excel en español lo lee como número: con
+ * punto lo tomaba por texto y SUMA() daba cero en esas columnas.
+ */
+function csvCell(raw: string | number | null | undefined): string {
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw === "number") return Number.isFinite(raw) ? String(raw).replace(".", ",") : "";
+  return raw;
+}
+
 function downloadCsvText(filename: string, csv: string) {
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -21,7 +32,7 @@ function tableCsv<T>(rows: T[], columns: CsvColumn<T>[]): string {
   const header = columns.map((column) => escapeCsvValue(column.header)).join(";");
   const lines = rows.map((row) => columns.map((column) => {
     const raw = column.value(row);
-    return escapeCsvValue(raw === null || raw === undefined ? "" : String(raw));
+    return escapeCsvValue(csvCell(raw));
   }).join(";"));
   return [header, ...lines].join("\r\n");
 }
@@ -38,7 +49,7 @@ export function downloadCsvReport<T>(
   rows: T[],
   columns: CsvColumn<T>[],
 ) {
-  const summaryLines = summary.map((item) => `${escapeCsvValue(item.label)};${escapeCsvValue(String(item.value))}`);
+  const summaryLines = summary.map((item) => `${escapeCsvValue(item.label)};${escapeCsvValue(csvCell(item.value))}`);
   const csv = [...summaryLines, "", tableCsv(rows, columns)].join("\r\n");
   downloadCsvText(filename, csv);
 }

@@ -162,6 +162,16 @@ export function ExpensesManager() {
   }, [configured]);
 
   async function loadRealData() {
+    try {
+      await loadExpensesData();
+    } catch (cause) {
+      // Sin esto, `access` se quedaba en "comprobando" y la página en blanco.
+      setAccess("allowed");
+      setMessage(reportSafeError(cause, "No se pudieron cargar los gastos. Recarga la página."));
+    }
+  }
+
+  async function loadExpensesData() {
     const supabase = createClient();
     const { data: authData } = await supabase.auth.getUser();
     const user = authData.user;
@@ -222,7 +232,7 @@ export function ExpensesManager() {
           case "unit": result = unitOf(a).localeCompare(unitOf(b), "es"); break;
           case "kind": result = KIND_ORDER[a.kind === "one_off" ? "one_off" : a.billingPeriod ?? "monthly"] - KIND_ORDER[b.kind === "one_off" ? "one_off" : b.billingPeriod ?? "monthly"]; break;
           case "amount": result = a.amount - b.amount; break;
-          case "monthly": result = monthlyCost(a) - monthlyCost(b); break;
+          case "monthly": result = monthlyCost(a, today) - monthlyCost(b, today); break;
           case "status": result = a.status === b.status ? 0 : a.status === "active" ? -1 : 1; break;
           case "next": {
             const dateA = displayDate(a, today);
@@ -277,39 +287,44 @@ export function ExpensesManager() {
   const expenseSpend = useCallback((expense: MarketingExpense, to: string) => subscriptionSpend(expense, invoices, yearStart, to), [invoices, yearStart]);
 
   const summary = useMemo(() => {
-    const monthly = visibleExpenses.reduce((sum, expense) => sum + monthlyCost(expense), 0);
+    const monthly = visibleExpenses.reduce((sum, expense) => sum + monthlyCost(expense, today), 0);
     const standaloneSpent = standaloneInvoices.filter((invoice) => invoice.invoiceDate <= spentUntil).reduce((sum, invoice) => sum + invoice.baseAmount, 0);
     let invoiced = standaloneSpent;
     let estimated = 0;
+    let projected = standaloneInvoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0);
+    const byCategory = new Map<ExpenseCategory, number>();
     for (const expense of visibleExpenses) {
       const part = expenseSpend(expense, spentUntil);
       invoiced += part.actual;
       estimated += part.estimated;
+      const value = part.actual + part.estimated;
+      if (value > 0) byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + value);
+      const toYearEnd = expenseSpend(expense, yearEnd);
+      projected += toYearEnd.actual + toYearEnd.estimated;
     }
     const spent = invoiced + estimated;
-    const projected = visibleExpenses.reduce((sum, expense) => { const part = expenseSpend(expense, yearEnd); return sum + part.actual + part.estimated; }, 0)
-      + standaloneInvoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0);
+    // Las facturas que se enseñan son las del año que cumplen los filtros de
+    // arriba: antes el recuento y el total iban por libre y contradecían al
+    // «Gasto del año» que sí los aplica.
+    const countedInvoices = yearInvoices.filter((invoice) => (invoice.expenseId
+      ? visibleExpenses.some((expense) => expense.id === invoice.expenseId)
+      : standaloneInvoices.some((item) => item.id === invoice.id)));
     const invoiceTotals = {
-      count: yearInvoices.length,
-      base: yearInvoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0),
-      total: yearInvoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0),
+      count: countedInvoices.length,
+      base: countedInvoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0),
+      total: countedInvoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0),
     };
     const renewals = visibleExpenses
       .map((expense) => ({ expense, date: nextRenewal(expense, today) }))
       .filter((item): item is { expense: MarketingExpense; date: string } => item.date !== null && daysBetween(today, item.date) <= RENEWAL_WINDOW_DAYS)
       .sort((a, b) => a.date.localeCompare(b.date));
-    const byCategory = new Map<ExpenseCategory, number>();
-    for (const expense of visibleExpenses) {
-      const part = expenseSpend(expense, spentUntil);
-      const value = part.actual + part.estimated;
-      if (value > 0) byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + value);
-    }
     for (const invoice of standaloneInvoices) {
       const value = invoice.invoiceDate <= spentUntil ? invoice.baseAmount : 0;
       if (value > 0) byCategory.set(invoice.category, (byCategory.get(invoice.category) ?? 0) + value);
     }
     const categoryItems: DonutItem[] = Array.from(byCategory, ([key, value]) => ({ label: expenseCategoryLabels[key], value, color: expenseCategoryColors[key] })).sort((a, b) => b.value - a.value);
-    const activeSubscriptions = visibleExpenses.filter((expense) => monthlyCost(expense) > 0).length;
+    // Una suscripción activa de importe cero sigue siendo una suscripción activa.
+    const activeSubscriptions = visibleExpenses.filter((expense) => expense.kind === "subscription" && expense.status === "active" && expense.startDate <= today).length;
     return { monthly, spent, invoiced, estimated, projected, invoiceTotals, renewals, categoryItems, activeSubscriptions };
   }, [visibleExpenses, standaloneInvoices, yearInvoices, expenseSpend, yearEnd, spentUntil, today]);
 
@@ -451,7 +466,7 @@ export function ExpensesManager() {
       { header: "Unidad", value: (expense) => unitName(expense.businessUnitId) },
       { header: "Tipo", value: (expense) => expenseKindLabel(expense) },
       { header: "Importe (€)", value: (expense) => expense.amount },
-      { header: "Coste mensual (€)", value: (expense) => Math.round(monthlyCost(expense) * 100) / 100 },
+      { header: "Coste mensual (€)", value: (expense) => monthlyCost(expense, today) },
       { header: `Gastado ${year} (€)`, value: (expense) => { const part = expenseSpend(expense, spentUntil); return Math.round((part.actual + part.estimated) * 100) / 100; } },
       { header: "Fecha inicio / gasto", value: (expense) => formatDate(expense.startDate) },
       { header: "Próxima renovación", value: (expense) => { const date = nextRenewal(expense, today); return date ? formatDate(date) : ""; } },
@@ -471,7 +486,7 @@ export function ExpensesManager() {
         unitName: unitName(expense.businessUnitId),
         kindLabel: expenseKindLabel(expense),
         amount: expense.amount,
-        monthlyCost: monthlyCost(expense),
+        monthlyCost: monthlyCost(expense, today),
         spentInYear: (() => { const part = expenseSpend(expense, spentUntil); return part.actual + part.estimated; })(),
         nextDate: expense.kind === "one_off" ? expense.startDate : nextRenewal(expense, today),
         active: expense.status === "active",
@@ -547,8 +562,8 @@ export function ExpensesManager() {
       <section className="kpi-grid">
         <KpiCard label={year === currentYear ? `Gasto ${year} hasta hoy` : `Gasto ${year}`} value={currencyFormatter.format(summary.spent)} delta="Sin comparación" helper={`${currencyFormatter.format(summary.invoiced)} facturado + ${currencyFormatter.format(summary.estimated)} estimado`} icon={<EuroIcon />} tone="amber" />
         <KpiCard label={`Facturas ${year}`} value={currencyFormatter.format(summary.invoiceTotals.base)} delta="Sin comparación" helper={`${summary.invoiceTotals.count} factura${summary.invoiceTotals.count === 1 ? "" : "s"} · ${currencyFormatter.format(summary.invoiceTotals.total)} con IVA`} icon={<DocumentIcon />} tone="sky" />
-        <KpiCard label="Coste mensual" value={currencyFormatter.format(summary.monthly)} delta="Sin comparación" helper={`${currencyFormatter.format(summary.monthly * 12)}/año · ${summary.activeSubscriptions} suscripcion${summary.activeSubscriptions === 1 ? "" : "es"} activa${summary.activeSubscriptions === 1 ? "" : "s"}`} icon={<WalletIcon />} tone="indigo" />
-        <KpiCard label="Renovaciones próximas" value={String(summary.renewals.length)} delta="Sin comparación" helper={nextRenewalItem ? `${nextRenewalItem.expense.name} ${renewalLabel(daysBetween(today, nextRenewalItem.date))}` : `ninguna en ${RENEWAL_WINDOW_DAYS} días`} icon={<CalendarIcon />} tone={summary.renewals.some((item) => daysBetween(today, item.date) <= 7) ? "rose" : "emerald"} />
+        <KpiCard label="Coste mensual" value={currencyFormatter.format(summary.monthly)} delta="Sin comparación" helper={`hoy · ${currencyFormatter.format(summary.monthly * 12)}/año · ${summary.activeSubscriptions} suscripcion${summary.activeSubscriptions === 1 ? "" : "es"} activa${summary.activeSubscriptions === 1 ? "" : "s"}`} icon={<WalletIcon />} tone="indigo" />
+        <KpiCard label="Renovaciones próximas" value={String(summary.renewals.length)} delta="Sin comparación" helper={nextRenewalItem ? `desde hoy · ${nextRenewalItem.expense.name} ${renewalLabel(daysBetween(today, nextRenewalItem.date))}` : `ninguna en los próximos ${RENEWAL_WINDOW_DAYS} días`} icon={<CalendarIcon />} tone={summary.renewals.some((item) => daysBetween(today, item.date) <= 7) ? "rose" : "emerald"} />
       </section>
 
       <section className="expenses-grid">
@@ -621,7 +636,7 @@ export function ExpensesManager() {
                     <td>{unitName(expense.businessUnitId)}</td>
                     <td>{expenseKindLabel(expense)}</td>
                     <td>{currencyFormatter.format(expense.amount)}</td>
-                    <td>{monthlyCost(expense) ? currencyFormatter.format(monthlyCost(expense)) : "—"}</td>
+                    <td>{monthlyCost(expense, today) ? currencyFormatter.format(monthlyCost(expense, today)) : "—"}</td>
                     <td>{expense.kind === "one_off" ? <span className="muted">{formatDate(expense.startDate)}</span> : renewal ? formatDate(renewal) : expense.cancelledOn ? <span className="muted">Baja {formatDate(expense.cancelledOn)}</span> : "—"}</td>
                     <td><span className={expense.status === "active" ? "badge badge-active" : "badge"}>{expense.status === "active" ? "Activo" : "De baja"}</span></td>
                     <td>

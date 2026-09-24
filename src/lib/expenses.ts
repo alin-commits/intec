@@ -70,8 +70,11 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /** What an active subscription costs per month; one-off or cancelled expenses cost nothing recurring. */
-export function monthlyCost(expense: MarketingExpense): number {
+export function monthlyCost(expense: MarketingExpense, today?: string): number {
   if (expense.kind !== "subscription" || expense.status !== "active" || !expense.billingPeriod) return 0;
+  // Una suscripción cuyo primer cargo aún no ha llegado no cuesta nada todavía:
+  // sin esto, darla de alta con fecha futura ya subía el coste mensual de hoy.
+  if (today && expense.startDate > today) return 0;
   return expense.amount / PERIOD_MONTHS[expense.billingPeriod];
 }
 
@@ -81,7 +84,9 @@ export function chargeDates(expense: MarketingExpense, from: string, to: string)
     return expense.startDate >= from && expense.startDate <= to ? [expense.startDate] : [];
   }
   // A cancelled subscription is not charged on or after the cancellation date.
-  const stop = expense.status === "cancelled" && expense.cancelledOn ? expense.cancelledOn : null;
+  // Una baja sin fecha se trata como dada de baja desde el principio: si no,
+  // seguiría generando cargos todo el año con coste mensual cero.
+  const stop = expense.status === "cancelled" ? expense.cancelledOn ?? expense.startDate : null;
   const step = PERIOD_MONTHS[expense.billingPeriod];
   const dates: string[] = [];
   for (let index = 0; ; index++) {
@@ -127,6 +132,11 @@ export function subscriptionSpend(expense: MarketingExpense, invoices: InvoiceCh
     if (best === -1) uncovered++;
     else unused.splice(best, 1);
   }
+  // Una factura enlazada que no ha casado con ningún cargo sigue siendo un cargo
+  // de esta suscripción, solo que con la fecha corrida (la cuota de diciembre
+  // facturada en enero, por ejemplo). Si no descontara, se sumaría encima de la
+  // estimación y el año saldría con un cargo de más.
+  uncovered = Math.max(0, uncovered - unused.length);
   return { actual, estimated: uncovered * expense.amount };
 }
 
