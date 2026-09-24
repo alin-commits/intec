@@ -1235,3 +1235,16 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .invoice-table th:nth-child(3), .invoice-table td:nth-child(3) { min-width: 170px; }
 .invoice-table th:nth-child(2), .invoice-table td:nth-child(2) { min-width: 150px; }
 .invoice-table td:nth-child(10) { white-space: nowrap; }
+
+/* Ventas por origen: cada línea explica de dónde sale su número */
+.sales-source-list li { align-items: flex-start; }
+.sales-source-list span { display: grid; gap: 2px; }
+.sales-source-list small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.sales-source-list strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sales-source-panel { grid-column: 1 / -1; }
+.sales-source-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); gap: 26px; align-items: start; }
+.sales-source-note { padding: 16px 18px; border-radius: 12px; background: var(--surface-muted); }
+.sales-source-note strong { display: block; font-size: 13px; margin-bottom: 8px; }
+.sales-source-note p { margin: 0 0 10px; color: #475569; font-size: 12.5px; line-height: 1.55; }
+.sales-source-note p:last-child { margin-bottom: 0; }
+@media (max-width: 900px) { .sales-source-body { grid-template-columns: 1fr; gap: 18px; } }

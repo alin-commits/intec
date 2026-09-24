@@ -56,7 +56,7 @@ function ActivityIcon({ kind }: { kind: ActivityKind }) {
 
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
-type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus; directSalesCount: number; directSaleValue: number };
+type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus; month: string | null; directSalesCount: number; directSaleValue: number };
 type CampaignLeadStub = { campaignId: string | null; businessUnitId: string; createdAt: string; status: LeadStatus; saleValue: number | null };
 type StatusCounts = Partial<Record<LeadStatus, number>>;
 
@@ -91,8 +91,8 @@ function bucketChannels(rows: { businessUnitId: string; createdAt: string; chann
 const demoChannelStats = bucketChannels(demoInquiries.map((record) => ({ businessUnitId: record.businessUnitId, createdAt: record.createdAt, channel: record.inquiryType, count: record.count })));
 type SocialStub = { businessUnitId: string; periodMonth: string; newFollowers: number };
 type InquirySaleStub = { businessUnitId: string; month: string; value: number };
-type AdsStub = { businessUnitId: string; campaignId: string | null; amountSpent: number; leads: number; revenue: number };
-type MailingStub = { businessUnitId: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
+type AdsStub = { businessUnitId: string; campaignId: string | null; month: string; amountSpent: number; leads: number; revenue: number };
+type MailingStub = { businessUnitId: string; month: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
 
 function sumRows(rows: MonthlyStat[]): Totals {
   return rows.reduce((acc, row) => ({
@@ -156,7 +156,7 @@ export function DashboardClient() {
   const [allBusinessUnits, setAllBusinessUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStat[]>(demoMonthlyStats);
   const [channelStats, setChannelStats] = useState<ChannelStat[]>(demoChannelStats);
-  const [campaignRows, setCampaignRows] = useState<CampaignRow[]>(demoCampaigns.map((campaign: Campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name, status: campaign.status, directSalesCount: campaign.directSalesCount, directSaleValue: campaign.directSaleValue })));
+  const [campaignRows, setCampaignRows] = useState<CampaignRow[]>(demoCampaigns.map((campaign: Campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name, status: campaign.status, month: null, directSalesCount: campaign.directSalesCount, directSaleValue: campaign.directSaleValue })));
   const [campaignLeads, setCampaignLeads] = useState<CampaignLeadStub[]>(demoCampaignLeads);
   const [socialStats, setSocialStats] = useState<SocialStub[]>([]);
   const [inquirySales, setInquirySales] = useState<InquirySaleStub[]>([]);
@@ -199,11 +199,11 @@ export function DashboardClient() {
         fetchAllPages((from, to) => supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, count").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode, sale_type").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").order("id").range(from, to)),
-        fetchAllPages((from, to) => supabase.from("lead_status_history").select("new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).order("id").range(from, to)),
-        supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
+        fetchAllPages((from, to) => supabase.from("lead_status_history").select("lead_id, new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).order("id").range(from, to)),
+        supabase.from("campaigns").select("id, business_unit_id, name, status, start_date, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         supabase.from("social_media_stats").select("business_unit_id, period_month, new_followers"),
-        supabase.from("meta_ads_entries").select("business_unit_id, campaign_id, amount_spent, leads, revenue"),
-        supabase.from("mailing_campaigns").select("business_unit_id, sent_count, opens, delivered_count, revenue"),
+        supabase.from("meta_ads_entries").select("business_unit_id, campaign_id, start_date, created_at, amount_spent, leads, revenue"),
+        supabase.from("mailing_campaigns").select("business_unit_id, sent_date, sent_count, opens, delivered_count, revenue"),
       ]);
       if (unitError || inquiryError || salesError || leadError || historyError || campaignError) {
         setMessage(reportSafeError(unitError ?? inquiryError ?? salesError ?? leadError ?? historyError ?? campaignError, "No se pudieron cargar los datos del dashboard."));
@@ -245,32 +245,44 @@ export function DashboardClient() {
       for (const row of leadData ?? []) {
         bucket(row.business_unit_id, monthKeyOf(row.created_at)).leads += 1;
       }
+      // Un lead puede pasar por "ganado" más de una vez si alguien le cambia el
+      // estado y lo vuelve a poner. Cuenta una sola vez, la primera, y su
+      // importe también.
+      const firstChange = new Map<string, { changedAt: string; unitId: string; saleValue: number }>();
       for (const row of historyData ?? []) {
         const leadInfo = row.leads as unknown as { business_unit_id: string; sale_value: number | null } | null;
         if (!leadInfo) continue;
-        const b = bucket(leadInfo.business_unit_id, monthKeyOf(row.changed_at));
-        if (row.new_status === "won") {
+        const key = `${row.lead_id}|${row.new_status}`;
+        const previous = firstChange.get(key);
+        if (previous && previous.changedAt <= row.changed_at) continue;
+        firstChange.set(key, { changedAt: row.changed_at, unitId: leadInfo.business_unit_id, saleValue: leadInfo.sale_value ?? 0 });
+      }
+      for (const [key, change] of firstChange) {
+        const b = bucket(change.unitId, monthKeyOf(change.changedAt));
+        if (key.endsWith("|won")) {
           b.won += 1;
-          b.saleValue += leadInfo.sale_value ?? 0;
-        } else if (row.new_status === "lost") {
+          b.saleValue += change.saleValue;
+        } else {
           b.lost += 1;
         }
       }
       setMonthlyStats(Array.from(buckets.values()));
       setChannelStats(bucketChannels((inquiryData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, createdAt: row.created_at, channel: row.inquiry_type as InquiryType, count: Number(row.count ?? 1) }))));
 
-      setCampaignRows((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
+      setCampaignRows((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, month: row.start_date ? monthKeyOf(String(row.start_date)) : null, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
 
       const leadStubs: CampaignLeadStub[] = (leadData ?? []).map((row) => ({ campaignId: row.campaign_id, businessUnitId: row.business_unit_id, createdAt: row.created_at, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) }));
       setCampaignLeads(leadStubs);
 
       setSocialStats((socialData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, periodMonth: String(row.period_month).slice(0, 7), newFollowers: Number(row.new_followers ?? 0) })));
-      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0), revenue: Number(row.revenue ?? 0) })));
+      // La fecha de una entrada de Meta Ads es la de inicio de la campaña; si no
+      // la tiene, la de cuando se anotó. Es el mismo criterio que usa RRSS.
+      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, month: monthKeyOf(String(row.start_date ?? row.created_at)), amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0), revenue: Number(row.revenue ?? 0) })));
       if (socialError || adsError || mailingError) {
         console.error("Métricas de marketing no disponibles en el dashboard:", socialError ?? adsError ?? mailingError);
         setMessage(PARTIAL_LOAD_MESSAGE);
       }
-      setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0), revenue: Number(row.revenue ?? 0) })));
+      setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, month: monthKeyOf(String(row.sent_date)), sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0), revenue: Number(row.revenue ?? 0) })));
     })();
   }, [configured, selectedMonthYear, selectedYear]);
 
@@ -420,9 +432,24 @@ export function DashboardClient() {
   const trendData = trendMonths.map((month) => ({ label: monthShortLabel(month), ...sumChannels(filteredChannelStats.filter((row) => row.month === month)) }));
   const periodChannelCounts = sumChannels(filteredChannelStats.filter((row) => inPeriod(row.month)));
 
-  const rrssSocialFiltered = useMemo(() => socialStats.filter((row) => businessUnitId === "all" || row.businessUnitId === businessUnitId), [socialStats, businessUnitId]);
-  const rrssAdsFiltered = useMemo(() => adsEntries.filter((row) => businessUnitId === "all" || row.businessUnitId === businessUnitId), [adsEntries, businessUnitId]);
-  const rrssMailingFiltered = useMemo(() => mailingRows.filter((row) => businessUnitId === "all" || row.businessUnitId === businessUnitId), [mailingRows, businessUnitId]);
+  // Antes solo se filtraba por unidad, así que estas cifras enseñaban el total
+  // de siempre aunque arriba estuviera elegido un mes o un año concretos.
+  const matchesUnit = (unit: string) => businessUnitId === "all" || unit === businessUnitId;
+  const rrssSocialFiltered = useMemo(
+    () => socialStats.filter((row) => matchesUnit(row.businessUnitId) && inPeriod(row.periodMonth)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- matchesUnit e inPeriod se rehacen en cada render
+    [socialStats, businessUnitId, viewMode, selectedMonth, selectedYear],
+  );
+  const rrssAdsFiltered = useMemo(
+    () => adsEntries.filter((row) => matchesUnit(row.businessUnitId) && inPeriod(row.month)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- igual que arriba
+    [adsEntries, businessUnitId, viewMode, selectedMonth, selectedYear],
+  );
+  const rrssMailingFiltered = useMemo(
+    () => mailingRows.filter((row) => matchesUnit(row.businessUnitId) && inPeriod(row.month)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- igual que arriba
+    [mailingRows, businessUnitId, viewMode, selectedMonth, selectedYear],
+  );
 
   const rrssSummary = useMemo(() => {
     const spend = rrssAdsFiltered.reduce((sum, row) => sum + row.amountSpent, 0);
@@ -441,6 +468,23 @@ export function DashboardClient() {
       followersGained,
     };
   }, [rrssAdsFiltered, rrssMailingFiltered, rrssSocialFiltered]);
+
+  /**
+   * Las cinco cifras de venta que maneja el hub. A propósito NO se suman: una
+   * misma venta puede estar anotada en más de un sitio (un lead ganado que vino
+   * de una campaña de Meta, por ejemplo), así que un total sería mentira.
+   */
+  const salesBySource = useMemo(() => {
+    const campaignsInPeriod = campaignRows.filter((row) => matchesUnit(row.businessUnitId) && row.month !== null && inPeriod(row.month));
+    return [
+      { key: "leads", label: "Leads ganados", value: current.saleValue, helper: "valor de los leads marcados como ganados" },
+      { key: "ads", label: "Meta Ads", value: rrssAdsFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada campaña" },
+      { key: "mailing", label: "Mailing", value: rrssMailingFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada envío" },
+      { key: "inquiries", label: "Consultas", value: filteredInquirySales.filter((item) => inPeriod(item.month)).reduce((sum, item) => sum + item.value, 0), helper: "solo los apuntes de tipo pedido" },
+      { key: "campaigns", label: "Campañas", value: campaignsInPeriod.reduce((sum, row) => sum + row.directSaleValue, 0), helper: "venta directa anotada en la campaña" },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- matchesUnit e inPeriod se rehacen en cada render
+  }, [current.saleValue, rrssAdsFiltered, rrssMailingFiltered, filteredInquirySales, campaignRows, businessUnitId, viewMode, selectedMonth, selectedYear]);
 
   const rrssTrend = useMemo(() => {
     const byMonth = new Map<string, number>();
@@ -675,15 +719,43 @@ export function DashboardClient() {
           />
         </article>
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><h2>Meta Ads y mailing</h2><p className="panel-subtitle">Total registrado</p></div></div>
+          <div className="panel-heading"><div><h2>Meta Ads y mailing</h2><p className="panel-subtitle">{periodLabel}</p></div></div>
           <ul className="stat-list">
             <li><span>Gasto en Meta Ads</span><strong>{currencyFormatter.format(rrssSummary.adsSpend)}</strong></li>
-            <li><span>Valor de venta RRSS</span><strong>{currencyFormatter.format(rrssSummary.revenue)}</strong></li>
             <li><span>Leads de Meta Ads</span><strong>{numberFormatter.format(rrssSummary.adsLeads)}</strong></li>
             <li><span>Seguidores ganados</span><strong>{numberFormatter.format(rrssSummary.followersGained)}</strong></li>
             <li><span>Envíos de email</span><strong>{numberFormatter.format(rrssSummary.mailingSent)}</strong></li>
             <li><span>Open rate medio</span><strong>{formatPercent(rrssSummary.mailingOpenRate)}</strong></li>
           </ul>
+        </article>
+      </section>
+
+      <section className="dashboard-grid">
+        <article className="panel chart-panel sales-source-panel">
+          <div className="panel-heading">
+            <div><h2>Ventas por origen</h2><p className="panel-subtitle">{periodLabel}</p></div>
+          </div>
+          <div className="sales-source-body">
+            <ul className="stat-list sales-source-list">
+              {salesBySource.map((source) => (
+                <li key={source.key}>
+                  <span>{source.label}<small>{source.helper}</small></span>
+                  <strong>{currencyFormatter.format(source.value)}</strong>
+                </li>
+              ))}
+            </ul>
+            <aside className="sales-source-note">
+              <strong>Por qué están separadas</strong>
+              <p>
+                Estas cifras <b>no se suman entre sí</b>. Una misma venta puede estar anotada en más de un sitio:
+                un lead ganado que vino de una campaña de Meta cuenta en las dos primeras líneas.
+              </p>
+              <p>
+                Son importes que escribe el equipo a mano para medir qué canal funciona, <b>no facturación</b>.
+                La cifra de lo que se ha vendido de verdad está en Sage.
+              </p>
+            </aside>
+          </div>
         </article>
       </section>
 
