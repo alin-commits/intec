@@ -19,6 +19,14 @@ export function Modal({ open, title, eyebrow, children, onClose, scrollInside = 
   const titleId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const returnFocusTo = useRef<Element | null>(null);
+  // onClose llega casi siempre como función nueva en cada render. Guardarla aquí
+  // permite que el efecto de abajo dependa solo de `open`: cuando dependía de
+  // onClose, cada letra escrita en un campo lo volvía a ejecutar y el foco
+  // saltaba del campo a la ✕ de cerrar, que es lo primero enfocable del diálogo.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -36,7 +44,7 @@ export function Modal({ open, title, eyebrow, children, onClose, scrollInside = 
         const cards = document.querySelectorAll(".modal-card");
         if (cards.length > 0 && cards[cards.length - 1] !== cardRef.current) return;
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !cardRef.current) return;
@@ -60,7 +68,7 @@ export function Modal({ open, title, eyebrow, children, onClose, scrollInside = 
       // Al cerrar, el foco vuelve a donde estaba y no se pierde el sitio.
       if (returnFocusTo.current instanceof HTMLElement) returnFocusTo.current.focus();
     };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
   return (

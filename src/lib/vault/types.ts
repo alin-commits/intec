@@ -32,7 +32,7 @@ export type VaultEntrySummary = {
   bankDetails: VaultBankDetails | null;
 };
 
-export type VaultCategory = { id: string; name: string; description: string | null };
+export type VaultCategory = { id: string; name: string; description: string | null; parentId: string | null };
 
 export type VaultPermission = {
   userId: string;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, fingerprintSecret } from "@/lib/security/vault-key";
 import { guardVault, logVault, passwordMetadata, vaultError } from "@/lib/vault/server";
 import { createEntrySchema } from "@/lib/vault/validation";
@@ -8,6 +9,18 @@ import { sanitizeSearchTerm } from "@/lib/search-term";
 const PAGE_SIZE = 100;
 /** Tope del índice del buscador: por encima de esto se busca contra el servidor. */
 const INDEX_LIMIT = 3000;
+
+/**
+ * Las carpetas, con su madre si la base ya la tiene. Mientras la migración del
+ * árbol no esté aplicada, parent_id no existe y la consulta entera fallaría:
+ * entonces se piden sin ella y el gestor sigue enseñando las carpetas, igual que
+ * se hace más abajo con la función que cuenta por carpeta.
+ */
+async function loadCategories(db: SupabaseClient) {
+  const withParent = await db.from("vault_categories").select("id, name, description, parent_id").order("sort_order");
+  if (!withParent.error) return withParent;
+  return db.from("vault_categories").select("id, name, description").order("sort_order");
+}
 
 /** Lists the credentials this user may see. Never returns ciphertext or secrets. */
 export async function GET(request: Request) {
@@ -105,7 +118,7 @@ export async function GET(request: Request) {
 
   const [{ data, error, count }, categories, folderCounts, favorites, recentLog] = await Promise.all([
     query,
-    guard.supabase.from("vault_categories").select("id, name, description").order("sort_order"),
+    loadCategories(guard.supabase),
     // The database counts per folder and returns one row per folder, instead of
     // one row per credential just to add them up here.
     guard.supabase.rpc("vault_folder_counts"),
@@ -145,6 +158,7 @@ export async function GET(request: Request) {
         id: row.id,
         name: row.name,
         description: row.description,
+        parentId: (row as { parent_id?: string | null }).parent_id ?? null,
         count: counts.get(String(row.id)) ?? 0,
       })),
       uncategorised: counts.get("none") ?? 0,

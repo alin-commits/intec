@@ -8,8 +8,16 @@ export async function GET() {
   const guard = await guardVault({ requireAdmin: true });
   if (!guard.ok) return guard.response;
 
+  // Si la migración del árbol de carpetas aún no está aplicada, parent_id no
+  // existe y pedirla tiraría la consulta entera: entonces se piden sin ella.
+  const categoriesQuery = async () => {
+    const withParent = await guard.admin.from("vault_categories").select("id, name, parent_id").order("name");
+    if (!withParent.error) return withParent;
+    return guard.admin.from("vault_categories").select("id, name").order("name");
+  };
+
   const [{ data: categories }, { data: entries }, { data: access }, { data: profiles }] = await Promise.all([
-    guard.admin.from("vault_categories").select("id, name").order("name"),
+    categoriesQuery(),
     guard.admin.from("vault_entries").select("category_id, visibility").eq("is_active", true),
     guard.admin.from("vault_category_access").select("category_id, user_id"),
     guard.admin.from("profiles").select("id, full_name, email, roles, is_active").eq("is_active", true).order("full_name"),
@@ -34,6 +42,7 @@ export async function GET() {
   const folders = (categories ?? []).map((category) => ({
     id: String(category.id),
     name: String(category.name),
+    parentId: (category as { parent_id?: string | null }).parent_id ?? null,
     count: counts.get(String(category.id)) ?? 0,
     userIds: accessByCategory.get(String(category.id)) ?? [],
   }));

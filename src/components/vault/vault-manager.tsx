@@ -33,7 +33,7 @@ const bankFields: { key: keyof VaultBankDetails; label: string; placeholder: str
 const emptyBank: VaultBankDetails = { bankName: null, bankCode: null, accountHolder: null, accountNumber: null, iban: null };
 
 
-type Category = { id: string; name: string; description: string | null; count: number };
+type Category = { id: string; name: string; description: string | null; parentId: string | null; count: number };
 /** En una carpeta madre, `ids` lleva la suya y las de sus subcarpetas. */
 type Scope = { kind: "all" | "favorites" | "recent" | "personal" | "uncategorised" | "category"; id?: string; ids?: string[] };
 type EntryDraft = { name: string; url: string; username: string; password: string; notes: string; categoryId: string; visibility: VaultVisibility; entryType: VaultEntryType; bank: VaultBankDetails };
@@ -208,16 +208,22 @@ export function VaultManager() {
   // ---------- folder tree ----------
 
   const tree = useMemo(() => {
-    const roots = new Map<string, { name: string; category?: Category; total: number; children: Category[] }>();
-    for (const category of data?.categories ?? []) {
-      const [parent, child] = category.name.split(" / ");
-      const node = roots.get(parent) ?? { name: parent, total: 0, children: [] };
-      if (child) node.children.push({ ...category, name: child });
-      else node.category = category;
-      node.total += category.count;
-      roots.set(parent, node);
+    const all = data?.categories ?? [];
+    const present = new Set(all.map((category) => category.id));
+    const childrenOf = new Map<string, Category[]>();
+    for (const category of all) {
+      if (!category.parentId || !present.has(category.parentId)) continue;
+      childrenOf.set(category.parentId, [...(childrenOf.get(category.parentId) ?? []), category]);
     }
-    return [...roots.values()].sort((a, b) => b.total - a.total);
+    // Una carpeta cuya madre no esté en la lista se enseña como si fuera de
+    // primer nivel: mejor eso que dejarla fuera del árbol y que parezca perdida.
+    return all
+      .filter((category) => !category.parentId || !present.has(category.parentId))
+      .map((category) => {
+        const children = childrenOf.get(category.id) ?? [];
+        return { category, name: category.name, children, total: category.count + children.reduce((sum, child) => sum + child.count, 0) };
+      })
+      .sort((a, b) => b.total - a.total);
   }, [data?.categories]);
 
   const entries = useMemo(() => data?.entries ?? [], [data?.entries]);
@@ -225,6 +231,23 @@ export function VaultManager() {
   const categoryName = useMemo(() => {
     const map = new Map((data?.categories ?? []).map((category) => [category.id, category.name]));
     return (id: string | null) => (id ? map.get(id) ?? "—" : "Sin carpeta");
+  }, [data?.categories]);
+  /** La carpeta con su madre delante ("Dpto. Marketing e IT / Blizzcool"), para
+   *  la ficha, el buscador y los títulos: hay nombres que se repiten en varios
+   *  departamentos y por sí solos no dicen de cuál son. */
+  const categoryPath = useMemo(() => {
+    const byId = new Map((data?.categories ?? []).map((category) => [category.id, category]));
+    return (id: string | null) => {
+      if (!id) return "Sin carpeta";
+      const parts: string[] = [];
+      let current = byId.get(id);
+      // El tope corta cualquier lazo raro entre carpetas en vez de colgarse.
+      while (current && parts.length < 10) {
+        parts.unshift(current.name);
+        current = current.parentId ? byId.get(current.parentId) : undefined;
+      }
+      return parts.length > 0 ? parts.join(" / ") : "—";
+    };
   }, [data?.categories]);
   const typed = query.trim().toLowerCase();
   /** Null mientras no haya índice o no se esté buscando: entonces manda el servidor. */
@@ -238,10 +261,12 @@ export function VaultManager() {
       if (scope.kind === "favorites" && !favorites.has(entry.id)) return false;
       if (scope.kind === "uncategorised" && entry.categoryId) return false;
       if (scope.kind === "recent" && !recent.includes(entry.id)) return false;
-      const haystack = `${entry.name} ${entry.username ?? ""} ${entry.url ?? ""} ${categoryName(entry.categoryId)}`.toLowerCase();
+      // Con la ruta entera se sigue encontrando por departamento, no solo por
+      // el nombre corto de la carpeta.
+      const haystack = `${entry.name} ${entry.username ?? ""} ${entry.url ?? ""} ${categoryPath(entry.categoryId)}`.toLowerCase();
       return words.every((word) => haystack.includes(word));
     });
-  }, [index, typed, scope.kind, scope.id, scope.ids, userId, favorites, categoryName, data?.recent]);
+  }, [index, typed, scope.kind, scope.id, scope.ids, userId, favorites, categoryPath, data?.recent]);
 
   const visibleEntries = useMemo(() => {
     if (localResults) return localResults;
@@ -256,15 +281,10 @@ export function VaultManager() {
     setPage(0);
   }
 
-  function toggleFolder(name: string) {
-    setOpenFolders((current) => (current.includes(name) ? current.filter((item) => item !== name) : [...current, name]));
-  }
-
-  /** In the list the parent is already known from the tree, so only the leaf is shown. */
-  function shortFolder(id: string | null): string {
-    const full = categoryName(id);
-    const parts = full.split(" / ");
-    return parts[parts.length - 1];
+  // Por id y no por nombre: al quitarles el prefijo hay carpetas que se llaman
+  // igual en departamentos distintos, y abrir una abriría también la otra.
+  function toggleFolder(id: string) {
+    setOpenFolders((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
   // ---------- actions ----------
@@ -498,7 +518,7 @@ export function VaultManager() {
         : scope.kind === "recent" ? "Usadas recientemente"
           : scope.kind === "personal" ? "Mis credenciales personales"
             : scope.kind === "uncategorised" ? "Sin carpeta"
-              : categoryName(scope.id ?? null);
+              : categoryPath(scope.id ?? null);
 
   return (
     <div className="page-stack">
@@ -525,23 +545,22 @@ export function VaultManager() {
           <span className="search-group-title vault-tree-title">Carpetas</span>
           <ul className="vault-tree-list">
             {tree.map((node) => (
-              <li key={node.name}>
+              <li key={node.category.id}>
                 <div className="vault-tree-row">
                   {node.children.length > 0 ? (
-                    <button type="button" className="vault-tree-toggle" onClick={() => toggleFolder(node.name)} aria-expanded={openFolders.includes(node.name)} aria-label={openFolders.includes(node.name) ? `Cerrar ${node.name}` : `Abrir ${node.name}`}>
-                      <ChevronIcon open={openFolders.includes(node.name)} />
+                    <button type="button" className="vault-tree-toggle" onClick={() => toggleFolder(node.category.id)} aria-expanded={openFolders.includes(node.category.id)} aria-label={openFolders.includes(node.category.id) ? `Cerrar ${node.name}` : `Abrir ${node.name}`}>
+                      <ChevronIcon open={openFolders.includes(node.category.id)} />
                     </button>
                   ) : <span className="vault-tree-toggle vault-tree-toggle-empty" />}
                   <button
                     type="button"
-                    className={scope.kind === "category" && scope.id === node.category?.id ? "vault-tree-item active" : "vault-tree-item"}
-                    onClick={() => node.category && selectScope({ kind: "category", id: node.category.id, ids: [node.category.id, ...node.children.map((child) => child.id)] })}
-                    disabled={!node.category}
+                    className={scope.kind === "category" && scope.id === node.category.id ? "vault-tree-item active" : "vault-tree-item"}
+                    onClick={() => selectScope({ kind: "category", id: node.category.id, ids: [node.category.id, ...node.children.map((child) => child.id)] })}
                   >
                     {node.name}<span>{node.total}</span>
                   </button>
                 </div>
-                {node.children.length > 0 && openFolders.includes(node.name) ? (
+                {node.children.length > 0 && openFolders.includes(node.category.id) ? (
                   <ul className="vault-tree-children">
                     {node.children.map((child) => (
                       <li key={child.id}>
@@ -606,7 +625,7 @@ export function VaultManager() {
                         {entry.username ? <button type="button" className="vault-icon-button" onClick={() => void copyText(entry.username as string, "Usuario")} title="Copiar usuario" aria-label={`Copiar el usuario de ${entry.name}`}><CopyIcon /></button> : null}
                       </div>
                     </td>
-                    <td className="vault-folder-cell" title={categoryName(entry.categoryId)}>{shortFolder(entry.categoryId)}</td>
+                    <td className="vault-folder-cell" title={categoryPath(entry.categoryId)}>{categoryName(entry.categoryId)}</td>
                     <td>
                       <div className="table-actions vault-row-actions">
                         <button type="button" className="button button-compact button-primary" aria-label={`Copiar la contraseña de ${entry.name}`} onClick={() => void copySecret(entry.id)} title="Copiar la contraseña"><CopyIcon /> Copiar</button>
@@ -657,7 +676,7 @@ export function VaultManager() {
               </strong>
               <span>Web</span>
               <strong>{detail.entry.url ? <a href={detail.entry.url} target="_blank" rel="noopener noreferrer" className="text-link">{detail.entry.url}</a> : "—"}</strong>
-              <span>Carpeta</span><strong>{categoryName(detail.entry.categoryId)}</strong>
+              <span>Carpeta</span><strong>{categoryPath(detail.entry.categoryId)}</strong>
               <span>Ámbito</span><strong>{visibilityLabels[detail.entry.visibility]}</strong>
               <span>Fuerza</span>
               <strong>{detail.entry.strength ? <em className={`vault-strength vault-strength-${detail.entry.strength}`}>{strengthLabels[detail.entry.strength]}</em> : "—"}</strong>
@@ -732,7 +751,15 @@ export function VaultManager() {
             </label>
             <label><span>Carpeta</span><select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>
               <option value="">Sin carpeta</option>
-              {(data?.categories ?? []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              {/* Agrupadas por departamento: hay subcarpetas que se llaman igual y sueltas no se distinguirían. */}
+              {tree.map((node) => (node.children.length > 0 ? (
+                <optgroup key={node.category.id} label={node.name}>
+                  <option value={node.category.id}>{node.name}</option>
+                  {node.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
+                </optgroup>
+              ) : (
+                <option key={node.category.id} value={node.category.id}>{node.name}</option>
+              )))}
             </select></label>
             <label><span>Tipo</span><select value={draft.entryType} onChange={(event) => setDraft({ ...draft, entryType: event.target.value as VaultEntryType })}>
               {(Object.keys(typeLabels) as VaultEntryType[]).map((type) => <option key={type} value={type}>{typeLabels[type]}</option>)}

@@ -10,7 +10,30 @@ import { KeyIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { roleLabels } from "@/lib/constants";
 import type { AppRole } from "@/lib/types";
 
-type Folder = { id: string; name: string; count: number; userIds: string[] };
+type Folder = { id: string; name: string; parentId: string | null; count: number; userIds: string[] };
+
+/** La carpeta con su madre delante: hay subcarpetas que se llaman igual en varios departamentos. */
+function folderPath(folders: Folder[], folder: Folder): string {
+  const parent = folder.parentId ? folders.find((item) => item.id === folder.parentId) : undefined;
+  return parent ? parent.name + " / " + folder.name : folder.name;
+}
+
+/** Cada madre seguida de sus hijas, para que la tabla se lea igual que el árbol del gestor. */
+function inTreeOrder(folders: Folder[]): { folder: Folder; isChild: boolean }[] {
+  const present = new Set(folders.map((folder) => folder.id));
+  const childrenOf = new Map<string, Folder[]>();
+  for (const folder of folders) {
+    if (!folder.parentId || !present.has(folder.parentId)) continue;
+    childrenOf.set(folder.parentId, [...(childrenOf.get(folder.parentId) ?? []), folder]);
+  }
+  const rows: { folder: Folder; isChild: boolean }[] = [];
+  for (const folder of folders) {
+    if (folder.parentId && present.has(folder.parentId)) continue;
+    rows.push({ folder, isChild: false });
+    for (const child of childrenOf.get(folder.id) ?? []) rows.push({ folder: child, isChild: true });
+  }
+  return rows;
+}
 type Person = { id: string; name: string; roles: AppRole[]; isVaultAdmin: boolean; folderCount: number; credentialCount: number; restrictedFolders: string[] };
 type AccessPayload = { folders: Folder[]; people: Person[]; uncategorised: number; personalCount: number; totalShared: number };
 
@@ -148,9 +171,9 @@ export function VaultAccessView() {
             <table>
               <thead><tr><th>Carpeta</th><th>Credenciales</th><th>Quién la ve</th><th>Acciones</th></tr></thead>
               <tbody>
-                {data.folders.map((folder) => (
+                {inTreeOrder(data.folders).map(({ folder, isChild }) => (
                   <tr key={folder.id}>
-                    <td><strong>{folder.name}</strong></td>
+                    <td style={isChild ? { paddingLeft: "1.75rem" } : undefined}><strong title={folderPath(data.folders, folder)}>{folder.name}</strong></td>
                     <td className="vault-access-count">{folder.count}</td>
                     <td>
                       {folder.userIds.length === 0 ? (
@@ -242,7 +265,7 @@ export function VaultAccessView() {
                               : [...editingPerson.folderIds, folder.id],
                           })}
                         />
-                        <span>{folder.name}</span>
+                        <span>{folderPath(data.folders, folder)}</span>
                         <small>{folder.count} credenciales{folder.userIds.length === 0 ? " · abierta a todo el equipo" : ` · restringida a ${folder.userIds.length}`}</small>
                       </label>
                     ))}
@@ -264,7 +287,7 @@ export function VaultAccessView() {
         ) : null}
       </Modal>
 
-      <Modal open={Boolean(editing)} title={`Quién ve «${editing?.folder.name ?? ""}»`} eyebrow="Acceso por carpeta" onClose={() => setEditing(null)}>
+      <Modal open={Boolean(editing)} title={`Quién ve «${editing ? folderPath(data.folders, editing.folder) : ""}»`} eyebrow="Acceso por carpeta" onClose={() => setEditing(null)}>
         {editing ? (
           <>
             <p className="muted">

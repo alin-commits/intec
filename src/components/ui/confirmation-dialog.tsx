@@ -31,23 +31,31 @@ export function ConfirmationDialog({
   const titleId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const returnFocusTo = useRef<Element | null>(null);
+  // Lo que cambia en cada render vive aquí para que el efecto de abajo dependa
+  // solo de `open`. Si dependiera de los callbacks, que llegan nuevos cada vez,
+  // cualquier tecleo en la página volvería a ejecutarlo y el foco se iría del
+  // campo al diálogo.
+  const latest = useRef({ busy, onCancel, onConfirm });
+  useEffect(() => {
+    latest.current = { busy, onCancel, onConfirm };
+  });
 
   useEffect(() => {
     if (!open) return;
     returnFocusTo.current = document.activeElement;
     cardRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (busy) return;
+      if (latest.current.busy) return;
       // Solo si el foco está dentro: con el Enter global, pulsarlo en un campo
       // del formulario de detrás lo enviaba y además confirmaba el diálogo.
       if (!cardRef.current?.contains(document.activeElement)) return;
       if (event.key === "Escape") {
         event.stopPropagation();
-        onCancel();
+        latest.current.onCancel();
       }
       if (event.key === "Enter" && !(document.activeElement instanceof HTMLTextAreaElement)) {
         event.preventDefault();
-        onConfirm();
+        latest.current.onConfirm();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -55,7 +63,7 @@ export function ConfirmationDialog({
       window.removeEventListener("keydown", handleKeyDown);
       if (returnFocusTo.current instanceof HTMLElement) returnFocusTo.current.focus();
     };
-  }, [busy, onCancel, onConfirm, open]);
+  }, [open]);
 
   if (!open) return null;
 
