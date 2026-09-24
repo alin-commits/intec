@@ -18,11 +18,17 @@ export async function GET(request: Request) {
   const visibility = url.searchParams.get("visibility");
   const page = Math.max(0, Number(url.searchParams.get("page") ?? 0) || 0);
 
+  // Counting every row a second time is as expensive as listing them, so it is
+  // only asked for when the total cannot be worked out from the folder counts.
+  const onlyFavorites = url.searchParams.get("favorites") === "1";
+  const uncategorised = url.searchParams.get("uncategorised") === "1";
+  const needsExactCount = term.length >= 2 || visibility === "personal" || onlyFavorites;
+
   // Read with the user's own session: row level security applies, and the
   // ciphertext columns are not even granted to that role.
   let query = guard.supabase
     .from("vault_entries")
-    .select(VAULT_ENTRY_COLUMNS, { count: "exact" })
+    .select(VAULT_ENTRY_COLUMNS, needsExactCount ? { count: "exact" } : undefined)
     .eq("is_active", true)
     .order("name")
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
@@ -30,18 +36,18 @@ export async function GET(request: Request) {
   if (category) query = query.eq("category_id", category);
   if (visibility === "personal") query = query.eq("created_by", guard.userId);
   else if (visibility === "shared") query = query.eq("visibility", "shared");
-  if (url.searchParams.get("uncategorised") === "1") query = query.is("category_id", null);
-  const onlyFavorites = url.searchParams.get("favorites") === "1";
+  if (uncategorised) query = query.is("category_id", null);
   if (onlyFavorites) {
     const { data: favoriteIds } = await guard.supabase.from("vault_favorites").select("vault_entry_id").eq("user_id", guard.userId);
     query = query.in("id", (favoriteIds ?? []).map((row) => row.vault_entry_id));
   }
 
-  const [{ data, error, count }, categories, allVisible, favorites, recentLog] = await Promise.all([
+  const [{ data, error, count }, categories, folderCounts, favorites, recentLog] = await Promise.all([
     query,
     guard.supabase.from("vault_categories").select("id, name, description").order("sort_order"),
-    // One column for every entry this person may see: enough to count per folder.
-    guard.supabase.from("vault_entries").select("category_id").eq("is_active", true),
+    // The database counts per folder and returns one row per folder, instead of
+    // one row per credential just to add them up here.
+    guard.supabase.rpc("vault_folder_counts"),
     guard.supabase.from("vault_favorites").select("vault_entry_id").eq("user_id", guard.userId),
     guard.admin
       .from("vault_audit_log")
@@ -60,9 +66,22 @@ export async function GET(request: Request) {
   await logVault(guard.admin, { userId: guard.userId, action: "ENTRY_LIST", metadata: { count: data?.length ?? 0, page } });
 
   const counts = new Map<string, number>();
-  for (const row of allVisible.data ?? []) {
-    const key = row.category_id ? String(row.category_id) : "none";
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+  let visibleTotal = 0;
+  if (folderCounts.error) {
+    // The counting function is not in the database yet: count the old way so the
+    // folder tree keeps working while the migration is applied.
+    const { data: everyVisible } = await guard.supabase.from("vault_entries").select("category_id").eq("is_active", true);
+    for (const row of everyVisible ?? []) {
+      const key = row.category_id ? String(row.category_id) : "none";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      visibleTotal++;
+    }
+  } else {
+    for (const row of (folderCounts.data ?? []) as { category_id: string | null; total: number }[]) {
+      const key = row.category_id ? String(row.category_id) : "none";
+      counts.set(key, Number(row.total));
+      visibleTotal += Number(row.total);
+    }
   }
   // Most recently revealed first, without repeating.
   const recent: string[] = [];
@@ -82,10 +101,10 @@ export async function GET(request: Request) {
         count: counts.get(String(row.id)) ?? 0,
       })),
       uncategorised: counts.get("none") ?? 0,
-      visibleTotal: allVisible.data?.length ?? 0,
+      visibleTotal,
       favorites: (favorites.data ?? []).map((row) => String(row.vault_entry_id)),
       recent,
-      total: count ?? 0,
+      total: needsExactCount ? (count ?? 0) : uncategorised ? counts.get("none") ?? 0 : category ? counts.get(category) ?? 0 : visibleTotal,
       page,
       pageSize: PAGE_SIZE,
       isVaultAdmin: guard.actor.isVaultAdmin,

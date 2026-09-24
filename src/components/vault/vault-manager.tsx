@@ -12,6 +12,7 @@ import { DEFAULT_GENERATOR, generatePassword, MAX_LENGTH, MIN_LENGTH, passwordSt
 import type { VaultEntrySummary, VaultPermission, VaultVisibility } from "@/lib/vault/types";
 import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
+import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import type { AppRole } from "@/lib/types";
 
 const REVEAL_SECONDS = 30;
@@ -100,14 +101,11 @@ export function VaultManager() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const supabase = createClient();
-      const { data: auth } = await supabase.auth.getUser();
-      if (!active || !auth.user) return;
-      const { data: profile } = await supabase.from("profiles").select("full_name, roles").eq("id", auth.user.id).maybeSingle();
-      if (!active) return;
-      setUserId(auth.user.id);
-      setUserName((profile?.full_name as string | null) ?? auth.user.email ?? "");
-      setRoles((profile?.roles ?? []) as AppRole[]);
+      const profile = await loadCurrentProfile();
+      if (!active || !profile) return;
+      setUserId(profile.id);
+      setUserName(profile.fullName);
+      setRoles(profile.roles);
     })();
     return () => { active = false; };
   }, []);

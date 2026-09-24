@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { hasAnyRole, VAULT_ADMIN_ROLES } from "@/lib/constants";
-import { createClient } from "@/lib/supabase/client";
-import type { AppRole } from "@/lib/types";
+import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 
 /** Tabs shared by the three vault pages. Salud and Auditoría are for vault admins. */
 export function VaultTabs() {
@@ -15,12 +14,9 @@ export function VaultTabs() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const supabase = createClient();
-      const { data: auth } = await supabase.auth.getUser();
-      if (!active || !auth.user) return;
-      const { data: profile } = await supabase.from("profiles").select("roles").eq("id", auth.user.id).maybeSingle();
-      if (!active) return;
-      setIsVaultAdmin(hasAnyRole((profile?.roles ?? []) as AppRole[], VAULT_ADMIN_ROLES));
+      const profile = await loadCurrentProfile();
+      if (!active || !profile) return;
+      setIsVaultAdmin(hasAnyRole(profile.roles, VAULT_ADMIN_ROLES));
     })();
     return () => { active = false; };
   }, []);

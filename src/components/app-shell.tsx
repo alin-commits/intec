@@ -9,6 +9,7 @@ import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, EXPENSES_ROLES, LEADS_ROLES, RRSS_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
 
@@ -83,18 +84,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!configured) return;
     let active = true;
     async function loadProfile() {
+      const current = await loadCurrentProfile();
+      if (!current || !active) return;
+      setProfile({ fullName: current.fullName.includes("@") ? nameFromEmail(current.fullName) : current.fullName, roles: current.roles });
       const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !active) return;
-      const [{ data }, { data: assignedCard }] = await Promise.all([
-        supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle(),
-        supabase.from("business_cards").select("id").eq("assigned_user_id", user.id).limit(1).maybeSingle(),
-      ]);
+      const { data: assignedCard } = await supabase.from("business_cards").select("id").eq("assigned_user_id", current.id).limit(1).maybeSingle();
       if (!active) return;
-      if (data) {
-        const rawName = data.full_name || user.email || "Usuario";
-        setProfile({ fullName: rawName.includes("@") ? nameFromEmail(rawName) : rawName, roles: data.roles as AppRole[] });
-      }
       setHasAssignedCard(Boolean(assignedCard));
     }
     void loadProfile();
@@ -111,6 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   async function signOut() {
     if (configured) {
+      forgetCurrentProfile();
       await createClient().auth.signOut();
       router.replace("/login");
       router.refresh();

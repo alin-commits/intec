@@ -120,7 +120,7 @@ export function VaultHealthView() {
           <div className="panel-heading"><div><h2>Fuerza de las contraseñas</h2><p className="panel-subtitle">Según su longitud y variedad</p></div></div>
           <DonutChart items={strengthItems} centerLabel="credenciales" ariaLabel="Reparto de credenciales por fuerza de la contraseña" emptyMessage="Sin datos todavía." />
         </article>
-        <article className="panel">
+        <article className="panel chart-panel">
           <div className="panel-heading"><div><h2>Qué conviene hacer</h2><p className="panel-subtitle">Por dónde empezar</p></div></div>
           <ol className="vault-health-steps">
             <li>
@@ -140,7 +140,7 @@ export function VaultHealthView() {
         </article>
       </section>
 
-      <section className="panel">
+      <section className="panel table-panel">
         <div className="panel-heading">
           <div>
             <h2>Contraseñas repetidas</h2>
