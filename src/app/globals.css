@@ -1257,3 +1257,6 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sales-source-note p { margin: 0 0 10px; color: #475569; font-size: 12.5px; line-height: 1.55; }
 .sales-source-note p:last-child { margin-bottom: 0; }
 @media (max-width: 900px) { .sales-source-body { grid-template-columns: 1fr; gap: 18px; } }
+
+/* Aviso de que lo que se ve no son datos reales */
+.dashboard-failed-notice { border-color: #fca5a5; background: linear-gradient(90deg, #fee2e2, #fff 70%); }

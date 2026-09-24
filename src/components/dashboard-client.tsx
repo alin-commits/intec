@@ -133,7 +133,7 @@ function campaignStatsFor(campaign: CampaignRow, leads: CampaignLeadStub[]) {
   const rows = leads.filter((lead) => lead.campaignId === campaign.id);
   const leadsWon = rows.filter((lead) => lead.status === "won").length;
   const leadsValue = rows.reduce((sum, lead) => sum + (lead.status === "won" ? lead.saleValue ?? 0 : 0), 0);
-  return { total: rows.length, won: leadsWon + campaign.directSalesCount, value: leadsValue + campaign.directSaleValue };
+  return { total: rows.length, won: leadsWon, directSales: campaign.directSalesCount, value: leadsValue + campaign.directSaleValue };
 }
 
 function adsStatsFor(campaignId: string, ads: AdsStub[]) {
@@ -159,6 +159,8 @@ export function DashboardClient() {
   const [campaignRows, setCampaignRows] = useState<CampaignRow[]>(demoCampaigns.map((campaign: Campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name, status: campaign.status, month: null, directSalesCount: campaign.directSalesCount, directSaleValue: campaign.directSaleValue })));
   const [campaignLeads, setCampaignLeads] = useState<CampaignLeadStub[]>(demoCampaignLeads);
   const [socialStats, setSocialStats] = useState<SocialStub[]>([]);
+  /** Con la carga fallida se avisa en pantalla: hasta ahora quedaban los datos de ejemplo. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [inquirySales, setInquirySales] = useState<InquirySaleStub[]>([]);
   const [adsEntries, setAdsEntries] = useState<AdsStub[]>([]);
   const [mailingRows, setMailingRows] = useState<MailingStub[]>([]);
@@ -182,7 +184,9 @@ export function DashboardClient() {
     const fetchToYear = Math.max(selectedYear, selectedMonthYear) + 1;
     const fetchStart = yearRange(fetchFromYear).start;
     const fetchEnd = yearRange(fetchToYear).end;
+    let active = true;
     void (async () => {
+      try {
       const supabase = createClient();
       const [
         { data: unitData, error: unitError },
@@ -205,10 +209,15 @@ export function DashboardClient() {
         supabase.from("meta_ads_entries").select("business_unit_id, campaign_id, start_date, created_at, amount_spent, leads, revenue"),
         supabase.from("mailing_campaigns").select("business_unit_id, sent_date, sent_count, opens, delivered_count, revenue"),
       ]);
+      // Una respuesta vieja que llega tarde no puede pisar a la nueva: al
+      // cambiar de año dos veces seguidas, la primera consulta es la más lenta.
+      if (!active) return;
       if (unitError || inquiryError || salesError || leadError || historyError || campaignError) {
+        setLoadFailed(true);
         setMessage(reportSafeError(unitError ?? inquiryError ?? salesError ?? leadError ?? historyError ?? campaignError, "No se pudieron cargar los datos del dashboard."));
         return;
       }
+      setLoadFailed(false);
 
       const units: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true }));
       setAllBusinessUnits(units);
@@ -283,7 +292,14 @@ export function DashboardClient() {
         setMessage(PARTIAL_LOAD_MESSAGE);
       }
       setMailingRows((mailingData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, month: monthKeyOf(String(row.sent_date)), sentCount: Number(row.sent_count ?? 0), opens: Number(row.opens ?? 0), deliveredCount: Number(row.delivered_count ?? 0), revenue: Number(row.revenue ?? 0) })));
+      } catch (cause) {
+        console.error("No se pudieron cargar los datos del dashboard:", cause);
+        if (!active) return;
+        setLoadFailed(true);
+        setMessage("No se pudieron cargar los datos. Comprueba tu conexión y recarga la página.");
+      }
     })();
+    return () => { active = false; };
   }, [configured, selectedMonthYear, selectedYear]);
 
   useEffect(() => {
@@ -381,9 +397,15 @@ export function DashboardClient() {
     return Array.from(years).sort();
   }, [currentMonthKey, monthlyStats]);
 
+  /** Las unidades que esta persona puede ver: activas y, si es comercial, las suyas. */
+  const visibleUnitIds = useMemo(() => new Set(businessUnits.map((unit) => unit.id)), [businessUnits]);
+
+  // Con "Todas las unidades" hay que quedarse en las visibles, no en todo lo que
+  // haya en la base de datos: si no, los KPIs de arriba suman marcas apagadas o
+  // de otros compañeros y la tabla de abajo, que sí filtra, dice otra cosa.
   const filtered = useMemo(
-    () => monthlyStats.filter((item) => businessUnitId === "all" || item.businessUnitId === businessUnitId),
-    [businessUnitId, monthlyStats],
+    () => monthlyStats.filter((item) => (businessUnitId === "all" ? visibleUnitIds.has(item.businessUnitId) : item.businessUnitId === businessUnitId)),
+    [businessUnitId, monthlyStats, visibleUnitIds],
   );
 
   const currentRows = useMemo(
@@ -399,8 +421,8 @@ export function DashboardClient() {
   }, [compareMode, currentMonthKey, filtered, selectedMonth, selectedYear, viewMode]);
 
   const filteredInquirySales = useMemo(
-    () => inquirySales.filter((item) => businessUnitId === "all" || item.businessUnitId === businessUnitId),
-    [businessUnitId, inquirySales],
+    () => inquirySales.filter((item) => (businessUnitId === "all" ? visibleUnitIds.has(item.businessUnitId) : item.businessUnitId === businessUnitId)),
+    [businessUnitId, inquirySales, visibleUnitIds],
   );
   const currentInquirySaleValue = useMemo(() => {
     const rows = viewMode === "month" ? filteredInquirySales.filter((row) => row.month === selectedMonth) : filteredInquirySales.filter((row) => yearOfMonth(row.month) === selectedYear);
@@ -412,12 +434,9 @@ export function DashboardClient() {
   const previous = sumRows(previousRows);
   const currentTotal = current.web + current.phone;
   const previousTotal = previous.web + previous.phone;
-  const conversion = current.leads ? (current.won / current.leads) * 100 : 0;
-  const previousConversion = previous.leads ? (previous.won / previous.leads) * 100 : null;
-
   const totalDelta = hasComparison ? variation(currentTotal, previousTotal) : null;
+
   const leadsDelta = hasComparison ? variation(current.leads, previous.leads) : null;
-  const conversionDelta = hasComparison && previousConversion !== null ? conversion - previousConversion : null;
   const saleValueDelta = hasComparison ? variation(current.saleValue, previous.saleValue) : null;
 
   const comparisonHelper = viewMode === "year" ? `frente a ${selectedYear - 1}` : compareModeHelpers[compareMode];
@@ -427,14 +446,14 @@ export function DashboardClient() {
     () => Array.from({ length: 12 }, (_, index) => `${trendYear}-${String(index + 1).padStart(2, "0")}`),
     [trendYear],
   );
-  const filteredChannelStats = channelStats.filter((row) => businessUnitId === "all" || row.businessUnitId === businessUnitId);
+  const filteredChannelStats = channelStats.filter((row) => (businessUnitId === "all" ? visibleUnitIds.has(row.businessUnitId) : row.businessUnitId === businessUnitId));
   const inPeriod = (month: string) => (viewMode === "month" ? month === selectedMonth : yearOfMonth(month) === selectedYear);
   const trendData = trendMonths.map((month) => ({ label: monthShortLabel(month), ...sumChannels(filteredChannelStats.filter((row) => row.month === month)) }));
   const periodChannelCounts = sumChannels(filteredChannelStats.filter((row) => inPeriod(row.month)));
 
   // Antes solo se filtraba por unidad, así que estas cifras enseñaban el total
   // de siempre aunque arriba estuviera elegido un mes o un año concretos.
-  const matchesUnit = (unit: string) => businessUnitId === "all" || unit === businessUnitId;
+  const matchesUnit = (unit: string) => (businessUnitId === "all" ? visibleUnitIds.has(unit) : unit === businessUnitId);
   const rrssSocialFiltered = useMemo(
     () => socialStats.filter((row) => matchesUnit(row.businessUnitId) && inPeriod(row.periodMonth)),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- matchesUnit e inPeriod se rehacen en cada render
@@ -502,19 +521,38 @@ export function DashboardClient() {
       : inquirySales.filter((item) => yearOfMonth(item.month) === selectedYear && item.businessUnitId === unit.id);
     const inquiryValue = inquiryRows.reduce((sum, item) => sum + item.value, 0);
     const channels = sumChannels(channelStats.filter((row) => row.businessUnitId === unit.id && inPeriod(row.month)));
-    return { unit, summed, channels, inquiries: summed.web + summed.phone, conversion: summed.leads ? (summed.won / summed.leads) * 100 : 0, inquiryValue };
+    // Mismos leads arriba y abajo: los creados en el periodo por esta unidad.
+    const cohort = campaignLeads.filter((lead) => lead.businessUnitId === unit.id && inPeriod(monthKeyOf(lead.createdAt)));
+    const cohortWon = cohort.filter((lead) => lead.status === "won").length;
+    return { unit, summed, channels, inquiries: summed.web + summed.phone, cohortLeads: cohort.length, cohortWon, conversion: cohort.length ? (cohortWon / cohort.length) * 100 : 0, inquiryValue };
   });
 
   const sparkMonths = trendMonths.filter((month) => month <= currentMonthKey);
   const monthlyTotals = sparkMonths.map((month) => sumRows(filtered.filter((row) => row.month === month)));
   const sparkInquiries = monthlyTotals.map((row) => row.web + row.phone);
   const sparkLeads = monthlyTotals.map((row) => row.leads);
-  const sparkConversion = monthlyTotals.map((row) => (row.leads ? (row.won / row.leads) * 100 : 0));
   const sparkValue = monthlyTotals.map((row) => row.saleValue);
 
-  const visibleUnitIds = new Set(businessUnits.map((unit) => unit.id));
   const unitLeads = campaignLeads.filter((lead) => (businessUnitId === "all" ? visibleUnitIds.has(lead.businessUnitId) : lead.businessUnitId === businessUnitId));
-  const periodLeads = unitLeads.filter((lead) => (viewMode === "month" ? monthKeyOf(lead.createdAt) === selectedMonth : yearOfMonth(monthKeyOf(lead.createdAt)) === selectedYear));
+  const leadsCreatedIn = (month: string) => unitLeads.filter((lead) => monthKeyOf(lead.createdAt) === month);
+  const leadsCreatedInYear = (year: number) => unitLeads.filter((lead) => yearOfMonth(monthKeyOf(lead.createdAt)) === year);
+  const periodLeads = viewMode === "month" ? leadsCreatedIn(selectedMonth) : leadsCreatedInYear(selectedYear);
+
+  /**
+   * De los leads creados en el periodo, cuántos están hoy ganados. Antes se
+   * dividían los cerrados en el periodo (vinieran de cuando vinieran) entre los
+   * creados en él, y en un mes con pocos leads nuevos y muchos cierres antiguos
+   * la conversión pasaba del 100 %.
+   */
+  const conversionOf = (leads: CampaignLeadStub[]) => (leads.length ? (leads.filter((lead) => lead.status === "won").length / leads.length) * 100 : 0);
+  const conversion = conversionOf(periodLeads);
+  const wonInPeriodCohort = periodLeads.filter((lead) => lead.status === "won").length;
+  const previousCohort = viewMode === "year"
+    ? leadsCreatedInYear(selectedYear - 1)
+    : previousRows.length > 0 ? unitLeads.filter((lead) => previousRows.some((row) => row.month === monthKeyOf(lead.createdAt))) : [];
+  const previousConversion = previousCohort.length > 0 ? conversionOf(previousCohort) : null;
+  const conversionDelta = previousConversion !== null ? conversion - previousConversion : null;
+  const sparkConversion = sparkMonths.map((month) => conversionOf(leadsCreatedIn(month)));
   const periodStatusCounts = countByStatus(periodLeads);
   const unitStatusCounts = countByStatus(unitLeads);
   const leadStatusItems: DonutItem[] = (Object.keys(leadStatusLabels) as LeadStatus[]).map((status) => ({
@@ -526,7 +564,7 @@ export function DashboardClient() {
 
   const canSeeLeads = hasAnyRole(operationalRoles, LEADS_ROLES);
   const canSeeTickets = hasAnyRole(operationalRoles, TICKET_VIEW_ROLES);
-  const activeCampaignsCount = campaignRows.filter((campaign) => campaign.status === "active").length;
+  const activeCampaignsCount = campaignRows.filter((campaign) => campaign.status === "active" && matchesUnit(campaign.businessUnitId)).length;
   const pendingItems = [
     canSeeLeads ? { key: "leads", label: "Leads nuevos sin contactar", value: unitStatusCounts.new ?? 0, href: "/leads", icon: <LeadsIcon />, alert: false } : null,
     canSeeTickets && openTicketsCount !== null ? { key: "tickets", label: "Tickets abiertos", value: openTicketsCount, href: "/tickets", icon: <TicketsIcon />, alert: false } : null,
@@ -546,9 +584,9 @@ export function DashboardClient() {
       { header: "Unidad", value: (row) => row.unit.name },
       ...inquiryChannelOrder.map((channel) => ({ header: inquiryChannelLabels[channel], value: (row: (typeof unitRows)[number]) => row.channels[channel] })),
       { header: "Total", value: (row) => row.inquiries },
-      { header: "Leads", value: (row) => row.summed.leads },
-      { header: "Ganados", value: (row) => row.summed.won },
-      { header: "Conversión (%)", value: (row) => row.conversion.toFixed(1).replace(".", ",") },
+      { header: "Leads", value: (row) => row.cohortLeads },
+      { header: "Ganados", value: (row) => row.cohortWon },
+      { header: "Conversión (%)", value: (row) => row.conversion },
       { header: "Valor (€)", value: (row) => row.summed.saleValue },
       { header: "Valor de venta Consultas (€)", value: (row) => row.inquiryValue },
     ]);
@@ -605,7 +643,19 @@ export function DashboardClient() {
         </div>
       </CollapsibleFilters>
 
-      {!hasRecordedData ? (
+      {loadFailed ? (
+        <section className="panel dashboard-empty-notice dashboard-failed-notice">
+          <div>
+            <strong>No se han podido cargar los datos</strong>
+            <p>Lo que se ve debajo es un ejemplo, no son cifras de la empresa. Comprueba tu conexión y recarga la página.</p>
+          </div>
+          <div className="dashboard-empty-actions">
+            <button type="button" className="button button-primary" onClick={() => window.location.reload()}>Recargar</button>
+          </div>
+        </section>
+      ) : null}
+
+      {!loadFailed && !hasRecordedData ? (
         <section className="panel dashboard-empty-notice">
           <div>
             <strong>Todavía no hay consultas ni leads registrados</strong>
@@ -626,7 +676,7 @@ export function DashboardClient() {
           value={formatPercent(conversion)}
           delta={conversionDelta === null ? "Sin comparación" : `${conversionDelta >= 0 ? "+" : ""}${conversionDelta.toFixed(1).replace(".", ",")} pts`}
           positive={conversionDelta === null || conversionDelta >= 0}
-          helper={`${numberFormatter.format(current.won)} ganados`}
+          helper={`${numberFormatter.format(wonInPeriodCohort)} de ${numberFormatter.format(periodLeads.length)} leads creados`}
           icon={<ConversionIcon />}
           tone="emerald"
           sparkline={sparkConversion}
@@ -709,7 +759,7 @@ export function DashboardClient() {
       <section className="dashboard-grid">
         <article className="panel chart-panel">
           <div className="panel-heading">
-            <div><h2>Nuevos seguidores en RRSS</h2><p className="panel-subtitle">Últimos 6 meses registrados</p></div>
+            <div><h2>Nuevos seguidores en RRSS</h2><p className="panel-subtitle">{periodLabel}</p></div>
             <a href="/rrss" className="text-link">Ver RRSS →</a>
           </div>
           <TrendChart
@@ -768,11 +818,11 @@ export function DashboardClient() {
           <table>
             <thead><tr><th>Unidad</th>{inquiryChannelOrder.map((channel) => <th key={channel}>{inquiryChannelLabels[channel]}</th>)}<th>Total</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Valor de venta Consultas</th></tr></thead>
             <tbody>
-              {unitRows.map(({ unit, summed, channels, inquiries, conversion: unitConversion, inquiryValue }) => (
+              {unitRows.map(({ unit, summed, channels, inquiries, cohortLeads, cohortWon, conversion: unitConversion, inquiryValue }) => (
                 <tr key={unit.id}>
                   <td><span className="unit-name"><i style={{ background: unit.accent }} />{unit.name}</span></td>
                   {inquiryChannelOrder.map((channel) => <td key={channel}>{channels[channel]}</td>)}<td><strong>{inquiries}</strong></td>
-                  <td>{summed.leads}</td><td>{summed.won}</td><td>{formatPercent(unitConversion)}</td>
+                  <td>{cohortLeads}</td><td>{cohortWon}</td><td>{formatPercent(unitConversion)}</td>
                   <td>{currencyFormatter.format(summed.saleValue)}</td>
                   <td>{currencyFormatter.format(inquiryValue)}</td>
                 </tr>
@@ -789,23 +839,26 @@ export function DashboardClient() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Meta Ads</th></tr></thead>
+            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Venta directa</th><th>Valor</th><th>Meta Ads</th></tr></thead>
             <tbody>
               {topCampaigns.map((campaign) => {
                 const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);
                 const stats = campaignStatsFor(campaign, campaignLeads);
-                const ads = adsStatsFor(campaign.id, adsEntries);
+                // Del periodo y de las unidades visibles, como el resto de la
+                // pantalla: antes esta columna era el histórico completo.
+                const ads = adsStatsFor(campaign.id, rrssAdsFiltered);
                 return (
                   <tr key={campaign.id}>
                     <td><strong>{campaign.name}</strong></td><td>{unit?.name ?? "—"}</td>
                     <td><span className={campaign.status === "active" ? "badge badge-active" : "badge"}>{campaignStatusLabels[campaign.status]}</span></td>
                     <td>{stats.total}</td><td>{stats.won}</td><td>{formatPercent(stats.total ? (stats.won / stats.total) * 100 : 0)}</td>
+                    <td>{stats.directSales || "—"}</td>
                     <td>{currencyFormatter.format(stats.value)}</td>
                     <td>{ads.count > 0 ? `${currencyFormatter.format(ads.spend)} · ${ads.roas.toFixed(2)}x` : "—"}</td>
                   </tr>
                 );
               })}
-              {topCampaigns.length === 0 ? <tr><td colSpan={8} className="muted">Todavía no hay campañas.</td></tr> : null}
+              {topCampaigns.length === 0 ? <tr><td colSpan={9} className="muted">Todavía no hay campañas.</td></tr> : null}
             </tbody>
           </table>
         </div>
