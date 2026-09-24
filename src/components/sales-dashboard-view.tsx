@@ -240,19 +240,43 @@ export function SalesDashboardView() {
     })).sort((a, b) => b.bucket.net - a.bucket.net);
   }, [rows, companies]);
 
+  /**
+   * En Sage la misma persona está dada de alta varias veces: un código por
+   * sociedad y, a veces, el nombre a medias. "SERGIO ALMODOVAR", "Sergio
+   * Almodovar" y "Sergio Almodóvar Alcaraz" son uno solo, y salían en tres
+   * filas distintas.
+   *
+   * Se juntan los que se escriben igual salvo tildes y mayúsculas, y también
+   * los que son el principio de otro contando palabras enteras, que es el caso
+   * del nombre sin apellido. Se queda el más completo.
+   *
+   * Lo de las palabras enteras evita juntar a quien comparte el nombre de pila:
+   * "Juan López" y "Juan Antonio López Toral" siguen siendo dos personas. Lo
+   * que la regla no distingue es un apellido añadido de verdad: si algún día
+   * hay un "Juan López Martínez" que no sea Juan López, se juntarían. Con los
+   * 26 nombres que hay hoy en Sage solo agrupa a Sergio Almodóvar, con tres
+   * fichas, y a Raúl Vicente Barea, con dos por una tilde.
+   */
+  const repIdentities = useMemo(() => {
+    const plain = (name: string) =>
+      name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+    // De más largo a más corto, para que el primero que encaje sea el completo.
+    const names = [...new Set(reps.map((rep) => rep.name))].sort((a, b) => plain(b).length - plain(a).length);
+    const identities = new Map<string, { key: string; label: string }>();
+    for (const name of names) {
+      const fuller = names.find((other) => plain(other).startsWith(`${plain(name)} `)) ?? name;
+      identities.set(name, { key: plain(fuller), label: fuller });
+    }
+    return identities;
+  }, [reps]);
+
   const byRep = useMemo(() => {
     const map = new Map<string, { name: string; assigned: boolean; bucket: Bucket }>();
     for (const row of visible) {
       const rep = row.rep_code === null ? null : reps.find((item) => item.company_code === row.company_code && item.code === row.rep_code);
-      const name = row.rep_code === null ? "Sin comercial asignado" : rep?.name ?? `Código ${row.rep_code}`;
-      // El mismo comercial tiene un código distinto en cada sociedad, así que
-      // agrupar por código lo partía en tres filas con su nombre repetido. Se
-      // agrupa por nombre, sin tildes ni mayúsculas, que es la persona.
-      const key = row.rep_code === null
-        ? "sin"
-        : rep
-          ? name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim()
-          : `${row.company_code}-${row.rep_code}`;
+      const identity = rep ? repIdentities.get(rep.name) : undefined;
+      const name = row.rep_code === null ? "Sin comercial asignado" : identity?.label ?? `Código ${row.rep_code}`;
+      const key = row.rep_code === null ? "sin" : identity?.key ?? `${row.company_code}-${row.rep_code}`;
       const entry = map.get(key) ?? { name, assigned: row.rep_code !== null, bucket: emptyBucket() };
       addRow(entry.bucket, row);
       map.set(key, entry);
@@ -260,7 +284,7 @@ export function SalesDashboardView() {
     return [...map]
       .map(([key, value]) => ({ key, ...value, margin: bucketMargin(value.bucket) }))
       .sort((a, b) => b.bucket.net - a.bucket.net);
-  }, [visible, reps]);
+  }, [visible, reps, repIdentities]);
 
   /** Cuántos canales caben en la rosquilla antes de que las etiquetas se corten. */
   const TOP_CHANNELS = 8;
