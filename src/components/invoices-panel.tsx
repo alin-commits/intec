@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { downloadCsvReport } from "@/lib/csv-export";
@@ -14,12 +15,31 @@ import { INVOICE_BUCKET, INVOICE_MAX_BYTES, matchSubscription, type InvoiceExtra
 import { createClient } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
 
-type InvoiceDraft = Omit<MarketingInvoice, "id">;
+/** La fecha de subida la pone la base de datos, no se edita. */
+type InvoiceDraft = Omit<MarketingInvoice, "id" | "createdAt">;
 type UploadStep = "idle" | "uploading" | "reading";
 /** Una factura esperando a que se decida si se manda a contabilidad. */
 type PendingSend = { id: string; supplier: string };
 /** Envíos anteriores de esa factura, de más reciente a más antiguo. */
 type InvoiceSend = { at: string; by: string | null; to: string };
+
+type SortKey = "date" | "supplier" | "concept" | "category" | "unit" | "base" | "vat" | "total" | "kind" | "added";
+type SortState = { key: SortKey; direction: "asc" | "desc" };
+const SORTABLE_COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "date", label: "Fecha" },
+  { key: "supplier", label: "Proveedor" },
+  { key: "concept", label: "Concepto" },
+  { key: "category", label: "Categoría" },
+  { key: "unit", label: "Unidad" },
+  { key: "base", label: "Base" },
+  { key: "vat", label: "IVA" },
+  { key: "total", label: "Total" },
+  { key: "kind", label: "Tipo" },
+  { key: "added", label: "Añadida" },
+];
+/** En los importes y en las fechas interesa más ver primero lo grande y lo nuevo. */
+const DESC_FIRST: SortKey[] = ["date", "added", "base", "vat", "total"];
+const PAGE_SIZE = 6;
 
 export function mapInvoiceRow(row: Record<string, unknown>): MarketingInvoice {
   return {
@@ -28,6 +48,7 @@ export function mapInvoiceRow(row: Record<string, unknown>): MarketingInvoice {
     invoiceNumber: row.invoice_number ? String(row.invoice_number) : null,
     concept: row.concept ? String(row.concept) : null,
     invoiceDate: String(row.invoice_date),
+    createdAt: String(row.created_at ?? row.invoice_date),
     baseAmount: Number(row.base_amount ?? 0),
     vatAmount: Number(row.vat_amount ?? 0),
     totalAmount: Number(row.total_amount ?? 0),
@@ -102,6 +123,8 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MarketingInvoice | null>(null);
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [page, setPage] = useState(0);
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
   /** A qué dirección se mandan las facturas; la decide el servidor. */
   const [mailbox, setMailbox] = useState("");
@@ -355,6 +378,52 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   const lastSend = previousSends && previousSends.length > 0 ? previousSends[0] : null;
   const sendCountLabel = previousSends?.length === 1 ? "una vez" : `${previousSends?.length ?? 0} veces`;
 
+  function toggleSort(key: SortKey) {
+    setPage(0);
+    setSort((current) => {
+      if (current?.key !== key) return { key, direction: DESC_FIRST.includes(key) ? "desc" : "asc" };
+      return current.direction === "asc" ? { key, direction: "desc" } : null;
+    });
+  }
+
+  const sortedInvoices = useMemo(() => {
+    const value = (invoice: MarketingInvoice, key: SortKey): string | number => {
+      switch (key) {
+        case "date": return invoice.invoiceDate;
+        case "added": return invoice.createdAt;
+        case "supplier": return invoice.supplier.toLowerCase();
+        case "concept": return (invoice.concept ?? "").toLowerCase();
+        case "category": return expenseCategoryLabels[invoice.category].toLowerCase();
+        case "unit": return (units.find((unit) => unit.id === invoice.businessUnitId)?.name ?? "").toLowerCase();
+        case "base": return invoice.baseAmount;
+        case "vat": return invoice.vatAmount;
+        case "total": return invoice.totalAmount;
+        case "kind": return (expenses.find((expense) => expense.id === invoice.expenseId)?.name ?? "").toLowerCase();
+      }
+    };
+    const rows = [...invoices];
+    if (!sort) return rows;
+    const factor = sort.direction === "asc" ? 1 : -1;
+    return rows.sort((a, b) => {
+      const left = value(a, sort.key);
+      const right = value(b, sort.key);
+      if (typeof left === "number" && typeof right === "number") return (left - right) * factor;
+      return String(left).localeCompare(String(right), "es") * factor;
+    });
+  }, [invoices, sort, units, expenses]);
+
+  // Si cambian los filtros de arriba o el orden, se vuelve a la primera página.
+  const filterKey = `${year}|${invoices.length}|${sort?.key ?? ""}|${sort?.direction ?? ""}`;
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
+    setPage(0);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(sortedInvoices.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleInvoices = sortedInvoices.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+
   const totals = {
     base: invoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0),
     vat: invoices.reduce((sum, invoice) => sum + invoice.vatAmount, 0),
@@ -447,10 +516,23 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
 
       <section className="panel table-panel">
         <div className="table-scroll">
-          <table>
-            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th>Unidad</th><th>Base</th><th>IVA</th><th>Total</th><th>Tipo</th><th>Acciones</th></tr></thead>
+          <table className="invoice-table">
+            <thead><tr>
+              {SORTABLE_COLUMNS.map((column) => {
+                const active = sort?.key === column.key;
+                return (
+                  <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className={active ? "sort-header active" : "sort-header"} onClick={() => toggleSort(column.key)} title="Ordenar">
+                      {column.label}
+                      <span aria-hidden="true">{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+                    </button>
+                  </th>
+                );
+              })}
+              <th>Acciones</th>
+            </tr></thead>
             <tbody>
-              {invoices.map((invoice) => (
+              {visibleInvoices.map((invoice) => (
                 <tr key={invoice.id}>
                   <td>{formatDate(invoice.invoiceDate)}</td>
                   <td><strong>{invoice.supplier}</strong><small>{invoice.invoiceNumber ? `Nº ${invoice.invoiceNumber}` : "Sin número"}</small></td>
@@ -461,6 +543,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <td>{currencyFormatter.format(invoice.vatAmount)}</td>
                   <td><strong>{currencyFormatter.format(invoice.totalAmount)}</strong></td>
                   <td>{invoice.expenseId ? <span className="badge" title="Cuenta como el cargo real de esta suscripción en su periodo">Suscripción · {expenseName(invoice.expenseId)}</span> : <span className="badge badge-active">Gasto suelto</span>}</td>
+                  <td className="muted">{formatDate(invoice.createdAt)}</td>
                   <td>
                     <div className="table-actions">
                       {invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => void viewPdf(invoice.filePath as string)}>PDF</button> : null}
@@ -470,15 +553,16 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   </td>
                 </tr>
               ))}
-              {invoices.length === 0 ? <tr><td colSpan={10} className="muted">{allInvoices.length === 0 ? "Todavía no hay facturas. Sube la primera en PDF." : `Sin facturas en ${year} con estos filtros.`}</td></tr> : null}
+              {invoices.length === 0 ? <tr><td colSpan={11} className="muted">{allInvoices.length === 0 ? "Todavía no hay facturas. Sube la primera en PDF." : `Sin facturas en ${year} con estos filtros.`}</td></tr> : null}
             </tbody>
             {invoices.length ? (
               <tfoot>
-                <tr className="channel-table-footer-row"><td colSpan={5}><strong>Total {year}</strong></td><td>{currencyFormatter.format(totals.base)}</td><td>{currencyFormatter.format(totals.vat)}</td><td><strong>{currencyFormatter.format(totals.total)}</strong></td><td colSpan={2} /></tr>
+                <tr className="channel-table-footer-row"><td colSpan={5}><strong>Total {year}</strong></td><td>{currencyFormatter.format(totals.base)}</td><td>{currencyFormatter.format(totals.vat)}</td><td><strong>{currencyFormatter.format(totals.total)}</strong></td><td colSpan={3} /></tr>
               </tfoot>
             ) : null}
           </table>
         </div>
+        <TablePagination page={currentPage} pageCount={pageCount} total={sortedInvoices.length} label="facturas" onChange={setPage} />
       </section>
 
       <ConfirmationDialog

@@ -1228,3 +1228,10 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 
 /* El "buscar en todas" del gestor, dentro del subtítulo */
 .panel-subtitle .text-link { border: 0; background: none; padding: 0; font: inherit; color: var(--primary); font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+/* La tabla de facturas tiene once columnas: con el ancho mínimo general, el
+   concepto se queda en una palabra por línea. Mejor que se desplace. */
+.invoice-table { min-width: 1180px; }
+.invoice-table th:nth-child(3), .invoice-table td:nth-child(3) { min-width: 170px; }
+.invoice-table th:nth-child(2), .invoice-table td:nth-child(2) { min-width: 150px; }
+.invoice-table td:nth-child(10) { white-space: nowrap; }

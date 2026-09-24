@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
@@ -55,6 +56,7 @@ const SORTABLE_COLUMNS: { key: SortKey; label: string }[] = [
 ];
 // Amounts read best biggest-first; text and dates in natural order.
 const DESC_FIRST: SortKey[] = ["amount", "monthly"];
+const PAGE_SIZE = 6;
 const KIND_ORDER: Record<string, number> = { monthly: 0, quarterly: 1, yearly: 2, one_off: 3 };
 
 /** Date shown in "Próximo cargo": next renewal, the one-off date, or the cancellation date. */
@@ -138,6 +140,7 @@ export function ExpensesManager() {
   const [kind, setKind] = useState("all");
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState<SortState>(null);
+  const [page, setPage] = useState(0);
   const [tab, setTab] = useState<"expenses" | "invoices">("expenses");
   const [invoices, setInvoices] = useState<MarketingInvoice[]>([]);
   const [invoicesAvailable, setInvoicesAvailable] = useState(false);
@@ -233,6 +236,19 @@ export function ExpensesManager() {
         return result * factor || byDefault;
       });
   }, [expenses, query, unitId, category, kind, status, sort, units, today]);
+
+  // Al cambiar un filtro o el orden se vuelve a la primera página: quedarse en
+  // la cuarta cuando ya solo hay dos despista.
+  const filterKey = `${query}|${unitId}|${category}|${kind}|${status}|${sort?.key ?? ""}|${sort?.direction ?? ""}`;
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
+    setPage(0);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(visibleExpenses.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pagedExpenses = visibleExpenses.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
 
   function toggleSort(key: SortKey) {
     setSort((current) => {
@@ -592,7 +608,7 @@ export function ExpensesManager() {
               <th>Acciones</th>
             </tr></thead>
             <tbody>
-              {visibleExpenses.map((expense) => {
+              {pagedExpenses.map((expense) => {
                 const renewal = nextRenewal(expense, today);
                 const link = safeUrl(expense.url);
                 return (
@@ -621,6 +637,7 @@ export function ExpensesManager() {
             </tbody>
           </table>
         </div>
+        <TablePagination page={currentPage} pageCount={pageCount} total={visibleExpenses.length} label="en la lista" onChange={setPage} />
       </section>
       )}
 

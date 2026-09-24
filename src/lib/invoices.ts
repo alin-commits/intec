@@ -13,6 +13,8 @@ export type MarketingInvoice = {
   invoiceNumber: string | null;
   concept: string | null;
   invoiceDate: string;
+  /** Cuándo se subió al panel, que no es la fecha que lleva la factura. */
+  createdAt: string;
   baseAmount: number;
   vatAmount: number;
   totalAmount: number;
