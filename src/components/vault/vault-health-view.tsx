@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
 import { CheckCircleIcon, ClockIcon, KeyIcon, RefreshIcon, XCircleIcon } from "@/components/icons";
+import { VaultTabs } from "@/components/vault/vault-tabs";
 import { formatDate } from "@/lib/format";
 
 type HealthItem = { id: string; name: string; folder: string };
@@ -67,10 +68,9 @@ export function VaultHealthView() {
     <div className="page-stack">
       <section className="section-heading">
         <div><p>Revisión de las credenciales compartidas: cuáles repiten contraseña, cuáles son débiles y cuáles llevan tiempo sin cambiarse. Las personales de cada uno no se revisan.</p></div>
-        <div className="panel-heading-trailing">
-          <Link className="button button-secondary" href="/contrasenas">Volver al gestor</Link>
-        </div>
       </section>
+
+      <VaultTabs />
 
       <section className="kpi-grid">
         <KpiCard label="Credenciales revisadas" value={String(health.total)} delta="Sin comparación" helper={health.personalCount ? `${health.personalCount} personales no se revisan` : "todas las compartidas"} icon={<KeyIcon />} tone="indigo" />

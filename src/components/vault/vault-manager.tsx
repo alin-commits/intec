@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
-import { ChevronIcon, CopyIcon, EyeIcon, KeyIcon, RefreshIcon, SearchIcon, StarIcon } from "@/components/icons";
+import { ChevronIcon, CopyIcon, EyeIcon, RefreshIcon, SearchIcon, StarIcon } from "@/components/icons";
 import { MyTicketButton } from "@/components/tickets/my-ticket-button";
+import { VaultTabs } from "@/components/vault/vault-tabs";
 import { VaultUnlock } from "@/components/vault/vault-unlock";
 import { DEFAULT_GENERATOR, generatePassword, MAX_LENGTH, MIN_LENGTH, passwordStrength, type GeneratorOptions } from "@/lib/vault/password-generator";
 import type { VaultEntrySummary, VaultPermission, VaultVisibility } from "@/lib/vault/types";
@@ -21,27 +21,12 @@ type LockReason = (typeof LOCK_REASONS)[number];
 const visibilityLabels: Record<VaultVisibility, string> = { shared: "Compartida", personal: "Personal", restricted: "Restringida" };
 const strengthLabels = { weak: "Débil", fair: "Aceptable", strong: "Fuerte" } as const;
 
-const auditActionLabels: Record<string, string> = {
-  VAULT_OPEN: "Abrió el gestor",
-  VAULT_UNLOCK_FAILED: "Intento bloqueado",
-  ENTRY_LIST: "Vio el listado",
-  ENTRY_VIEW: "Abrió una ficha",
-  PASSWORD_REVEAL: "Mostró una contraseña",
-  PASSWORD_COPY: "Copió una contraseña",
-  ENTRY_CREATE: "Creó una credencial",
-  ENTRY_UPDATE: "Editó una credencial",
-  ENTRY_DELETE: "Eliminó una credencial",
-  PERMISSION_ADD: "Dio acceso",
-  PERMISSION_REMOVE: "Quitó acceso",
-  IMPORT: "Importó credenciales",
-};
 
 type Category = { id: string; name: string; description: string | null; count: number };
 type Scope = { kind: "all" | "favorites" | "recent" | "personal" | "uncategorised" | "category"; id?: string };
 type EntryDraft = { name: string; url: string; username: string; password: string; notes: string; categoryId: string; visibility: VaultVisibility };
 type DetailPayload = { entry: VaultEntrySummary; can: { edit: boolean; delete: boolean; managePermissions: boolean }; sharedWith: VaultPermission[] };
 type TeamMember = { id: string; fullName: string };
-type AuditEvent = { id: string; userName: string; entryName: string | null; action: string; createdAt: string };
 type ListPayload = {
   entries: VaultEntrySummary[];
   categories: Category[];
@@ -100,8 +85,6 @@ export function VaultManager() {
   const [pendingDelete, setPendingDelete] = useState<VaultEntrySummary | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [team, setTeam] = useState<TeamMember[]>([]);
-  const [auditOpen, setAuditOpen] = useState(false);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
   const [folderAccess, setFolderAccess] = useState<{ id: string; name: string; userIds: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -165,16 +148,6 @@ export function VaultManager() {
     const timer = setTimeout(() => setRevealed((current) => (current && current.seconds > 1 ? { ...current, seconds: current.seconds - 1 } : null)), 1000);
     return () => clearTimeout(timer);
   }, [revealed]);
-
-  useEffect(() => {
-    if (!auditOpen) return;
-    let active = true;
-    void (async () => {
-      const result = await vaultRequest<{ events: AuditEvent[] }>("/api/vault/audit");
-      if (active && result.ok) setAuditEvents(result.data.events ?? []);
-    })();
-    return () => { active = false; };
-  }, [auditOpen]);
 
   function handleLock(lock: LockReason) {
     setRevealed(null);
@@ -431,13 +404,13 @@ export function VaultManager() {
         <div><p>Credenciales de la empresa, cifradas. Para mostrar o copiar una contraseña se pide el código de tu app de autenticación, una vez al día.</p></div>
         <div className="panel-heading-trailing">
           {isEmployee ? <MyTicketButton userName={userName} /> : null}
-          {isVaultAdmin ? <Link className="button button-secondary" href="/contrasenas/salud">Salud del gestor</Link> : null}
-          {isVaultAdmin ? <button type="button" className="button button-secondary" onClick={() => { setAuditEvents(null); setAuditOpen(true); }}>Auditoría</button> : null}
           <button type="button" className="button button-primary" onClick={openNew}>+ Nueva credencial</button>
         </div>
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
+
+      <VaultTabs />
 
       <div className="vault-layout">
         <aside className="panel vault-tree">
@@ -718,29 +691,6 @@ export function VaultManager() {
         ) : null}
       </Modal>
 
-      {/* ---------- Audit ---------- */}
-      <Modal open={auditOpen} title="Auditoría del gestor" eyebrow="Registro de actividad" onClose={() => setAuditOpen(false)}>
-        <div className="table-scroll vault-audit-table">
-          <table>
-            <thead><tr><th>Cuándo</th><th>Quién</th><th>Qué hizo</th><th>Credencial</th></tr></thead>
-            <tbody>
-              {auditEvents === null ? <tr><td colSpan={4} className="muted">Cargando…</td></tr>
-                : auditEvents.length === 0 ? <tr><td colSpan={4} className="muted">Sin actividad registrada.</td></tr>
-                  : auditEvents.map((event) => (
-                    <tr key={event.id} className={event.action === "PASSWORD_REVEAL" || event.action === "PASSWORD_COPY" ? "vault-audit-secret" : undefined}>
-                      <td>{new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", dateStyle: "short", timeStyle: "short" }).format(new Date(event.createdAt))}</td>
-                      <td>{event.userName}</td>
-                      <td>{auditActionLabels[event.action] ?? event.action}</td>
-                      <td>{event.entryName ?? "—"}</td>
-                    </tr>
-                  ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="muted invoice-hint">El registro nunca guarda contraseñas: solo quién hizo qué y cuándo.</p>
-        <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setAuditOpen(false)}>Cerrar</button></div>
-      </Modal>
-
       <ConfirmationDialog
         open={Boolean(pendingDelete)}
         title="¿Eliminar la credencial?"
@@ -758,7 +708,6 @@ export function VaultManager() {
         ) : null}
       </ConfirmationDialog>
 
-      {isVaultAdmin ? <p className="muted vault-admin-note"><KeyIcon /> Eres administrador del gestor: gestionas accesos y ves la auditoría. Las credenciales personales de otras personas siguen siendo privadas.</p> : null}
     </div>
   );
 }

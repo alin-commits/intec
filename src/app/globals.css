@@ -1031,7 +1031,7 @@ tr.row-muted td { opacity: .6; }
 .vault-audit-table table { font-size: 13px; }
 tr.vault-audit-secret td:nth-child(3) { color: #b45309; font-weight: 700; }
 /* Gestor: árbol de carpetas, listado denso y scroll propio */
-.vault-layout { display: grid; grid-template-columns: minmax(210px, 250px) minmax(0, 1fr); gap: 18px; align-items: stretch; height: calc(100dvh - 268px); min-height: 420px; }
+.vault-layout { display: grid; grid-template-columns: minmax(210px, 250px) minmax(0, 1fr); gap: 18px; align-items: stretch; height: calc(100dvh - 292px); min-height: 380px; }
 .vault-tree { padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .vault-tree-title { padding-left: 4px; }
 .vault-tree-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
@@ -1115,3 +1115,7 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .vault-health-chip small { color: var(--muted); font-size: 11px; }
 .vault-health-count { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; width: 90px; }
 @media (max-width: 900px) { .vault-health-grid { grid-template-columns: 1fr; } }
+.vault-audit-scroll { max-height: 56vh; overflow-y: auto; margin-top: 12px; }
+.vault-audit-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.vault-audit-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.view-tabs a.view-tab { text-decoration: none; }
