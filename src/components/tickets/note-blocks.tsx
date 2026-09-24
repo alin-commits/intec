@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createBlock, noteBlockTypeLabels, noteBlockTypeOrder, type NoteBlock, type NoteBlockType } from "@/lib/tickets/notes";
 
 const URL_PATTERN = /(https?:\/\/[^\s<>"')\]]+)/g;
@@ -15,6 +15,8 @@ function linkify(text: string): ReactNode {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const resetCopied = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (resetCopied.current) clearTimeout(resetCopied.current); }, []);
   return (
     <button
       type="button"
@@ -22,7 +24,8 @@ function CopyButton({ text }: { text: string }) {
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
+          if (resetCopied.current) clearTimeout(resetCopied.current);
+          resetCopied.current = setTimeout(() => setCopied(false), 1500);
         });
       }}
     >

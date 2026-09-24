@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Modal } from "@/components/ui/modal";
 import { buildVCard, downloadVCard } from "@/lib/vcard";
@@ -17,6 +17,8 @@ export function CardActions({ card, unitName }: { card: BusinessCard; unitName: 
   const [shareOpen, setShareOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copyLabel, setCopyLabel] = useState("Copiar enlace");
+  const resetLabel = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (resetLabel.current) clearTimeout(resetLabel.current); }, []);
   const [publicUrl] = useState(() => (typeof window !== "undefined" ? `${window.location.origin}/tarjeta/${card.slug}` : ""));
   const [canNativeShare] = useState(() => typeof navigator !== "undefined" && Boolean(navigator.share));
 
@@ -41,7 +43,8 @@ export function CardActions({ card, unitName }: { card: BusinessCard; unitName: 
     try {
       await navigator.clipboard.writeText(publicUrl);
       setCopyLabel("¡Copiado!");
-      setTimeout(() => setCopyLabel("Copiar enlace"), 2000);
+      if (resetLabel.current) clearTimeout(resetLabel.current);
+      resetLabel.current = setTimeout(() => setCopyLabel("Copiar enlace"), 2000);
     } catch {
       setCopyLabel("No se pudo copiar");
     }

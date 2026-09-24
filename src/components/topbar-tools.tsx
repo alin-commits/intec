@@ -22,13 +22,16 @@ const SEARCH_LIMIT = 5;
 const RENEWAL_ALERT_DAYS = 7;
 
 function useClickOutside(ref: RefObject<HTMLElement | null>, onOutside: () => void) {
+  const callback = useRef(onOutside);
+  // En un efecto, no en el render: React 19 no deja tocar refs mientras pinta.
+  useEffect(() => { callback.current = onOutside; });
   useEffect(() => {
     function handle(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) onOutside();
+      if (ref.current && !ref.current.contains(event.target as Node)) callback.current();
     }
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
-  }, [ref, onOutside]);
+  }, [ref]);
 }
 
 // ---------- Notifications ----------
@@ -286,6 +289,8 @@ export function GlobalSearch({ roles }: { roles: AppRole[] }) {
   useClickOutside(wrapperRef, () => setOpen(false));
   const rolesKey = roles.join(",");
   const cleaned = sanitizeSearchTerm(term);
+  /** De qué término son los resultados que hay guardados. */
+  const [resultsFor, setResultsFor] = useState("");
 
   useEffect(() => {
     if (cleaned.length < 2) return;
@@ -300,6 +305,7 @@ export function GlobalSearch({ roles }: { roles: AppRole[] }) {
       ]);
       if (!active) return;
       const query = encodeURIComponent(cleaned);
+      setResultsFor(cleaned);
       setResults([
         ...(crm?.data ?? []).map((row) => ({ key: `crm-${row.id}`, group: "Contactos CRM" as const, title: row.full_name, detail: row.company_name ?? "", href: `/crm?q=${encodeURIComponent(row.full_name)}` })),
         ...(leads?.data ?? []).map((row) => ({ key: `lead-${row.id}`, group: "Leads" as const, title: row.contact_name || row.client_company_name || "Lead", detail: [row.client_company_name, row.email].filter(Boolean).join(" · "), href: `/leads?q=${query}` })),
@@ -310,7 +316,8 @@ export function GlobalSearch({ roles }: { roles: AppRole[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rolesKey stands in for roles
   }, [cleaned, rolesKey]);
 
-  const visibleResults = cleaned.length < 2 ? null : results;
+  // Solo se enseñan si son de lo que hay escrito ahora mismo.
+  const visibleResults = cleaned.length < 2 || resultsFor !== cleaned ? null : results;
   const groups = (["Contactos CRM", "Leads", "Tickets"] as const)
     .map((group) => ({ group, items: (visibleResults ?? []).filter((item) => item.group === group) }))
     .filter((entry) => entry.items.length > 0);
