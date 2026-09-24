@@ -6,6 +6,7 @@ import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { expenseCategoryLabels, type ExpenseCategory } from "@/lib/expenses";
 import { currencyFormatter, formatDate } from "@/lib/format";
 import { INVOICE_BUCKET, INVOICE_MAX_BYTES, INVOICE_PATH_PATTERN } from "@/lib/invoices";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/types";
 
@@ -15,6 +16,13 @@ import type { AppRole } from "@/lib/types";
 const DEFAULT_RECIPIENT = "alin@suministrointec.com";
 
 const requestSchema = z.object({ id: z.string().uuid() });
+
+/** El nombre unido llega como objeto o como lista de uno, según la consulta. */
+function authorName(value: unknown): string | null {
+  const one = Array.isArray(value) ? value[0] : value;
+  const name = (one as { full_name?: unknown } | null)?.full_name;
+  return typeof name === "string" && name.trim() ? name : null;
+}
 
 function recipient(): string {
   return process.env.INVOICE_EMAIL_TO?.trim() || DEFAULT_RECIPIENT;
@@ -29,8 +37,11 @@ function sender(): string | undefined {
   return process.env.INVOICE_EMAIL_FROM?.trim() || undefined;
 }
 
-/** Para que la pantalla pueda decir a dónde va la factura antes de mandarla. */
-export async function GET() {
+/**
+ * Para que la pantalla pueda decir a dónde va la factura antes de mandarla y,
+ * con `?id=`, cuántas veces ha salido ya.
+ */
+export async function GET(request: Request) {
   const supabase = await createClient();
   if (!supabase) return NextResponse.json({ error: "Supabase no está configurado." }, { status: 503 });
   const { data: { user } } = await supabase.auth.getUser();
@@ -39,7 +50,21 @@ export async function GET() {
   if (!profile?.is_active || !hasAnyRole(profile.roles as AppRole[], EXPENSES_EDIT_ROLES)) {
     return NextResponse.json({ error: "No tienes permiso." }, { status: 403 });
   }
-  return NextResponse.json({ to: recipient(), configured: isEmailConfigured() }, { headers: { "Cache-Control": "no-store" } });
+  const id = new URL(request.url).searchParams.get("id");
+  let sends: { at: string; by: string | null; to: string }[] = [];
+  if (id && z.string().uuid().safeParse(id).success) {
+    const { data } = await supabase
+      .from("marketing_invoice_sends")
+      .select("created_at, sent_to, profiles:sent_by (full_name)")
+      .eq("invoice_id", id)
+      .order("created_at", { ascending: false });
+    sends = (data ?? []).map((row) => ({
+      at: String(row.created_at),
+      by: authorName(row.profiles),
+      to: String(row.sent_to),
+    }));
+  }
+  return NextResponse.json({ to: recipient(), configured: isEmailConfigured(), sends }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
@@ -110,6 +135,16 @@ export async function POST(request: Request) {
     attachments: [{ filename: fileName, content: Buffer.from(await file.arrayBuffer()) }],
   });
   if (!sent) return NextResponse.json({ error: "No se pudo enviar el correo. Inténtalo de nuevo." }, { status: 502 });
+
+  // Solo se apunta cuando el correo ha salido de verdad. Si esto fallara, el
+  // envío ya está hecho: se avisa por consola y no se echa atrás.
+  // Se escribe con el rol de servicio: la tabla no admite escrituras desde el
+  // navegador, para que el registro solo lo ponga un envío real.
+  const admin = createAdminClient();
+  const { error: logError } = admin
+    ? await admin.from("marketing_invoice_sends").insert({ invoice_id: id, sent_to: to, sent_by: user.id })
+    : { error: new Error("Supabase no está configurado.") };
+  if (logError) console.error("No se pudo registrar el envío de la factura:", logError.message);
 
   return NextResponse.json({ ok: true, to });
 }

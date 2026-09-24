@@ -16,8 +16,10 @@ import type { BusinessUnit } from "@/lib/types";
 
 type InvoiceDraft = Omit<MarketingInvoice, "id">;
 type UploadStep = "idle" | "uploading" | "reading";
-/** Una factura recién guardada esperando a que se decida si se manda a contabilidad. */
+/** Una factura esperando a que se decida si se manda a contabilidad. */
 type PendingSend = { id: string; supplier: string };
+/** Envíos anteriores de esa factura, de más reciente a más antiguo. */
+type InvoiceSend = { at: string; by: string | null; to: string };
 
 export function mapInvoiceRow(row: Record<string, unknown>): MarketingInvoice {
   return {
@@ -103,6 +105,8 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
   /** A qué dirección se mandan las facturas; la decide el servidor. */
   const [mailbox, setMailbox] = useState("");
+  /** Guarda de qué factura son los envíos, para no enseñar los de la anterior. */
+  const [sendLog, setSendLog] = useState<{ id: string; sends: InvoiceSend[] } | null>(null);
 
   const subscriptions = expenses.filter((expense) => expense.kind === "subscription");
   const unitName = (id: string | null) => (id ? units.find((unit) => unit.id === id)?.name ?? "—" : "General");
@@ -311,15 +315,18 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   }
 
   useEffect(() => {
+    if (!pendingSend) return;
     let active = true;
     void (async () => {
-      const response = await fetch("/api/invoices/send", { cache: "no-store" });
-      if (!active || !response.ok) return;
-      const result = (await response.json().catch(() => ({}))) as { to?: string };
-      if (active && result.to) setMailbox(result.to);
+      const response = await fetch(`/api/invoices/send?id=${pendingSend.id}`, { cache: "no-store" });
+      if (!active) return;
+      const result = (await response.json().catch(() => ({}))) as { to?: string; sends?: InvoiceSend[] };
+      if (!response.ok) return;
+      if (result.to) setMailbox(result.to);
+      setSendLog({ id: pendingSend.id, sends: result.sends ?? [] });
     })();
     return () => { active = false; };
-  }, []);
+  }, [pendingSend]);
 
   async function sendInvoice(id: string) {
     setBusy(true);
@@ -342,6 +349,11 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   async function viewPdf(path: string) {
     if (!(await openInvoicePdf(path))) onMessage("No se pudo abrir el PDF de la factura.");
   }
+
+  // Null mientras no se sepa: así no se avisa de "0 envíos" antes de saberlo.
+  const previousSends = sendLog && pendingSend && sendLog.id === pendingSend.id ? sendLog.sends : null;
+  const lastSend = previousSends && previousSends.length > 0 ? previousSends[0] : null;
+  const sendCountLabel = previousSends?.length === 1 ? "una vez" : `${previousSends?.length ?? 0} veces`;
 
   const totals = {
     base: invoices.reduce((sum, invoice) => sum + invoice.baseAmount, 0),
@@ -471,20 +483,33 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
 
       <ConfirmationDialog
         open={Boolean(pendingSend)}
-        title="¿Enviar la factura por correo?"
-        confirmLabel="Sí, enviar"
+        title={lastSend ? "Esta factura ya se ha enviado" : "¿Enviar la factura por correo?"}
+        confirmLabel={lastSend ? "Enviar otra vez" : "Sí, enviar"}
         cancelLabel="Ahora no"
         busyLabel="Enviando…"
-        busy={busy}
+        busy={busy || previousSends === null}
         onCancel={() => setPendingSend(null)}
         onConfirm={() => pendingSend && void sendInvoice(pendingSend.id)}
       >
         {pendingSend ? (
-          <div className="confirmation-summary">
-            <span>Factura</span><strong>{pendingSend.supplier}</strong>
-            <span>Se envía a</span><strong>{mailbox || "la dirección configurada para facturas"}</strong>
-            <span>Qué lleva</span><strong>El PDF adjunto y un resumen con proveedor, número, fecha, base, IVA y total.</strong>
-          </div>
+          <>
+            {lastSend ? (
+              <div className="notice vault-weak-notice">
+                <div>
+                  <strong>Ya ha salido {sendCountLabel}.</strong>
+                  <span>
+                    La última vez el {formatDate(lastSend.at)}
+                    {lastSend.by ? `, enviada por ${lastSend.by}` : ""}. Si la envías de nuevo, contabilidad recibirá la misma factura otra vez.
+                  </span>
+                </div>
+              </div>
+            ) : null}
+            <div className="confirmation-summary">
+              <span>Factura</span><strong>{pendingSend.supplier}</strong>
+              <span>Se envía a</span><strong>{mailbox || "la dirección configurada para facturas"}</strong>
+              <span>Qué lleva</span><strong>El PDF adjunto y un resumen con proveedor, número, fecha, base, IVA y total.</strong>
+            </div>
+          </>
         ) : null}
       </ConfirmationDialog>
 
