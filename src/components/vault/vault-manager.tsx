@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -53,17 +54,6 @@ type ListPayload = {
   pageSize: number;
   isVaultAdmin: boolean;
 };
-type HealthPayload = {
-  total: number;
-  personalCount: number;
-  reused: string[][];
-  reusedCount: number;
-  weak: string[];
-  stale: { name: string; changedAt: string }[];
-  staleCount: number;
-  staleYears: number;
-  unknown: number;
-};
 
 function blankDraft(): EntryDraft {
   return { name: "", url: "", username: "", password: "", notes: "", categoryId: "", visibility: "shared" };
@@ -112,8 +102,6 @@ export function VaultManager() {
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
-  const [healthOpen, setHealthOpen] = useState(false);
-  const [health, setHealth] = useState<HealthPayload | null>(null);
   const [folderAccess, setFolderAccess] = useState<{ id: string; name: string; userIds: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -187,18 +175,6 @@ export function VaultManager() {
     })();
     return () => { active = false; };
   }, [auditOpen]);
-
-  useEffect(() => {
-    if (!healthOpen) return;
-    let active = true;
-    void (async () => {
-      const result = await vaultRequest<HealthPayload>("/api/vault/health");
-      if (!active) return;
-      if (result.ok) setHealth(result.data);
-      else setMessage(result.error);
-    })();
-    return () => { active = false; };
-  }, [healthOpen]);
 
   function handleLock(lock: LockReason) {
     setRevealed(null);
@@ -455,7 +431,7 @@ export function VaultManager() {
         <div><p>Credenciales de la empresa, cifradas. Para mostrar o copiar una contraseña se pide el código de tu app de autenticación, una vez al día.</p></div>
         <div className="panel-heading-trailing">
           {isEmployee ? <MyTicketButton userName={userName} /> : null}
-          {isVaultAdmin ? <button type="button" className="button button-secondary" onClick={() => { setHealth(null); setHealthOpen(true); }}>Salud</button> : null}
+          {isVaultAdmin ? <Link className="button button-secondary" href="/contrasenas/salud">Salud del gestor</Link> : null}
           {isVaultAdmin ? <button type="button" className="button button-secondary" onClick={() => { setAuditEvents(null); setAuditOpen(true); }}>Auditoría</button> : null}
           <button type="button" className="button button-primary" onClick={openNew}>+ Nueva credencial</button>
         </div>
@@ -740,35 +716,6 @@ export function VaultManager() {
             </div>
           </>
         ) : null}
-      </Modal>
-
-      {/* ---------- Health ---------- */}
-      <Modal open={healthOpen} title="Salud del gestor" eyebrow="Revisión" onClose={() => setHealthOpen(false)}>
-        {health === null ? <p className="muted">Calculando…</p> : (
-          <div className="vault-health">
-            <div className="confirmation-summary">
-              <span>Credenciales revisadas</span><strong>{health.total}</strong>
-              <span>Repetidas</span><strong>{health.reusedCount} en {health.reused.length} grupos</strong>
-              <span>Débiles</span><strong>{health.weak.length}</strong>
-              <span>Sin cambiar en {health.staleYears} años</span><strong>{health.staleCount}</strong>
-            </div>
-            {health.reused.length > 0 ? (
-              <>
-                <span className="search-group-title">Contraseñas repetidas</span>
-                <ul className="vault-health-list">{health.reused.slice(0, 15).map((group) => <li key={group.join("|")}>{group.join(" · ")}</li>)}</ul>
-                <p className="muted invoice-hint">Si una se filtra, se filtran todas las de su grupo. Conviene ponerles contraseñas distintas.</p>
-              </>
-            ) : null}
-            {health.weak.length > 0 ? (
-              <>
-                <span className="search-group-title">Contraseñas débiles</span>
-                <ul className="vault-health-list">{health.weak.slice(0, 15).map((name) => <li key={name}>{name}</li>)}</ul>
-              </>
-            ) : null}
-            {health.personalCount > 0 ? <p className="muted invoice-hint">No se revisan {health.personalCount} credenciales personales: son privadas de cada persona.</p> : null}
-          </div>
-        )}
-        <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setHealthOpen(false)}>Cerrar</button></div>
       </Modal>
 
       {/* ---------- Audit ---------- */}

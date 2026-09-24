@@ -63,7 +63,10 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .page-stack { display: grid; gap: 24px; min-width: 0; }
 .page-stack > * { min-width: 0; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.03), 0 10px 30px rgba(15,23,42,.04); }
-.button { border: 0; min-height: 40px; border-radius: 10px; padding: 0 16px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .05s ease; }
+.button { border: 0; min-height: 40px; border-radius: 10px; padding: 0 16px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .05s ease; }
+/* Un icono dentro de un botón siempre del mismo tamaño, nunca estirado. */
+.button svg { width: 16px; height: 16px; flex-shrink: 0; }
+.button-compact svg { width: 14px; height: 14px; }
 .button:active { transform: translateY(1px); }
 .button-primary { background: var(--primary); color: white; box-shadow: 0 1px 2px rgba(51,44,128,.15); }
 .button-primary:hover { background: var(--primary-hover); box-shadow: 0 6px 16px rgba(51,44,128,.22); }
@@ -1015,6 +1018,7 @@ tr.row-muted td { opacity: .6; }
 .vault-notes-body { margin: 6px 0 0; white-space: pre-line; overflow-wrap: anywhere; font-size: 13px; color: #334155; }
 .vault-generator { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin-top: 16px; }
 .vault-generator .button { justify-self: start; }
+.vault-generator .search-group-title { display: inline-flex; align-items: center; }
 .vault-generator-options { display: grid; gap: 10px; }
 .vault-generator-options label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .vault-strength { font-style: normal; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
@@ -1098,3 +1102,16 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
   .vault-folder-cell::before { content: "Carpeta: "; }
   .vault-row-actions { justify-content: flex-start; margin-top: 8px; }
 }
+/* Salud del gestor */
+.vault-health-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
+.vault-health-steps { margin: 0; padding-left: 22px; display: grid; gap: 10px; color: #334155; font-size: 13.5px; line-height: 1.5; list-style: decimal; }
+.vault-health-steps li::marker { color: var(--primary); font-weight: 800; }
+.vault-health-steps strong { color: var(--text); }
+.vault-health-scroll { max-height: 420px; overflow-y: auto; }
+.vault-health-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.vault-health-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.vault-health-chip { display: inline-grid; padding: 5px 10px; border-radius: 9px; background: var(--surface-muted); font-size: 12.5px; }
+.vault-health-chip strong { font-size: 12.5px; }
+.vault-health-chip small { color: var(--muted); font-size: 11px; }
+.vault-health-count { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; width: 90px; }
+@media (max-width: 900px) { .vault-health-grid { grid-template-columns: 1fr; } }
