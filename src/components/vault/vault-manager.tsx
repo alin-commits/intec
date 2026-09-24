@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
@@ -106,12 +106,17 @@ export function VaultManager() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** El borrado del portapapeles, para poder cancelarlo al salir de la página. */
+  const clipboardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (clipboardTimer.current) clearTimeout(clipboardTimer.current); }, []);
 
   const isEmployee = roles.includes("employee");
   const isVaultAdmin = data?.isVaultAdmin ?? false;
-  const reload = useCallback(() => {
-    // El índice del buscador también deja de valer en cuanto algo cambia.
-    setIndex(null);
+  const reload = useCallback((refreshIndex = true) => {
+    // El índice del buscador deja de valer cuando cambia una credencial, pero
+    // no cuando solo se marca una favorita: eso son 613 filas y un apunte de
+    // auditoría de más por cada clic en la estrella.
+    if (refreshIndex) setIndex(null);
     setReloadTick((tick) => tick + 1);
   }, []);
 
@@ -297,7 +302,15 @@ export function VaultManager() {
       await navigator.clipboard.writeText(value);
       setMessage(`${field === "notes" ? "Notas copiadas" : "Contraseña copiada"}. Se intentará borrar del portapapeles en ${REVEAL_SECONDS} segundos.`);
       // Best effort only: the browser may refuse if the tab is not focused.
-      setTimeout(() => { void navigator.clipboard.writeText("").catch(() => {}); }, REVEAL_SECONDS * 1000);
+      if (clipboardTimer.current) clearTimeout(clipboardTimer.current);
+      clipboardTimer.current = setTimeout(() => {
+        clipboardTimer.current = null;
+        // Solo se borra si lo que hay sigue siendo el secreto: si entretanto se
+        // ha copiado otra cosa, vaciar el portapapeles sería perderla.
+        void navigator.clipboard.readText()
+          .then((current) => { if (current === value) return navigator.clipboard.writeText(""); })
+          .catch(() => {});
+      }, REVEAL_SECONDS * 1000);
     } catch {
       setMessage("Tu navegador no ha permitido copiar. Usa «Mostrar» y cópialo a mano.");
     }
@@ -596,9 +609,9 @@ export function VaultManager() {
                     <td className="vault-folder-cell" title={categoryName(entry.categoryId)}>{shortFolder(entry.categoryId)}</td>
                     <td>
                       <div className="table-actions vault-row-actions">
-                        <button type="button" className="button button-compact button-primary" onClick={() => void copySecret(entry.id)} title="Copiar la contraseña"><CopyIcon /> Copiar</button>
-                        {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer" title="Abrir la web">Abrir</a> : null}
-                        <button type="button" className="button button-compact button-secondary" onClick={() => void openDetail(entry.id)}>Ver</button>
+                        <button type="button" className="button button-compact button-primary" aria-label={`Copiar la contraseña de ${entry.name}`} onClick={() => void copySecret(entry.id)} title="Copiar la contraseña"><CopyIcon /> Copiar</button>
+                        {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer" aria-label={`Abrir la web de ${entry.name}`} title="Abrir la web">Abrir</a> : null}
+                        <button type="button" className="button button-compact button-secondary" aria-label={`Ver ${entry.name}`} onClick={() => void openDetail(entry.id)}>Ver</button>
                       </div>
                     </td>
                   </tr>

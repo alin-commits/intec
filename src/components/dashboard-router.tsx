@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { hasAnyRole } from "@/lib/constants";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
 import { DashboardClient } from "./dashboard-client";
@@ -19,26 +20,33 @@ export function DashboardRouter() {
 
   useEffect(() => {
     if (!configured) return;
-    const supabase = createClient();
-    supabase.auth.getUser().then(async ({ data: authData }) => {
-      if (!authData.user) {
-        setRoles(["admin"]);
-        return;
+    let active = true;
+    void (async () => {
+      try {
+        // Se reaprovecha la consulta que ya hacen el menú y las pestañas.
+        const profile = await loadCurrentProfile();
+        if (!active) return;
+        // Sin sesión no se decide nada aquí: de eso se encarga el proxy, que
+        // manda a iniciar sesión. Suponer "admin" enseñaba de más.
+        if (!profile) return;
+        setRoles(profile.roles);
+        if (profile.roles.includes("direction")) setDirectionViewState(getDirectionViewAs());
+      } catch (cause) {
+        console.error("No se pudo saber qué rol tiene esta persona:", cause);
+        if (active) setRoles([]);
       }
-      const { data } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
-      const resolvedRoles = (data?.roles as AppRole[] | undefined) ?? ["admin"];
-      setRoles(resolvedRoles);
-      if (resolvedRoles.includes("direction")) setDirectionViewState(getDirectionViewAs());
-    });
+    })();
+    return () => { active = false; };
   }, [configured]);
 
-  if (roles === null) return <div className="page-stack" />;
+  // El rol de empleado solo llega a Contraseñas. La redirección va en un efecto:
+  // navegar desde el cuerpo del render se repite en cada pasada.
+  const onlyEmployee = roles !== null && roles.length > 0 && roles.every((role) => role === "employee");
+  useEffect(() => {
+    if (onlyEmployee) router.replace("/contrasenas");
+  }, [onlyEmployee, router]);
 
-  // The employee role only has access to Contraseñas.
-  if (roles.length > 0 && roles.every((role) => role === "employee")) {
-    router.replace("/contrasenas");
-    return <div className="page-stack" />;
-  }
+  if (roles === null || onlyEmployee) return <div className="page-stack" />;
 
   if (roles.includes("direction")) {
     if (!directionView) {

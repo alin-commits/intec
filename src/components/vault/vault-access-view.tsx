@@ -38,13 +38,17 @@ export function VaultAccessView() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const response = await fetch("/api/vault/access", { cache: "no-store" });
-      const payload = (await response.json().catch(() => ({}))) as AccessPayload & { error?: string };
-      if (!active) return;
-      if (!response.ok) setError(payload.error ?? "No se pudo cargar el panel de accesos.");
-      else {
-        setError(null);
-        setData(payload);
+      try {
+        const response = await fetch("/api/vault/access", { cache: "no-store" });
+        const payload = (await response.json().catch(() => ({}))) as AccessPayload & { error?: string };
+        if (!active) return;
+        if (!response.ok) setError(payload.error ?? "No se pudo cargar el panel de accesos.");
+        else {
+          setError(null);
+          setData(payload);
+        }
+      } catch {
+        if (active) setError("No hay conexión con el servidor. Comprueba tu red y recarga la página.");
       }
     })();
     return () => { active = false; };
@@ -103,7 +107,7 @@ export function VaultAccessView() {
     return (
       <div className="page-stack">
         <section className="panel">
-          <h2>No tienes acceso a esta página</h2>
+          <h2>No se pudo cargar esta página</h2>
           <p>{error}</p>
           <div className="modal-actions"><Link className="button button-secondary" href="/contrasenas">Volver al gestor</Link></div>
         </section>

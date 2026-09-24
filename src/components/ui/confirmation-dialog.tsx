@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 export type ConfirmationDialogProps = {
   open: boolean;
@@ -28,25 +28,44 @@ export function ConfirmationDialog({
   onCancel,
   onConfirm,
 }: ConfirmationDialogProps) {
+  const titleId = useId();
+  const cardRef = useRef<HTMLElement>(null);
+  const returnFocusTo = useRef<Element | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    returnFocusTo.current = document.activeElement;
+    cardRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onCancel();
-      if (event.key === "Enter" && !busy) onConfirm();
+      if (busy) return;
+      // Solo si el foco está dentro: con el Enter global, pulsarlo en un campo
+      // del formulario de detrás lo enviaba y además confirmaba el diálogo.
+      if (!cardRef.current?.contains(document.activeElement)) return;
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onCancel();
+      }
+      if (event.key === "Enter" && !(document.activeElement instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        onConfirm();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (returnFocusTo.current instanceof HTMLElement) returnFocusTo.current.focus();
+    };
   }, [busy, onCancel, onConfirm, open]);
 
   if (!open) return null;
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-card confirmation-card" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+      <section ref={cardRef} tabIndex={-1} className="modal-card confirmation-card" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="modal-heading">
           <div>
             <span className="eyebrow">Confirmación</span>
-            <h2 id="confirmation-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
           </div>
         </div>
         <div className="confirmation-content">{children}</div>

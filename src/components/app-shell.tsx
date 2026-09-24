@@ -62,7 +62,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const configured = isSupabaseConfigured();
-  const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[] }>(() => ({ fullName: "Alín", roles: ["admin"] }));
+  // Sin roles hasta saberlos: suponer "admin" enseñaba el menú entero, "Usuarios"
+  // incluido, durante la carga de cada recarga dura.
+  const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[] }>(() => ({ fullName: "", roles: [] }));
   const [hasAssignedCard, setHasAssignedCard] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [directionView, setDirectionView] = useState<DirectionDepartment | null>(() => getDirectionViewAs());

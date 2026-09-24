@@ -51,6 +51,15 @@ export const DASHBOARD_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it"
 
 export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "employee", "vault_admin"];
 
+/**
+ * Los roles del gestor de contraseñas no se reparten desde la pantalla de
+ * usuarios: se conceden en Contraseñas → Accesos, que exige ser administrador
+ * del gestor. Si no, un administrador de la plataforma podría dárselos a una
+ * cuenta suya y llegar al llavero, que es justo lo que se quiere evitar.
+ */
+export const VAULT_ONLY_ROLES: AppRole[] = ["vault_admin", "employee"];
+export const USER_MANAGER_ROLES: AppRole[] = ALL_APP_ROLES.filter((role) => !VAULT_ONLY_ROLES.includes(role));
+
 /** True if the user holds at least one of the given roles. */
 export function hasAnyRole(userRoles: AppRole[], allowed: AppRole[]): boolean {
   return userRoles.some((role) => allowed.includes(role));

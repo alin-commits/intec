@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ALL_APP_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { USER_MANAGER_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -35,7 +35,7 @@ function toggleRole(current: AppRole[], role: AppRole): AppRole[] {
 function RoleChips({ value, onChange, disabled }: { value: AppRole[]; onChange: (next: AppRole[]) => void; disabled?: boolean }) {
   return (
     <div className="role-chip-group">
-      {ALL_APP_ROLES.map((role) => (
+      {USER_MANAGER_ROLES.map((role) => (
         <button
           key={role}
           type="button"

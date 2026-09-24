@@ -54,13 +54,18 @@ export function VaultAuditView() {
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       params.set("page", String(page));
-      const response = await fetch(`/api/vault/audit?${params}`, { cache: "no-store" });
-      const payload = (await response.json().catch(() => ({}))) as AuditPayload & { error?: string };
-      if (!active) return;
-      if (!response.ok) setError(payload.error ?? "No se pudo cargar la auditoría.");
-      else {
-        setError(null);
-        setData(payload);
+      try {
+        const response = await fetch(`/api/vault/audit?${params}`, { cache: "no-store" });
+        const payload = (await response.json().catch(() => ({}))) as AuditPayload & { error?: string };
+        if (!active) return;
+        if (!response.ok) setError(payload.error ?? "No se pudo cargar la auditoría.");
+        else {
+          setError(null);
+          setData(payload);
+        }
+      } catch {
+        // Sin esto la tabla se quedaba con «Cargando…» para siempre.
+        if (active) setError("No hay conexión con el servidor. Comprueba tu red y recarga la página.");
       }
     })();
     return () => { active = false; };

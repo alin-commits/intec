@@ -30,7 +30,11 @@ export function loadCurrentProfile(): Promise<CurrentProfile> {
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
-    const { data } = await supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle();
+    const { data, error } = await supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle();
+    // Supabase no lanza cuando la consulta falla: devuelve el error. Sin esto,
+    // un fallo pasajero se guardaba en la caché como "esta persona no tiene
+    // ningún rol" y el menú se quedaba vacío hasta recargar entera la página.
+    if (error) throw error;
     return {
       id: user.id,
       email: user.email ?? null,

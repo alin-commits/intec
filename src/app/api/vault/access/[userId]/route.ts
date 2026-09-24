@@ -48,6 +48,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ user
   // ---------- Type of user ----------
   const keptRoles = currentRoles.filter((role) => !(VAULT_MANAGED_ROLES as readonly string[]).includes(role));
   const nextRoles = [...keptRoles, ...body.roles] as AppRole[];
+  // La base de datos no admite un perfil sin ningún rol. Si alguien solo tenía
+  // "empleado" y se le quita, se queda como usuario normal de consulta.
+  if (nextRoles.length === 0) nextRoles.push("viewer");
   const rolesChanged =
     nextRoles.length !== currentRoles.length || nextRoles.some((role) => !currentRoles.includes(role));
 

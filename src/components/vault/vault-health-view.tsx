@@ -42,11 +42,20 @@ export function VaultHealthView() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const response = await fetch("/api/vault/health", { cache: "no-store" });
-      const payload = (await response.json().catch(() => ({}))) as HealthPayload & { error?: string };
-      if (!active) return;
-      if (!response.ok) setError(payload.error ?? "No se pudo cargar el estado del gestor.");
-      else setHealth(payload);
+      try {
+        const response = await fetch("/api/vault/health", { cache: "no-store" });
+        const payload = (await response.json().catch(() => ({}))) as HealthPayload & { error?: string };
+        if (!active) return;
+        if (!response.ok) {
+          setError(payload.error ?? "No se pudo cargar el estado del gestor.");
+          return;
+        }
+        setError(null);
+        setHealth(payload);
+      } catch {
+        // Sin esto, un fallo de red dejaba la página en blanco para siempre.
+        if (active) setError("No hay conexión con el servidor. Comprueba tu red y recarga la página.");
+      }
     })();
     return () => { active = false; };
   }, [reloadTick]);
@@ -88,7 +97,7 @@ export function VaultHealthView() {
     return (
       <div className="page-stack">
         <section className="panel">
-          <h2>No tienes acceso a esta página</h2>
+          <h2>No se pudo cargar esta página</h2>
           <p>{error}</p>
           <div className="modal-actions"><Link className="button button-secondary" href="/contrasenas">Volver al gestor</Link></div>
         </section>

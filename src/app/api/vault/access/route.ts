@@ -50,7 +50,9 @@ export async function GET() {
       roles,
       isVaultAdmin,
       folderCount: visible.length,
-      credentialCount: visible.reduce((sum, folder) => sum + folder.count, 0) + (isVaultAdmin ? uncategorised : uncategorised),
+      // Las credenciales sin carpeta las ve todo el mundo, igual que una
+      // carpeta abierta, así que se suman siempre.
+      credentialCount: visible.reduce((sum, folder) => sum + folder.count, 0) + uncategorised,
       restrictedFolders: folders.filter((folder) => folder.userIds.length > 0 && !folder.userIds.includes(String(profile.id)) && !isVaultAdmin).map((folder) => folder.name),
     };
   });
