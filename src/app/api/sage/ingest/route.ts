@@ -52,7 +52,10 @@ const bodySchema = z.object({
 });
 
 function isAuthorized(request: Request): boolean {
-  const secret = process.env.SAGE_INGEST_TOKEN;
+  // Con trim: al pegar la clave en Vercel es fácil llevarse un salto de línea
+  // o un espacio detrás, y eso bastaba para rechazar al agente sin más pista
+  // que un 401.
+  const secret = process.env.SAGE_INGEST_TOKEN?.trim();
   if (!secret) return false;
   const received = Buffer.from(request.headers.get("authorization") ?? "");
   const expected = Buffer.from(`Bearer ${secret}`);
