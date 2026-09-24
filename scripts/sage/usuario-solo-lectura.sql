@@ -26,7 +26,7 @@ go
 if not exists (select 1 from sys.server_principals where name = 'intec_lectura')
 begin
   create login intec_lectura
-    with password = 'PON_AQUI_UNA_CLAVE_LARGA',
+    with password = '6dddf3d7-eef1-4f1a-aac3-c19768de93a285c30b46-cd4b-468e-aecd-d2c2a722936b',
          check_policy = on,
          default_database = Sage;
 end
