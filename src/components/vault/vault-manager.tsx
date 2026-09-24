@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
@@ -9,7 +9,7 @@ import { MyTicketButton } from "@/components/tickets/my-ticket-button";
 import { VaultTabs } from "@/components/vault/vault-tabs";
 import { VaultUnlock } from "@/components/vault/vault-unlock";
 import { DEFAULT_GENERATOR, generatePassword, MAX_LENGTH, MIN_LENGTH, passwordStrength, type GeneratorOptions } from "@/lib/vault/password-generator";
-import type { VaultEntrySummary, VaultPermission, VaultVisibility } from "@/lib/vault/types";
+import type { VaultBankDetails, VaultEntrySummary, VaultEntryType, VaultPermission, VaultVisibility } from "@/lib/vault/types";
 import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -21,11 +21,21 @@ type LockReason = (typeof LOCK_REASONS)[number];
 
 const visibilityLabels: Record<VaultVisibility, string> = { shared: "Compartida", personal: "Personal", restricted: "Restringida" };
 const strengthLabels = { weak: "Débil", fair: "Aceptable", strong: "Fuerte" } as const;
+const typeLabels: Record<VaultEntryType, string> = { plain: "Normal", email: "Correo", server: "Servidor", bank: "Banco", other: "Otra" };
+/** Los campos que solo tienen sentido en una ficha de banco, en el orden en que se leen. */
+const bankFields: { key: keyof VaultBankDetails; label: string; placeholder: string }[] = [
+  { key: "bankName", label: "Banco", placeholder: "BANCO SANTANDER" },
+  { key: "bankCode", label: "Código bancario", placeholder: "0049" },
+  { key: "accountHolder", label: "Titular de la cuenta", placeholder: "SUMINISTROS INTEC SL" },
+  { key: "accountNumber", label: "Número de cuenta", placeholder: "" },
+  { key: "iban", label: "IBAN", placeholder: "ES00 0000 0000 0000 0000 0000" },
+];
+const emptyBank: VaultBankDetails = { bankName: null, bankCode: null, accountHolder: null, accountNumber: null, iban: null };
 
 
 type Category = { id: string; name: string; description: string | null; count: number };
 type Scope = { kind: "all" | "favorites" | "recent" | "personal" | "uncategorised" | "category"; id?: string };
-type EntryDraft = { name: string; url: string; username: string; password: string; notes: string; categoryId: string; visibility: VaultVisibility };
+type EntryDraft = { name: string; url: string; username: string; password: string; notes: string; categoryId: string; visibility: VaultVisibility; entryType: VaultEntryType; bank: VaultBankDetails };
 type DetailPayload = { entry: VaultEntrySummary; can: { edit: boolean; delete: boolean; managePermissions: boolean }; sharedWith: VaultPermission[] };
 type TeamMember = { id: string; fullName: string };
 type ListPayload = {
@@ -42,7 +52,7 @@ type ListPayload = {
 };
 
 function blankDraft(): EntryDraft {
-  return { name: "", url: "", username: "", password: "", notes: "", categoryId: "", visibility: "shared" };
+  return { name: "", url: "", username: "", password: "", notes: "", categoryId: "", visibility: "shared", entryType: "plain", bank: { ...emptyBank } };
 }
 
 function isLockReason(value: unknown): value is LockReason {
@@ -75,6 +85,8 @@ export function VaultManager() {
   const [page, setPage] = useState(0);
   const [openFolders, setOpenFolders] = useState<string[]>([]);
   const [reloadTick, setReloadTick] = useState(0);
+  /** Copia de todo lo que esta persona puede ver, para buscar sin ir al servidor. */
+  const [index, setIndex] = useState<VaultEntrySummary[] | null>(null);
 
   const [detail, setDetail] = useState<DetailPayload | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -96,7 +108,11 @@ export function VaultManager() {
 
   const isEmployee = roles.includes("employee");
   const isVaultAdmin = data?.isVaultAdmin ?? false;
-  const reload = useCallback(() => setReloadTick((tick) => tick + 1), []);
+  const reload = useCallback(() => {
+    // El índice del buscador también deja de valer en cuanto algo cambia.
+    setIndex(null);
+    setReloadTick((tick) => tick + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -111,11 +127,13 @@ export function VaultManager() {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => { setSearchTerm(query.trim()); setPage(0); }, 300);
+    const timer = setTimeout(() => { setSearchTerm(query.trim()); setPage(0); }, 150);
     return () => clearTimeout(timer);
   }, [query]);
 
+  const searchingLocally = Boolean(index && index.length > 0 && query.trim());
   useEffect(() => {
+    if (searchingLocally) return;
     let active = true;
     void (async () => {
       const params = new URLSearchParams();
@@ -141,7 +159,19 @@ export function VaultManager() {
       setStage("ready");
     })();
     return () => { active = false; };
-  }, [searchTerm, scope, page, reloadTick]);
+  }, [searchTerm, scope, page, reloadTick, searchingLocally]);
+
+  // Se pide una vez, ya con la lista pintada: no retrasa nada de lo que se ve.
+  useEffect(() => {
+    if (stage !== "ready" || index !== null) return;
+    let active = true;
+    void (async () => {
+      const result = await vaultRequest<{ entries: VaultEntrySummary[]; complete: boolean }>("/api/vault/entries?index=1");
+      if (!active || !result.ok) return;
+      setIndex(result.data.complete ? result.data.entries : []);
+    })();
+    return () => { active = false; };
+  }, [stage, index]);
 
   // Arriving from another page with ?entry=<id> opens that credential straight away.
   useEffect(() => {
@@ -189,12 +219,30 @@ export function VaultManager() {
     const map = new Map((data?.categories ?? []).map((category) => [category.id, category.name]));
     return (id: string | null) => (id ? map.get(id) ?? "—" : "Sin carpeta");
   }, [data?.categories]);
+  const typed = query.trim().toLowerCase();
+  /** Null mientras no haya índice o no se esté buscando: entonces manda el servidor. */
+  const localResults = useMemo(() => {
+    if (!index || index.length === 0 || typed.length === 0) return null;
+    const words = typed.split(/\s+/).filter(Boolean);
+    const recent = data?.recent ?? [];
+    return index.filter((entry) => {
+      if (scope.kind === "category" && entry.categoryId !== scope.id) return false;
+      if (scope.kind === "personal" && !(entry.visibility === "personal" && entry.createdBy === userId)) return false;
+      if (scope.kind === "favorites" && !favorites.has(entry.id)) return false;
+      if (scope.kind === "uncategorised" && entry.categoryId) return false;
+      if (scope.kind === "recent" && !recent.includes(entry.id)) return false;
+      const haystack = `${entry.name} ${entry.username ?? ""} ${entry.url ?? ""} ${categoryName(entry.categoryId)}`.toLowerCase();
+      return words.every((word) => haystack.includes(word));
+    });
+  }, [index, typed, scope.kind, scope.id, userId, favorites, categoryName, data?.recent]);
+
   const visibleEntries = useMemo(() => {
+    if (localResults) return localResults;
     if (scope.kind !== "recent") return entries;
     const order = data?.recent ?? [];
     return entries.filter((entry) => order.includes(entry.id)).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-  }, [scope.kind, data?.recent, entries]);
-  const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / (data?.pageSize ?? 100)));
+  }, [localResults, scope.kind, data?.recent, entries]);
+  const pageCount = localResults ? 1 : Math.max(1, Math.ceil((data?.total ?? 0) / (data?.pageSize ?? 100)));
 
   function selectScope(next: Scope) {
     setScope(next);
@@ -297,6 +345,8 @@ export function VaultManager() {
       notes: "",
       categoryId: entry.categoryId ?? "",
       visibility: entry.visibility,
+      entryType: entry.entryType,
+      bank: entry.bankDetails ?? { ...emptyBank },
     });
     const current = (detail?.entry.id === entry.id ? detail.sharedWith : []).map((permission) => permission.userId);
     setAccessUserIds(current);
@@ -317,6 +367,8 @@ export function VaultManager() {
       username: draft.username,
       categoryId: draft.categoryId || null,
       visibility: draft.visibility,
+      entryType: draft.entryType,
+      bankDetails: draft.entryType === "bank" ? draft.bank : null,
     };
     // An untouched password field means "leave it as it is": it is never sent back and forth.
     if (draft.password) body.password = draft.password;
@@ -497,7 +549,11 @@ export function VaultManager() {
           <div className="panel-heading vault-list-heading">
             <div>
               <h2>{scopeTitle}</h2>
-              <p className="panel-subtitle">{searchTerm ? `Resultados de «${searchTerm}»` : `${data?.total ?? 0} credenciales`}</p>
+              <p className="panel-subtitle">
+                {localResults
+                  ? `${localResults.length} ${localResults.length === 1 ? "resultado" : "resultados"} de «${query.trim()}»`
+                  : searchTerm ? `Resultados de «${searchTerm}»` : `${data?.total ?? 0} credenciales`}
+              </p>
             </div>
             <div className="vault-list-tools">
               <label className="search-field vault-search">
@@ -589,6 +645,23 @@ export function VaultManager() {
               <span>Contraseña cambiada</span><strong>{formatDate(detail.entry.lastPasswordChangeAt)}</strong>
             </div>
 
+            {detail.entry.entryType === "bank" && detail.entry.bankDetails ? (
+              <div className="vault-bank-block">
+                <span className="search-group-title">Datos del banco</span>
+                <div className="confirmation-summary">
+                  {bankFields.filter((field) => detail.entry.bankDetails?.[field.key]).map((field) => (
+                    <Fragment key={field.key}>
+                      <span>{field.label}</span>
+                      <strong className="vault-inline">
+                        {detail.entry.bankDetails?.[field.key]}
+                        <button type="button" className="button button-compact button-secondary" onClick={() => void copyText(detail.entry.bankDetails?.[field.key] as string, field.label)}><CopyIcon /> Copiar</button>
+                      </strong>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {detail.entry.strength === "weak" && detail.can.edit ? (
               <div className="notice vault-weak-notice">
                 <div>
@@ -642,11 +715,32 @@ export function VaultManager() {
               <option value="">Sin carpeta</option>
               {(data?.categories ?? []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select></label>
+            <label><span>Tipo</span><select value={draft.entryType} onChange={(event) => setDraft({ ...draft, entryType: event.target.value as VaultEntryType })}>
+              {(Object.keys(typeLabels) as VaultEntryType[]).map((type) => <option key={type} value={type}>{typeLabels[type]}</option>)}
+            </select></label>
             <label><span>¿Quién puede verla?</span><select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as VaultVisibility })}>
               <option value="shared">Compartida con el equipo</option>
               <option value="personal">Personal (solo yo)</option>
               <option value="restricted">Restringida (solo a quien le dé acceso)</option>
             </select></label>
+            {draft.entryType === "bank" ? (
+              <div className="form-field-wide vault-bank-fields">
+                <span className="vault-access-title">Datos del banco</span>
+                <div className="vault-bank-grid">
+                  {bankFields.map((field) => (
+                    <label key={field.key}>
+                      <span>{field.label}</span>
+                      <input
+                        value={draft.bank[field.key] ?? ""}
+                        placeholder={field.placeholder}
+                        onChange={(event) => setDraft({ ...draft, bank: { ...draft.bank, [field.key]: event.target.value } })}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="muted invoice-hint">Estos datos se guardan sin cifrar, porque no son secretos. El PIN o la clave de firma van en la contraseña, y lo demás en las notas.</p>
+              </div>
+            ) : null}
             {draft.visibility === "restricted" ? (
               <div className="form-field-wide vault-access-picker">
                 <span className="vault-access-title">¿Quién puede verla? {accessUserIds.length ? <strong>({accessUserIds.length})</strong> : null}</span>

@@ -2,6 +2,15 @@
 // passwords and notes only exist decrypted inside a single server response.
 
 export type VaultVisibility = "shared" | "personal" | "restricted";
+
+/** Datos propios de una ficha de banco. Nunca un secreto: el PIN va en la contraseña. */
+export type VaultBankDetails = {
+  bankName: string | null;
+  bankCode: string | null;
+  accountHolder: string | null;
+  accountNumber: string | null;
+  iban: string | null;
+};
 export type VaultEntryType = "plain" | "email" | "server" | "bank" | "other";
 
 export type VaultEntrySummary = {
@@ -20,6 +29,7 @@ export type VaultEntrySummary = {
   updatedAt: string;
   lastPasswordChangeAt: string;
   strength: "weak" | "fair" | "strong" | null;
+  bankDetails: VaultBankDetails | null;
 };
 
 export type VaultCategory = { id: string; name: string; description: string | null };
@@ -50,7 +60,19 @@ export type VaultAuditAction =
 export type VaultDeniedReason = "signed_out" | "inactive" | "mfa_enrollment_required" | "mfa_required" | "locked" | "forbidden" | "not_configured" | "rate_limited";
 
 export const VAULT_ENTRY_COLUMNS =
-  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at, password_strength";
+  "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at, password_strength, bank_details";
+
+/** Un valor vacío se guarda como null, para que la ficha no muestre huecos raros. */
+function mapBankDetails(row: Record<string, unknown>): VaultBankDetails {
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+  return {
+    bankName: text(row.bankName),
+    bankCode: text(row.bankCode),
+    accountHolder: text(row.accountHolder),
+    accountNumber: text(row.accountNumber),
+    iban: text(row.iban),
+  };
+}
 
 export function mapVaultEntry(row: Record<string, unknown>): VaultEntrySummary {
   return {
@@ -69,5 +91,6 @@ export function mapVaultEntry(row: Record<string, unknown>): VaultEntrySummary {
     updatedAt: String(row.updated_at),
     lastPasswordChangeAt: String(row.last_password_change_at),
     strength: (row.password_strength as "weak" | "fair" | "strong" | null) ?? null,
+    bankDetails: row.bank_details ? mapBankDetails(row.bank_details as Record<string, unknown>) : null,
   };
 }

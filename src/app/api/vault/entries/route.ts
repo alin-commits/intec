@@ -6,6 +6,8 @@ import { mapVaultEntry, VAULT_ENTRY_COLUMNS } from "@/lib/vault/types";
 import { sanitizeSearchTerm } from "@/lib/search-term";
 
 const PAGE_SIZE = 100;
+/** Tope del índice del buscador: por encima de esto se busca contra el servidor. */
+const INDEX_LIMIT = 3000;
 
 /** Lists the credentials this user may see. Never returns ciphertext or secrets. */
 export async function GET(request: Request) {
@@ -13,6 +15,29 @@ export async function GET(request: Request) {
   if (!guard.ok) return guard.response;
 
   const url = new URL(request.url);
+
+  // El buscador filtra en el navegador para que responda al instante. Para eso
+  // necesita, una sola vez, la lista entera de lo que esta persona puede ver.
+  // Si el gestor creciera por encima del tope, se avisa y se vuelve a buscar
+  // contra el servidor, que es lento pero nunca se deja nada fuera.
+  if (url.searchParams.get("index") === "1") {
+    const { data, error } = await guard.supabase
+      .from("vault_entries")
+      .select(VAULT_ENTRY_COLUMNS)
+      .eq("is_active", true)
+      .order("name")
+      .limit(INDEX_LIMIT);
+    if (error) {
+      console.error("No se pudo preparar el buscador:", error.message);
+      return vaultError("No se pudo preparar el buscador.", 500, "forbidden");
+    }
+    await logVault(guard.admin, { userId: guard.userId, action: "ENTRY_LIST", metadata: { index: true, count: data?.length ?? 0 } });
+    return NextResponse.json(
+      { entries: (data ?? []).map((row) => mapVaultEntry(row as Record<string, unknown>)), complete: (data?.length ?? 0) < INDEX_LIMIT },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const term = sanitizeSearchTerm(url.searchParams.get("q") ?? "");
   const category = url.searchParams.get("category");
   const visibility = url.searchParams.get("visibility");
@@ -146,6 +171,8 @@ export async function POST(request: Request) {
       business_unit_id: input.businessUnitId,
       visibility: input.visibility,
       entry_type: input.entryType,
+      // Los datos del banco solo tienen sentido en una ficha de banco.
+      bank_details: input.entryType === "bank" ? input.bankDetails : null,
       tags: input.tags,
       created_by: guard.userId,
       encryption_version: password.version,

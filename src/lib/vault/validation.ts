@@ -29,6 +29,18 @@ const visibility = z.enum(["shared", "personal", "restricted"]);
 const entryType = z.enum(["plain", "email", "server", "bank", "other"]);
 const optionalId = z.string().uuid().nullable();
 
+/** Datos del banco. Todo opcional: se rellena lo que se sepa. */
+const bankText = (max: number) => z.string().trim().max(max).transform((value) => value || null).nullable().default(null);
+const bankDetails = z
+  .object({
+    bankName: bankText(120),
+    bankCode: bankText(20),
+    accountHolder: bankText(160),
+    accountNumber: bankText(40),
+    iban: bankText(40),
+  })
+  .nullable();
+
 export const createEntrySchema = z.object({
   name,
   url: vaultUrl.default(null),
@@ -39,6 +51,7 @@ export const createEntrySchema = z.object({
   businessUnitId: optionalId.default(null),
   visibility: visibility.default("shared"),
   entryType: entryType.default("plain"),
+  bankDetails: bankDetails.default(null),
   tags: tags.default([]),
 });
 
@@ -53,6 +66,7 @@ export const updateEntrySchema = z.object({
   businessUnitId: optionalId.optional(),
   visibility: visibility.optional(),
   entryType: entryType.optional(),
+  bankDetails: bankDetails.optional(),
   tags: tags.optional(),
 });
 

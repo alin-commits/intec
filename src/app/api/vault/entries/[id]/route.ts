@@ -76,6 +76,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (input.categoryId !== undefined) patch.category_id = input.categoryId;
   if (input.businessUnitId !== undefined) patch.business_unit_id = input.businessUnitId;
   if (input.entryType !== undefined) patch.entry_type = input.entryType;
+  // Al dejar de ser una ficha de banco, sus datos bancarios se van con ella.
+  if (input.entryType !== undefined && input.entryType !== "bank") patch.bank_details = null;
+  else if (input.bankDetails !== undefined) patch.bank_details = input.bankDetails;
   if (input.tags !== undefined) patch.tags = input.tags;
   // Only the owner or a vault admin may change who can reach an entry.
   if (input.visibility !== undefined && input.visibility !== access.visibility) {
