@@ -265,7 +265,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   if (access === "denied") {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No tienes permiso para ver esta página</h2>
           <p>Tickets no está disponible para tu rol.</p>
         </section>
@@ -276,7 +276,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   if (access === "not_found" || !ticket) {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>Ticket no encontrado</h2>
           <p>Puede que haya sido eliminado.</p>
           <Link href="/tickets" className="button button-secondary">Volver a Tickets</Link>

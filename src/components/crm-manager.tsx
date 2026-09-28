@@ -249,7 +249,7 @@ export function CrmManager() {
   if (access === "denied") {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No tienes permiso para ver esta página</h2>
           <p>CRM no está disponible para tu rol.</p>
         </section>

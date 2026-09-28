@@ -96,7 +96,7 @@ export function VaultHealthView() {
   if (error) {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No se pudo cargar esta página</h2>
           <p>{error}</p>
           <div className="modal-actions"><Link className="button button-secondary" href="/contrasenas">Volver al gestor</Link></div>

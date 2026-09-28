@@ -624,7 +624,7 @@ export function SalesDashboardView() {
   if (stage === "denied") {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No tienes acceso a esta página</h2>
           <p>Las ventas de Sage solo las ven dirección y administración.</p>
         </section>
@@ -634,7 +634,7 @@ export function SalesDashboardView() {
   if (error && dataYear === null) {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No se pudo cargar</h2>
           <p>{error}</p>
         </section>
@@ -646,7 +646,7 @@ export function SalesDashboardView() {
   if (years.length === 0) {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>Todavía no han llegado datos de Sage</h2>
           <p className="muted">
             El programa que lee Sage aún no ha enviado nada. En cuanto lo haga, esta página se llena sola.
@@ -892,7 +892,7 @@ export function SalesDashboardView() {
           />
         </article>
 
-        <article className="panel sales-board-narrow">
+        <article className="panel panel-padded sales-board-narrow">
           <div className="panel-heading">
             <div>
               <h2>Lo que hay que mirar</h2>
@@ -910,7 +910,7 @@ export function SalesDashboardView() {
           )}
         </article>
 
-        <article className="panel sales-board-half">
+        <article className="panel panel-padded sales-board-half">
           <div className="panel-heading">
             <div>
               <h2>Ranking de comerciales</h2>

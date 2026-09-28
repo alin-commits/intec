@@ -504,7 +504,7 @@ export function ExpensesManager() {
   if (access === "denied") {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No tienes permiso para ver esta página</h2>
           <p>Gastos solo está disponible para Administración, Marketing y Dirección.</p>
         </section>

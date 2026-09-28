@@ -349,7 +349,7 @@ export function RrssManager() {
   if (access === "denied") {
     return (
       <div className="page-stack">
-        <section className="panel">
+        <section className="panel panel-padded">
           <h2>No tienes permiso para ver esta página</h2>
           <p>Las métricas de marketing no están disponibles para tu rol.</p>
         </section>
