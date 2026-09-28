@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CalendarIcon } from "@/components/icons";
 import { dateKeyInMadrid, monthKey, monthLabel } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
@@ -38,6 +39,10 @@ const WEEKDAYS = ["L", "M", "X", "J", "V", "S", "D"];
 const MONTHS_SHORT = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 /** Cuántos años se ofrecen de golpe al saltar de año. */
 const YEAR_PAGE = 12;
+/** Ancho del calendario, y aire que se le deja contra los bordes de la ventana. */
+const POPUP_WIDTH = 290;
+const POPUP_GAP = 6;
+const SCREEN_EDGE = 8;
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const todayKey = () => dateKeyInMadrid(new Date().toISOString());
@@ -92,10 +97,35 @@ function DateFieldInner({ value, onChange, min, max, readOnly, required, placeho
   const [view, setView] = useState<"days" | "months" | "years">(granularity === "day" ? "days" : "months");
   const [cursorMonth, setCursorMonth] = useState(() => monthOf(value, granularity));
   const [yearPageStart, setYearPageStart] = useState(() => Number(monthOf(value, granularity).slice(0, 4)) - Math.floor(YEAR_PAGE / 2));
-  const [dropUp, setDropUp] = useState(false);
+  /**
+   * Dónde se pinta el calendario, en coordenadas de la ventana.
+   *
+   * Va en un portal colgado del body y no dentro del campo a propósito: si
+   * cuelga del campo, cualquier contenedor con scroll por encima —el cuerpo de
+   * un diálogo, una tabla con scroll horizontal— lo recorta y además le añade
+   * barra de desplazamiento. Colgado del body no lo recorta nadie.
+   */
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const labelId = useId();
+
+  /** La posición que le toca ahora mismo, mirando dónde está el campo. */
+  function placement(popupHeight: number): { top: number; left: number; width: number } | null {
+    const trigger = wrapRef.current?.getBoundingClientRect();
+    if (!trigger) return null;
+    const width = Math.min(POPUP_WIDTH, window.innerWidth - SCREEN_EDGE * 2);
+    // Debajo salvo que no quepa y arriba sí: en un filtro al final de la página
+    // se quedaría medio fuera de la pantalla.
+    const below = trigger.bottom + POPUP_GAP;
+    const above = trigger.top - POPUP_GAP - popupHeight;
+    const flip = below + popupHeight > window.innerHeight && above >= SCREEN_EDGE;
+    return {
+      top: Math.max(SCREEN_EDGE, flip ? above : below),
+      left: Math.min(Math.max(SCREEN_EDGE, trigger.left), window.innerWidth - width - SCREEN_EDGE),
+      width,
+    };
+  }
 
   // Al abrirlo se coloca donde está el valor, no donde se quedó la última vez.
   function openPicker() {
@@ -104,6 +134,9 @@ function DateFieldInner({ value, onChange, min, max, readOnly, required, placeho
     setCursorMonth(month);
     setYearPageStart(Number(month.slice(0, 4)) - Math.floor(YEAR_PAGE / 2));
     setView(granularity === "day" ? "days" : "months");
+    // Una primera posición antes de pintarlo, para que no aparezca en la
+    // esquina y salte. El alto real se mide justo después.
+    setCoords(placement(320));
     setOpen(true);
   }
 
@@ -112,7 +145,10 @@ function DateFieldInner({ value, onChange, min, max, readOnly, required, placeho
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // El calendario vive fuera del campo, así que hay que mirar los dos.
+      if (wrapRef.current?.contains(target) || popupRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -128,14 +164,26 @@ function DateFieldInner({ value, onChange, min, max, readOnly, required, placeho
     };
   }, [open]);
 
-  // Si no cabe debajo, se abre hacia arriba. En un filtro al final de la página
-  // el calendario quedaba medio fuera de la pantalla.
+  /**
+   * Ya pintado, se mide de verdad y se recoloca. También al hacer scroll o
+   * cambiar el tamaño: como está colgado del body, si no se recolocara se
+   * quedaría quieto mientras el campo se mueve por debajo.
+   */
   useEffect(() => {
     if (!open) return;
-    const trigger = wrapRef.current?.getBoundingClientRect();
-    const popup = popupRef.current?.getBoundingClientRect();
-    if (!trigger || !popup) return;
-    setDropUp(trigger.bottom + popup.height + 12 > window.innerHeight && trigger.top > popup.height);
+    const reposition = () => {
+      const height = popupRef.current?.getBoundingClientRect().height ?? 320;
+      const next = placement(height);
+      if (next) setCoords(next);
+    };
+    reposition();
+    // En captura para enterarse también del scroll de un diálogo o una tabla.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
   }, [open, view]);
 
   function pick(next: string) {
@@ -166,10 +214,11 @@ function DateFieldInner({ value, onChange, min, max, readOnly, required, placeho
         {required && !value ? <em aria-hidden="true">*</em> : null}
       </button>
 
-      {open ? (
+      {open && coords && typeof document !== "undefined" ? createPortal(
         <div
-          className={`date-field-popup${dropUp ? " is-up" : ""}`}
+          className="date-field-popup"
           ref={popupRef}
+          style={{ top: coords.top, left: coords.left, width: coords.width }}
           role="dialog"
           aria-modal="false"
           aria-labelledby={labelId}
@@ -283,7 +332,8 @@ function DateFieldInner({ value, onChange, min, max, readOnly, required, placeho
               <button type="button" className="date-field-shortcut" onClick={() => pick("")}>Borrar</button>
             ) : null}
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   );

@@ -1447,8 +1447,10 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .date-field-trigger:focus-visible, .date-field-trigger.is-open { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 .date-field-trigger:disabled { background: var(--surface-muted); color: var(--muted); cursor: default; }
 
-.date-field-popup { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: 290px; max-width: min(290px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 44px rgba(15, 23, 42, .16); }
-.date-field-popup.is-up { top: auto; bottom: calc(100% + 6px); }
+/* Cuelga del body, no del campo, para que ningún contenedor con scroll lo
+   recorte. La posición la pone el componente; el z-index va por encima del
+   fondo de los diálogos, que está en 100. */
+.date-field-popup { position: fixed; z-index: 120; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 44px rgba(15, 23, 42, .16); }
 
 .date-field-head { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; gap: 4px; margin-bottom: 10px; }
 .date-field-step { min-height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; transition: background-color .12s ease; }
@@ -1485,6 +1487,5 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .date-field-shortcut:disabled { color: var(--muted); cursor: default; }
 
 @media (max-width: 560px) {
-  .date-field-popup { width: 100%; left: 0; right: 0; }
   .date-field-day { min-height: 40px; }
 }
