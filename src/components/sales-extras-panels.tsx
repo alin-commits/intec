@@ -46,8 +46,10 @@ const shortDate = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateStrin
 /** Cuántas familias se enseñan antes de juntar el resto en una fila. */
 const TOP_FAMILIES = 12;
 
-export function SalesExtrasPanels({ year, companyCode, companyLabel, repLabel }: {
+export function SalesExtrasPanels({ year, companyCode, companyLabel, repLabel, reloadKey = 0 }: {
   year: number;
+  /** Sube cuando termina una lectura de Sage pedida con el botón. */
+  reloadKey?: number;
   companyCode: "all" | number;
   companyLabel: string;
   /** El nombre de un comercial, con las fichas repetidas de Sage ya juntadas. */
@@ -93,7 +95,7 @@ export function SalesExtrasPanels({ year, companyCode, companyLabel, repLabel }:
       }
     })();
     return () => { active = false; };
-  }, [year]);
+  }, [year, reloadKey]);
 
   const inCompany = useMemo(
     () => (row: { company_code: number }) => companyCode === "all" || row.company_code === companyCode,

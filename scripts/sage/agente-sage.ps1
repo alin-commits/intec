@@ -2,24 +2,27 @@
   AGENTE DE SAGE → COMMERCIAL HUB
   ===============================
 
-  Lee Sage, calcula totales y los envía al Hub.
+  Lee Sage y envía al Hub lo que necesita el cuadro de mando comercial.
   Pensado para correr en el propio servidor de Sage como tarea programada.
 
-  Qué envía, siempre en totales:
-    - ventas por sociedad, día, serie y comercial (como siempre);
-    - ofertas y pedidos por sociedad, día, serie y comercial;
-    - venta por familia de artículo y día;
-    - clientes activos y nuevos por mes (cuántos, no quiénes);
-    - la cartera de pedidos pendientes de servir y cuántos clientes han dejado
-      de comprar (una foto al día);
-    - los nombres de las columnas de las tablas de Sage que interesan, para
-      poder ampliar la lectura sin tener que entrar en el servidor.
-  NO envía nombres de clientes, ni artículos, ni documentos, ni precios.
+  Qué envía:
+    - ventas por sociedad, día, serie y comercial (con líneas por albarán);
+    - ofertas y pedidos: totales por día y, además, uno a uno con su estado,
+      motivo de rechazo, fechas y el enlace oferta → pedido → albarán;
+    - venta por familia, subfamilia y artículo (con marca);
+    - clientes con nombre y contacto, y lo que compra cada uno (por día y por
+      familia). Dirección decidió traerlos para que las listas de clientes a
+      recuperar sirvan para actuar;
+    - abonos e incidencias de los albaranes;
+    - la cartera de pedidos pendientes y cuántos clientes han dejado de comprar;
+    - las tablas de códigos de Sage (motivos, tipos de cliente...) y la
+      estructura de las tablas que interesan (solo nombres de columnas).
+  NO envía cobros, ni precios de compra, ni documentos completos.
 
   Qué NO hace: escribir en Sage. Todas las consultas son de solo lectura.
 
   Si alguna tabla o columna no existe en esta instalación de Sage, esa parte se
-  salta, queda apuntado por qué, y las ventas siguen llegando igual.
+  salta, queda apuntado por qué, y el resto sigue llegando igual.
 
   ---------------------------------------------------------------------------
   PUESTA EN MARCHA
@@ -42,8 +45,18 @@
        schtasks /Create /TN "Intec - Sage hoy" /SC HOURLY /RU SYSTEM ^
          /TR "powershell -ExecutionPolicy Bypass -File C:\intec\agente-sage.ps1 -Dias 2"
 
-  La tarea de la noche repasa los últimos 90 días, por si alguien corrige un
-  albarán viejo. La de cada hora solo mira hoy y ayer, que es barato.
+  La tarea de la noche repasa los últimos 90 días (y las ofertas y pedidos del
+  último año, que cambian de estado aunque sean viejos). La de cada hora solo
+  mira hoy y ayer, que es barato.
+
+  5. El botón "Actualizar desde Sage" del panel. El Hub no puede entrar en este
+     servidor, así que es el agente quien pregunta cada minuto si alguien lo ha
+     pulsado. Si no, termina en un momento sin tocar Sage:
+
+       schtasks /Create /TN "Intec - Sage a peticion" /SC MINUTE /MO 1 /RU SYSTEM ^
+         /TR "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\intec\agente-sage.ps1 -Vigilar"
+
+  Dos lecturas nunca van a la vez: si coinciden, la segunda espera su turno.
 
   ---------------------------------------------------------------------------
   ACTUALIZAR UNA VERSIÓN ANTERIOR
@@ -68,14 +81,19 @@ param(
   # Cuántos días van en cada envío. Con años de histórico, mandarlo todo junto
   # no cabe ni en la ruta ni en el tamaño máximo del servidor.
   [int]$DiasPorEnvio = 45,
+  # Hasta dónde se repasan ofertas y pedidos en la lectura de la noche: una
+  # oferta de hace meses puede ganarse o perderse hoy.
+  [int]$DiasDocumentos = 365,
   [string]$Destino = "https://app.suministrointec.com/api/sage/ingest",
   [string]$Token = $env:INTEC_SAGE_TOKEN,
   [string]$Registro = "",
   [switch]$SoloProbar,
-  # Manda también la estructura de las tablas aunque sea una lectura corta.
+  # Manda también la estructura y las tablas de códigos aunque sea una lectura corta.
   [switch]$Reconocer,
-  # Por si algo de lo nuevo diera guerra: solo ventas, como la versión anterior.
-  [switch]$SoloVentas
+  # Por si algo de lo nuevo diera guerra: solo ventas, como la primera versión.
+  [switch]$SoloVentas,
+  # Para la tarea de cada minuto: lee Sage solo si alguien ha pulsado el botón.
+  [switch]$Vigilar
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,7 +160,7 @@ function Consultar($servidor, $sql) {
   }
 }
 
-# Un valor de SQL que puede venir vacío (DBNull) pasado a número o a nulo.
+# Un valor de SQL que puede venir vacío (DBNull) pasado a número, texto, fecha o nulo.
 function Entero-O-Nulo($valor) {
   if ($valor -eq [DBNull]::Value -or $null -eq $valor) { return $null }
   return [int]$valor
@@ -157,14 +175,83 @@ function Texto($valor, [int]$maximo) {
   if ($limpio.Length -gt $maximo) { $limpio = $limpio.Substring(0, $maximo) }
   return $limpio
 }
+function Texto-O-Nulo($valor, [int]$maximo) {
+  $limpio = Texto $valor $maximo
+  if ($limpio -eq "") { return $null }
+  return $limpio
+}
+function Fecha-O-Nulo($valor) {
+  if ($valor -eq [DBNull]::Value -or $null -eq $valor) { return $null }
+  $fecha = [datetime]$valor
+  # Sage usa fechas de relleno (1900, 9999) cuando no hay fecha.
+  if ($fecha.Year -lt 1990 -or $fecha.Year -gt 2100) { return $null }
+  return $fecha.ToString("yyyy-MM-dd")
+}
 
 # ---------------------------------------------------------------------------
-Apuntar "----- arranque: ultimos $Dias dias -----"
+# Turno, petición del botón y salida
+# ---------------------------------------------------------------------------
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 if (-not $SoloProbar -and [string]::IsNullOrWhiteSpace($Token)) {
   Apuntar "ERROR: falta la clave. Ponla con:  setx /M INTEC_SAGE_TOKEN ""...""  y vuelve a abrir la consola."
   exit 1
 }
+
+# Las rutas del botón cuelgan de la misma dirección que la de los envíos.
+$raizHub = $Destino -replace "/api/sage/ingest/?$", ""
+$urlRecoger = "$raizHub/api/sage/refresh/claim"
+$urlTerminar = "$raizHub/api/sage/refresh/finish"
+$script:peticion = $null
+
+# Dos lecturas a la vez leerían Sage dos veces y se pisarían los envíos: cada
+# ejecución espera su turno. La de cada minuto no espera: si hay otra en marcha,
+# lo deja para el minuto siguiente (la petición sigue pendiente).
+$turno = New-Object System.Threading.Mutex($false, "Global\IntecAgenteSage")
+$tengoTurno = $false
+try { $tengoTurno = $turno.WaitOne($(if ($Vigilar) { 0 } else { 40 * 60 * 1000 })) }
+catch [System.Threading.AbandonedMutexException] { $tengoTurno = $true }
+if (-not $tengoTurno) {
+  if (-not $Vigilar) { Apuntar "otra lectura lleva 40 minutos en marcha: esta se salta" }
+  exit 0
+}
+
+# Termina avisando al panel si la lectura se pidió con el botón, y soltando el turno.
+function Terminar([int]$codigo, [string]$mensaje) {
+  if ($script:peticion) {
+    try {
+      $aviso = @{ id = $script:peticion; ok = ($codigo -eq 0); message = $mensaje } | ConvertTo-Json -Compress
+      [void](Invoke-RestMethod -Uri $urlTerminar -Method Post -Body ([System.Text.Encoding]::UTF8.GetBytes($aviso)) `
+        -ContentType "application/json; charset=utf-8" -Headers @{ Authorization = "Bearer $Token" } -TimeoutSec 60)
+    } catch { Apuntar "no se pudo avisar al panel del final de la lectura: $($_.Exception.Message)" }
+  }
+  try { $turno.ReleaseMutex() } catch { }
+  exit $codigo
+}
+
+# Cualquier error no previsto termina igual: avisando y soltando el turno.
+trap {
+  Apuntar "ERROR: $($_.Exception.Message)"
+  Terminar 1 "Error leyendo Sage: $($_.Exception.Message)"
+}
+
+if ($Vigilar) {
+  $pedido = $null
+  try {
+    $pedido = (Invoke-RestMethod -Uri $urlRecoger -Method Post -Body "{}" -ContentType "application/json" `
+      -Headers @{ Authorization = "Bearer $Token" } -TimeoutSec 30).request
+  } catch {
+    Apuntar "no se pudo preguntar al Hub si hay lecturas pedidas: $($_.Exception.Message)"
+    Terminar 1 ""
+  }
+  # Lo normal: nadie ha pulsado. Se sale sin tocar Sage ni escribir en el registro.
+  if (-not $pedido) { Terminar 0 "" }
+  $script:peticion = [string]$pedido.id
+  $Dias = [int]$pedido.days
+  Apuntar "lectura pedida desde el panel"
+}
+
+Apuntar "----- arranque: ultimos $Dias dias -----"
 
 $candidatos = @()
 if ($Servidor -ne "") { $candidatos = @($Servidor) } else { $candidatos = Buscar-Instancias }
@@ -174,11 +261,66 @@ foreach ($candidato in $candidatos) {
 }
 if ($servidorBueno -eq "") {
   Apuntar "ERROR: no se pudo conectar a SQL Server. Prueba con -Servidor ""NOMBRE\INSTANCIA""."
-  exit 1
+  Terminar 1 "No se pudo conectar con la base de datos de Sage."
 }
 Apuntar "conectado a $servidorBueno"
 
 $excluidas = $EmpresasExcluidas -join ", "
+
+# ---------------------------------------------------------------------------
+# Antes de leer una tabla se mira qué columnas tiene: cada instalación de Sage
+# nombra alguna a su manera. Lo que no está se salta, se apunta el porqué
+# (llega al Hub como aviso) y el resto no se entera.
+# ---------------------------------------------------------------------------
+$avisosDeArranque = New-Object System.Collections.Generic.List[string]
+function Avisar($lista, $texto) {
+  Apuntar "  aviso: $texto"
+  if ($lista.Count -lt 30) { $lista.Add($(if ($texto.Length -gt 300) { $texto.Substring(0, 300) } else { $texto })) }
+}
+
+$cacheColumnas = @{}
+function Columnas($tabla) {
+  if (-not $cacheColumnas.ContainsKey($tabla)) {
+    $conjunto = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $filas = Consultar $servidorBueno "select c.name from sys.columns c join sys.tables t on t.object_id = c.object_id where t.name = '$tabla';"
+    foreach ($f in $filas.Rows) { [void]$conjunto.Add([string]$f["name"]) }
+    $cacheColumnas[$tabla] = $conjunto
+  }
+  return ,$cacheColumnas[$tabla]
+}
+function Elegir($tabla, [string[]]$candidatas) {
+  $cols = Columnas $tabla
+  foreach ($c in $candidatas) { if ($cols.Contains($c)) { return $c } }
+  return $null
+}
+function Faltan($tabla, [string[]]$necesarias) {
+  $cols = Columnas $tabla
+  if ($cols.Count -eq 0) { return @("(no existe la tabla $tabla)") }
+  return @($necesarias | Where-Object { -not $cols.Contains($_) })
+}
+function Tiene($tabla, $columna) { return (Columnas $tabla).Contains($columna) }
+
+# Trozos de SQL para una columna que puede no existir: si falta, sale un nulo
+# del tipo correcto y la consulta sigue valiendo.
+function Sql-Texto($alias, $columna, [int]$largo) {
+  if ($columna) { return "nullif(ltrim(rtrim(cast($alias.[$columna] as nvarchar($largo)))), '')" }
+  return "cast(null as nvarchar($largo))"
+}
+function Sql-Fecha($alias, $columna) {
+  if ($columna) { return "cast($alias.[$columna] as date)" }
+  return "cast(null as date)"
+}
+function Sql-Comercial($alias, $columna) {
+  if ($columna) { return "case when $alias.[$columna] in (0, 9999) then null else $alias.[$columna] end" }
+  return "cast(null as int)"
+}
+function Sql-Numero($alias, $columna) {
+  if ($columna) { return "isnull($alias.[$columna], 0)" }
+  return "0"
+}
+function Sql-Entre($expresion, $desde, $hasta) {
+  return "$expresion >= convert(datetime, '$desde', 112) and $expresion < convert(datetime, '$hasta', 112)"
+}
 
 # ---------------------------------------------------------------------------
 # Las sociedades y los comerciales
@@ -216,6 +358,25 @@ from Comisionistas
 where CodigoEmpresa not in ($excluidas);
 "@
 
+$sociedades = @()
+foreach ($fila in $empresas.Rows) {
+  $sociedades += [PSCustomObject]@{ code = [int]$fila["CodigoEmpresa"]; name = [string]$fila["Empresa"]; isActive = $true }
+}
+
+$vendedores = @()
+foreach ($fila in $comerciales.Rows) {
+  $nombre = [string]$fila["Nombre"]
+  # "GENERAL" y las altas automáticas no son personas: el panel las enseña como
+  # ventas sin comercial asignado.
+  $esPersona = -not ($nombre -match "GENERAL|AUTOM|NO ASIG|SAT ")
+  $vendedores += [PSCustomObject]@{
+    companyCode = [int]$fila["CodigoEmpresa"]
+    code        = [int]$fila["CodigoComisionista"]
+    name        = $nombre
+    isPerson    = $esPersona
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Las ventas. Dos maneras de fechar la misma venta: cuándo se sirvió y cuándo se
 # facturó. Se mandan las dos y el panel enseña la que haga falta.
@@ -223,6 +384,8 @@ where CodigoEmpresa not in ($excluidas);
 # Las devoluciones vienen en negativo y se suman tal cual, que es lo correcto:
 # restan de la venta del día.
 # ---------------------------------------------------------------------------
+$expLineasAlbaran = if (Tiene "CabeceraAlbaranCliente" "NumeroLineas") { "isnull(a.NumeroLineas, 0)" } else { "0" }
+
 function Sql-Ventas($campoFecha, $filtro, $desdeBloque, $hastaBloque) {
   return @"
 select
@@ -236,7 +399,8 @@ select
   sum(isnull(a.TotalCuotaIva, 0))              as Iva,
   -- La venta cuyos albaranes no llevan coste: si se contara como si no
   -- costara nada, el margen saldría más alto de lo que es.
-  sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste
+  sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste,
+  sum($expLineasAlbaran)                       as Lineas
 from CabeceraAlbaranCliente a
 where a.$campoFecha >= convert(datetime, '$desdeBloque', 112) and a.$campoFecha < convert(datetime, '$hastaBloque', 112)
   and a.CodigoEmpresa not in ($excluidas)
@@ -263,62 +427,12 @@ function Filas-Venta($tabla, $base) {
       costAmount  = [double]$fila["Coste"]
       vatAmount   = [double]$fila["Iva"]
       netWithoutCost = [double]$fila["NetoSinCoste"]
+      lines       = [int]$fila["Lineas"]
     })
   }
   # La coma evita que PowerShell desenrolle la lista: una lista vacía llegaría
   # como nada y una de un elemento, como un objeto suelto.
   return ,$lista
-}
-
-$sociedades = @()
-foreach ($fila in $empresas.Rows) {
-  $sociedades += [PSCustomObject]@{ code = [int]$fila["CodigoEmpresa"]; name = [string]$fila["Empresa"]; isActive = $true }
-}
-
-$vendedores = @()
-foreach ($fila in $comerciales.Rows) {
-  $nombre = [string]$fila["Nombre"]
-  # "GENERAL" y las altas automáticas no son personas: el panel las enseña como
-  # ventas sin comercial asignado.
-  $esPersona = -not ($nombre -match "GENERAL|AUTOM|NO ASIG|SAT ")
-  $vendedores += [PSCustomObject]@{
-    companyCode = [int]$fila["CodigoEmpresa"]
-    code        = [int]$fila["CodigoComisionista"]
-    name        = $nombre
-    isPerson    = $esPersona
-  }
-}
-
-# ---------------------------------------------------------------------------
-# Lo nuevo. Antes de leer una tabla se mira qué columnas tiene: cada
-# instalación de Sage nombra alguna a su manera. Lo que no está se salta, se
-# apunta el porqué (llega al Hub como aviso) y las ventas no se enteran.
-# ---------------------------------------------------------------------------
-$avisosDeArranque = New-Object System.Collections.Generic.List[string]
-function Avisar($lista, $texto) {
-  Apuntar "  aviso: $texto"
-  if ($lista.Count -lt 30) { $lista.Add($(if ($texto.Length -gt 300) { $texto.Substring(0, 300) } else { $texto })) }
-}
-
-$cacheColumnas = @{}
-function Columnas($tabla) {
-  if (-not $cacheColumnas.ContainsKey($tabla)) {
-    $conjunto = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $filas = Consultar $servidorBueno "select c.name from sys.columns c join sys.tables t on t.object_id = c.object_id where t.name = '$tabla';"
-    foreach ($f in $filas.Rows) { [void]$conjunto.Add([string]$f["name"]) }
-    $cacheColumnas[$tabla] = $conjunto
-  }
-  return ,$cacheColumnas[$tabla]
-}
-function Elegir($tabla, [string[]]$candidatas) {
-  $cols = Columnas $tabla
-  foreach ($c in $candidatas) { if ($cols.Contains($c)) { return $c } }
-  return $null
-}
-function Faltan($tabla, [string[]]$necesarias) {
-  $cols = Columnas $tabla
-  if ($cols.Count -eq 0) { return @("(no existe la tabla $tabla)") }
-  return @($necesarias | Where-Object { -not $cols.Contains($_) })
 }
 
 # --- Ofertas y pedidos: cabeceras, totales por día, serie y comercial -------
@@ -372,11 +486,15 @@ function Preparar-Familias {
 
   # La familia puede estar en la propia línea o solo en el artículo.
   $familia = $null
+  $subfamilia = "''"
   $unirArticulos = ""
-  if ((Columnas "LineasAlbaranCliente").Contains("CodigoFamilia")) {
+  $conArticulo = Tiene "LineasAlbaranCliente" "CodigoArticulo"
+  if (Tiene "LineasAlbaranCliente" "CodigoFamilia") {
     $familia = "l.[CodigoFamilia]"
-  } elseif ((Columnas "LineasAlbaranCliente").Contains("CodigoArticulo") -and (@(Faltan "Articulos" @("CodigoEmpresa", "CodigoArticulo", "CodigoFamilia")).Count -eq 0)) {
+    if (Tiene "LineasAlbaranCliente" "CodigoSubfamilia") { $subfamilia = "l.[CodigoSubfamilia]" }
+  } elseif ($conArticulo -and (@(Faltan "Articulos" @("CodigoEmpresa", "CodigoArticulo", "CodigoFamilia")).Count -eq 0)) {
     $familia = "ar.[CodigoFamilia]"
+    if (Tiene "Articulos" "CodigoSubfamilia") { $subfamilia = "ar.[CodigoSubfamilia]" }
     $unirArticulos = "left join Articulos ar on ar.CodigoEmpresa = l.CodigoEmpresa and ar.CodigoArticulo = l.CodigoArticulo"
   } else {
     Avisar $avisosDeArranque "familias: no se encuentra CodigoFamilia ni en las lineas ni en Articulos"
@@ -386,11 +504,25 @@ function Preparar-Familias {
   $unidades = Elegir "LineasAlbaranCliente" @("Unidades", "UnidadesServidas")
   $expUnidades = if ($unidades) { "l.[$unidades]" } else { "0" }
   $expCoste = "0"
-  if ((Columnas "LineasAlbaranCliente").Contains("ImporteCoste")) { $expCoste = "l.[ImporteCoste]" }
-  elseif ($unidades -and (Columnas "LineasAlbaranCliente").Contains("PrecioCoste")) { $expCoste = "l.[PrecioCoste] * l.[$unidades]" }
+  if (Tiene "LineasAlbaranCliente" "ImporteCoste") { $expCoste = "l.[ImporteCoste]" }
+  elseif ($unidades -and (Tiene "LineasAlbaranCliente" "PrecioCoste")) { $expCoste = "l.[PrecioCoste] * l.[$unidades]" }
   else { Avisar $avisosDeArranque "familias: las lineas no traen coste; se envia la venta sin margen" }
 
-  return @{ Importe = $importe; Familia = $familia; Unir = $unirArticulos; Unidades = $expUnidades; Coste = $expCoste }
+  return @{
+    Importe = $importe; Familia = $familia; Subfamilia = $subfamilia; Unir = $unirArticulos
+    Unidades = $expUnidades; Coste = $expCoste; ConArticulo = $conArticulo
+  }
+}
+
+# Lo que se repite en todas las consultas de líneas: la unión con su cabecera.
+function Sql-UnirLineas($cfg) {
+  return @"
+from LineasAlbaranCliente l
+join CabeceraAlbaranCliente a
+  on a.CodigoEmpresa = l.CodigoEmpresa and a.EjercicioAlbaran = l.EjercicioAlbaran
+ and a.SerieAlbaran = l.SerieAlbaran and a.NumeroAlbaran = l.NumeroAlbaran
+$($cfg.Unir)
+"@
 }
 
 function Sql-Familias($cfg, $desdeBloque, $hastaBloque) {
@@ -402,12 +534,8 @@ select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, $codigo as Familia,
   sum(isnull($($cfg.Coste), 0)) as Coste,
   -- Lo vendido sin coste grabado: el margen de la familia lo deja fuera.
   sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste
-from LineasAlbaranCliente l
-join CabeceraAlbaranCliente a
-  on a.CodigoEmpresa = l.CodigoEmpresa and a.EjercicioAlbaran = l.EjercicioAlbaran
- and a.SerieAlbaran = l.SerieAlbaran and a.NumeroAlbaran = l.NumeroAlbaran
-$($cfg.Unir)
-where a.FechaAlbaran >= convert(datetime, '$desdeBloque', 112) and a.FechaAlbaran < convert(datetime, '$hastaBloque', 112)
+$(Sql-UnirLineas $cfg)
+where $(Sql-Entre "a.FechaAlbaran" $desdeBloque $hastaBloque)
   and a.CodigoEmpresa not in ($excluidas)
 group by a.CodigoEmpresa, cast(a.FechaAlbaran as date), $codigo;
 "@
@@ -429,28 +557,268 @@ function Filas-Familias($tabla) {
   return ,$lista
 }
 
-# Los nombres de las familias. En Sage la tabla Familias guarda también las
-# subfamilias; la fila de la familia es la que no tiene subfamilia.
-function Leer-NombresFamilia {
+# Los nombres de las familias y de las subfamilias. En Sage van en la misma
+# tabla: la fila de la familia es la que no tiene subfamilia.
+function Leer-NombresFamilia($subfamilias) {
   $faltan = Faltan "Familias" @("CodigoEmpresa", "CodigoFamilia")
   if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "nombres de familia: faltan $($faltan -join ', ')"; return $null }
   $descripcion = Elegir "Familias" @("Descripcion", "DescripcionFamilia", "Familia", "Nombre")
   if (-not $descripcion) { Avisar $avisosDeArranque "nombres de familia: no hay columna de descripcion"; return $null }
+  $conSub = Tiene "Familias" "CodigoSubfamilia"
+  if ($subfamilias -and -not $conSub) { return $null }
   $filtro = ""
-  if ((Columnas "Familias").Contains("CodigoSubfamilia")) { $filtro = "and isnull(ltrim(rtrim(CodigoSubfamilia)), '') in ('', '**********')" }
+  $columnaSub = ""
+  $grupoSub = ""
+  if ($conSub) {
+    if ($subfamilias) {
+      $filtro = "and isnull(ltrim(rtrim(CodigoSubfamilia)), '') not in ('', '**********')"
+      $columnaSub = ", ltrim(rtrim(cast(CodigoSubfamilia as nvarchar(40)))) as Subfamilia"
+      $grupoSub = ", ltrim(rtrim(cast(CodigoSubfamilia as nvarchar(40))))"
+    } else {
+      $filtro = "and isnull(ltrim(rtrim(CodigoSubfamilia)), '') in ('', '**********')"
+    }
+  }
   $tabla = Consultar $servidorBueno @"
-select CodigoEmpresa, ltrim(rtrim(cast(CodigoFamilia as nvarchar(40)))) as Codigo, max(ltrim(rtrim(cast([$descripcion] as nvarchar(160))))) as Nombre
+select CodigoEmpresa, ltrim(rtrim(cast(CodigoFamilia as nvarchar(40)))) as Codigo$columnaSub,
+  max(ltrim(rtrim(cast([$descripcion] as nvarchar(160))))) as Nombre
 from Familias
 where CodigoEmpresa not in ($excluidas) $filtro
-group by CodigoEmpresa, ltrim(rtrim(cast(CodigoFamilia as nvarchar(40))));
+group by CodigoEmpresa, ltrim(rtrim(cast(CodigoFamilia as nvarchar(40))))$grupoSub;
 "@
   $lista = New-Object System.Collections.Generic.List[object]
   foreach ($fila in $tabla.Rows) {
     $nombre = Texto $fila["Nombre"] 160
     if ($nombre -eq "") { continue }
-    $lista.Add([PSCustomObject]@{ companyCode = [int]$fila["CodigoEmpresa"]; code = (Texto $fila["Codigo"] 40); name = $nombre })
+    if ($subfamilias) {
+      $lista.Add([PSCustomObject]@{ companyCode = [int]$fila["CodigoEmpresa"]; familyCode = (Texto $fila["Codigo"] 40); code = (Texto $fila["Subfamilia"] 40); name = $nombre })
+    } else {
+      $lista.Add([PSCustomObject]@{ companyCode = [int]$fila["CodigoEmpresa"]; code = (Texto $fila["Codigo"] 40); name = $nombre })
+    }
   }
   return ,$lista
+}
+
+# --- Artículos: venta por mes y la ficha de cada uno ------------------------
+function Sql-ArticulosVenta($cfg, $mesDesde, $mesHasta) {
+  $familia = "isnull(ltrim(rtrim(cast($($cfg.Familia) as nvarchar(40)))), '')"
+  $articulo = "isnull(ltrim(rtrim(cast(l.[CodigoArticulo] as nvarchar(40)))), '')"
+  # SQL Server no deja agrupar por un valor fijo: sin columna de subfamilia, va
+  # vacía y fuera del group by.
+  $subfamilia = "''"
+  $grupos = @("a.CodigoEmpresa", "convert(char(7), a.FechaAlbaran, 120)", $articulo, $familia)
+  if ($cfg.Subfamilia -ne "''") {
+    $subfamilia = "isnull(ltrim(rtrim(cast($($cfg.Subfamilia) as nvarchar(40)))), '')"
+    $grupos += $subfamilia
+  }
+  return @"
+select a.CodigoEmpresa, convert(char(7), a.FechaAlbaran, 120) as Mes, $articulo as Articulo, $familia as Familia, $subfamilia as Subfamilia,
+  sum(isnull($($cfg.Unidades), 0)) as Unidades,
+  count(distinct concat(a.EjercicioAlbaran, '|', a.SerieAlbaran, '|', a.NumeroAlbaran)) as Documentos,
+  sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
+  sum(isnull($($cfg.Coste), 0)) as Coste,
+  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste
+$(Sql-UnirLineas $cfg)
+where $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
+  and a.CodigoEmpresa not in ($excluidas)
+group by $($grupos -join ", ");
+"@
+}
+
+function Preparar-Articulos {
+  $faltan = Faltan "Articulos" @("CodigoEmpresa", "CodigoArticulo")
+  if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "articulos: faltan $($faltan -join ', ')"; return $null }
+  return @{
+    Nombre = (Elegir "Articulos" @("DescripcionArticulo", "Descripcion", "Descripcion2Articulo"))
+    Familia = (Elegir "Articulos" @("CodigoFamilia"))
+    Subfamilia = (Elegir "Articulos" @("CodigoSubfamilia"))
+    Marca = (Elegir "Articulos" @("MarcaProducto", "Marca"))
+    Proveedor = (Elegir "Articulos" @("CodigoProveedor"))
+    Fabricante = (Elegir "Articulos" @("CodigoFabricanteLc", "CodigoFabricante"))
+    Abc = (Elegir "Articulos" @("TipoABC"))
+    Alta = (Elegir "Articulos" @("FechaAlta"))
+    Obsoleto = (Elegir "Articulos" @("ObsoletoLc", "Obsoleto"))
+  }
+}
+
+# Los artículos vendidos en esos meses y los dados de alta en ellos.
+function Sql-ArticulosLista($cfgArt, $cfg, $mesDesde, $mesHasta) {
+  $obsoleto = if ($cfgArt.Obsoleto) { "case when isnull(ar.[$($cfgArt.Obsoleto)], 0) <> 0 then 1 else 0 end" } else { "0" }
+  $alta = ""
+  if ($cfgArt.Alta) { $alta = "or ($(Sql-Entre "ar.[$($cfgArt.Alta)]" $mesDesde $mesHasta))" }
+  return @"
+select ar.CodigoEmpresa, ltrim(rtrim(cast(ar.CodigoArticulo as nvarchar(40)))) as Codigo,
+  $(Sql-Texto "ar" $cfgArt.Nombre 200) as Nombre,
+  $(Sql-Texto "ar" $cfgArt.Familia 40) as Familia,
+  $(Sql-Texto "ar" $cfgArt.Subfamilia 40) as Subfamilia,
+  $(Sql-Texto "ar" $cfgArt.Marca 80) as Marca,
+  $(Sql-Texto "ar" $cfgArt.Proveedor 40) as Proveedor,
+  $(Sql-Texto "ar" $cfgArt.Fabricante 80) as Fabricante,
+  $(Sql-Texto "ar" $cfgArt.Abc 10) as Abc,
+  $(Sql-Fecha "ar" $cfgArt.Alta) as Alta,
+  $obsoleto as Obsoleto
+from Articulos ar
+where ar.CodigoEmpresa not in ($excluidas)
+  and (
+    exists (
+      select 1
+      from LineasAlbaranCliente l
+      join CabeceraAlbaranCliente a
+        on a.CodigoEmpresa = l.CodigoEmpresa and a.EjercicioAlbaran = l.EjercicioAlbaran
+       and a.SerieAlbaran = l.SerieAlbaran and a.NumeroAlbaran = l.NumeroAlbaran
+      where l.CodigoEmpresa = ar.CodigoEmpresa and l.CodigoArticulo = ar.CodigoArticulo
+        and $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
+    )
+    $alta
+  );
+"@
+}
+
+# --- Clientes ---------------------------------------------------------------
+function Preparar-Clientes {
+  $faltan = Faltan "Clientes" @("CodigoEmpresa", "CodigoCliente")
+  if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "ficha de clientes: faltan $($faltan -join ', ')"; return $null }
+  return @{
+    Razon = (Elegir "Clientes" @("RazonSocial"))
+    Nombre = (Elegir "Clientes" @("Nombre"))
+    Comercial = (Elegir "Clientes" @("CodigoComisionista"))
+    Provincia = (Elegir "Clientes" @("Provincia"))
+    Municipio = (Elegir "Clientes" @("Municipio"))
+    CodigoPostal = (Elegir "Clientes" @("CodigoPostal"))
+    Actividad = (Elegir "Clientes" @("Actividad", "CodigoActividadLc"))
+    Tipo = (Elegir "Clientes" @("CodigoTipoClienteLc", "TipoCliente"))
+    Grupo = (Elegir "Clientes" @("CodigoGrupoClienteLc"))
+    Telefono = (Elegir "Clientes" @("Telefono", "Telefono2"))
+    Correo = (Elegir "Clientes" @("EMail1", "Email1", "EMail2"))
+    Alta = (Elegir "Clientes" @("FechaAlta"))
+    UltimaAccion = (Elegir "Clientes" @("FechaUltimaAccionLc"))
+    MotivoBaja = (Elegir "Clientes" @("CodigoMotivoBajaClienteLc"))
+    Baja = (Elegir "Clientes" @("FechaBajaLc"))
+  }
+}
+
+# Los clientes que compran en esos meses, los que piden ofertas o pedidos en
+# ellos y los dados de alta en ellos. Los demás no cambian nada en el panel.
+function Sql-ClientesLista($cfgCli, $mesDesde, $mesHasta) {
+  $otros = ""
+  if ($cfgOfertas) {
+    $otros += " or exists (select 1 from CabeceraOfertaCliente o where o.CodigoEmpresa = c.CodigoEmpresa and o.CodigoCliente = c.CodigoCliente and $(Sql-Entre "o.FechaOferta" $mesDesde $mesHasta))"
+  }
+  if ($cfgPedidos) {
+    $otros += " or exists (select 1 from CabeceraPedidoCliente p where p.CodigoEmpresa = c.CodigoEmpresa and p.CodigoCliente = c.CodigoCliente and $(Sql-Entre "p.FechaPedido" $mesDesde $mesHasta))"
+  }
+  if ($cfgCli.Alta) { $otros += " or ($(Sql-Entre "c.[$($cfgCli.Alta)]" $mesDesde $mesHasta))" }
+  return @"
+select c.CodigoEmpresa, ltrim(rtrim(cast(c.CodigoCliente as nvarchar(40)))) as Codigo,
+  $(Sql-Texto "c" $cfgCli.Razon 200) as Razon,
+  $(Sql-Texto "c" $cfgCli.Nombre 200) as Nombre,
+  $(Sql-Comercial "c" $cfgCli.Comercial) as Comercial,
+  $(Sql-Texto "c" $cfgCli.Provincia 80) as Provincia,
+  $(Sql-Texto "c" $cfgCli.Municipio 80) as Municipio,
+  $(Sql-Texto "c" $cfgCli.CodigoPostal 20) as CodigoPostal,
+  $(Sql-Texto "c" $cfgCli.Actividad 120) as Actividad,
+  $(Sql-Texto "c" $cfgCli.Tipo 40) as Tipo,
+  $(Sql-Texto "c" $cfgCli.Grupo 40) as Grupo,
+  $(Sql-Texto "c" $cfgCli.Telefono 40) as Telefono,
+  $(Sql-Texto "c" $cfgCli.Correo 160) as Correo,
+  $(Sql-Fecha "c" $cfgCli.Alta) as Alta,
+  $(Sql-Fecha "c" $cfgCli.UltimaAccion) as UltimaAccion,
+  $(Sql-Texto "c" $cfgCli.MotivoBaja 80) as MotivoBaja,
+  $(Sql-Fecha "c" $cfgCli.Baja) as Baja
+from Clientes c
+where c.CodigoEmpresa not in ($excluidas)
+  and (
+    exists (select 1 from CabeceraAlbaranCliente a where a.CodigoEmpresa = c.CodigoEmpresa and a.CodigoCliente = c.CodigoCliente and $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta))
+    $otros
+  );
+"@
+}
+
+function Filas-ClientesLista($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $codigo = Texto $fila["Codigo"] 40
+    if ($codigo -eq "") { continue }
+    $razon = Texto-O-Nulo $fila["Razon"] 200
+    $comercialNombre = Texto-O-Nulo $fila["Nombre"] 200
+    $nombre = if ($razon) { $razon } elseif ($comercialNombre) { $comercialNombre } else { "Cliente $codigo" }
+    $lista.Add([PSCustomObject]@{
+      companyCode   = [int]$fila["CodigoEmpresa"]
+      code          = $codigo
+      name          = $nombre
+      tradeName     = $(if ($comercialNombre -and $comercialNombre -ne $nombre) { $comercialNombre } else { $null })
+      repCode       = (Entero-O-Nulo $fila["Comercial"])
+      province      = (Texto-O-Nulo $fila["Provincia"] 80)
+      municipality  = (Texto-O-Nulo $fila["Municipio"] 80)
+      postalCode    = (Texto-O-Nulo $fila["CodigoPostal"] 20)
+      activity      = (Texto-O-Nulo $fila["Actividad"] 120)
+      customerType  = (Texto-O-Nulo $fila["Tipo"] 40)
+      customerGroup = (Texto-O-Nulo $fila["Grupo"] 40)
+      phone         = (Texto-O-Nulo $fila["Telefono"] 40)
+      email         = (Texto-O-Nulo $fila["Correo"] 160)
+      createdOn     = (Fecha-O-Nulo $fila["Alta"])
+      lastActionOn  = (Fecha-O-Nulo $fila["UltimaAccion"])
+      leaveReason   = (Texto-O-Nulo $fila["MotivoBaja"] 80)
+      leftOn        = (Fecha-O-Nulo $fila["Baja"])
+    })
+  }
+  return ,$lista
+}
+
+# Lo que compra cada cliente cada día, por canal y comercial.
+function Sql-ClientesDia($desdeBloque, $hastaBloque) {
+  return @"
+select a.CodigoEmpresa, ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40)))) as Cliente, cast(a.FechaAlbaran as date) as Dia,
+  isnull(ltrim(rtrim(a.SerieAlbaran)), '') as Serie,
+  case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end as Comercial,
+  count(*) as Documentos,
+  sum($expLineasAlbaran) as Lineas,
+  sum(isnull(a.BaseImponible, 0)) as Neto,
+  sum(isnull(a.ImporteCoste, 0)) as Coste,
+  sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste
+from CabeceraAlbaranCliente a
+where $(Sql-Entre "a.FechaAlbaran" $desdeBloque $hastaBloque)
+  and a.CodigoEmpresa not in ($excluidas)
+  and isnull(ltrim(rtrim(a.CodigoCliente)), '') <> ''
+group by a.CodigoEmpresa, ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40)))), cast(a.FechaAlbaran as date),
+  isnull(ltrim(rtrim(a.SerieAlbaran)), ''),
+  case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end;
+"@
+}
+
+function Filas-ClientesDia($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode    = [int]$fila["CodigoEmpresa"]
+      customerCode   = (Texto $fila["Cliente"] 40)
+      day            = ([datetime]$fila["Dia"]).ToString("yyyy-MM-dd")
+      series         = (Texto $fila["Serie"] 20)
+      repCode        = (Entero-O-Nulo $fila["Comercial"])
+      documents      = [int]$fila["Documentos"]
+      lines          = [int](Numero $fila["Lineas"])
+      netAmount      = (Numero $fila["Neto"])
+      costAmount     = (Numero $fila["Coste"])
+      netWithoutCost = (Numero $fila["NetoSinCoste"])
+    })
+  }
+  return ,$lista
+}
+
+# Qué familias compra cada cliente cada mes.
+function Sql-ClientesFamilia($cfg, $mesDesde, $mesHasta) {
+  $familia = "isnull(ltrim(rtrim(cast($($cfg.Familia) as nvarchar(40)))), '')"
+  $cliente = "ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40))))"
+  return @"
+select a.CodigoEmpresa, $cliente as Cliente, convert(char(7), a.FechaAlbaran, 120) as Mes, $familia as Familia,
+  sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
+  sum(isnull($($cfg.Coste), 0)) as Coste,
+  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste
+$(Sql-UnirLineas $cfg)
+where $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
+  and a.CodigoEmpresa not in ($excluidas)
+  and isnull(ltrim(rtrim(a.CodigoCliente)), '') <> ''
+group by a.CodigoEmpresa, $cliente, convert(char(7), a.FechaAlbaran, 120), $familia;
+"@
 }
 
 # --- Clientes por mes: cuántos compran y cuántos lo hacen por primera vez ---
@@ -480,7 +848,7 @@ group by a.CodigoEmpresa, convert(char(7), a.FechaAlbaran, 120);
 }
 
 # Clientes que compraron en los 12 meses anteriores a los últimos 90 días y
-# desde entonces nada. Solo cuántos y cuánto compraban, sin nombres.
+# desde entonces nada. Solo cuántos y cuánto compraban.
 function Leer-Dormidos {
   $tabla = Consultar $servidorBueno @"
 select x.CodigoEmpresa, count(*) as Clientes, sum(x.Neto) as Importe
@@ -510,7 +878,7 @@ function Leer-Cartera {
   if (-not $pedidas -or -not $importe) { Avisar $avisosDeArranque "cartera de pedidos: faltan las unidades pedidas o el importe de la linea"; return $null }
   $comercial = "cast(null as int)"
   $grupo = ""
-  if ((Columnas "CabeceraPedidoCliente").Contains("CodigoComisionista")) {
+  if (Tiene "CabeceraPedidoCliente" "CodigoComisionista") {
     $comercial = "case when p.CodigoComisionista in (0, 9999) then null else p.CodigoComisionista end"
     $grupo = ", $comercial"
   }
@@ -534,19 +902,312 @@ group by p.CodigoEmpresa$grupo;
   return ,$lista
 }
 
-# --- Estructura: nombres de columnas, para ampliar la lectura sin adivinar ---
-# Incluye las tablas de cartera y cobros, que todavía no se leen: con sus
-# columnas a la vista se puede preparar esa parte sin entrar en el servidor.
-function Leer-Estructura {
-  $tabla = Consultar $servidorBueno @"
-select top 5000 t.name as Tabla, c.name as Columna, ty.name as Tipo
+# --- Ofertas una a una: estado, motivo, fechas y lo que acabó en pedido -----
+function Preparar-OfertasDetalle {
+  $faltan = Faltan "CabeceraOfertaCliente" @("CodigoEmpresa", "EjercicioOferta", "NumeroOferta", "FechaOferta")
+  if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "ofertas una a una: faltan $($faltan -join ', ')"; return $null }
+  $enlace = (@(Faltan "LineasPedidoCliente" @("CodigoEmpresa", "EjercicioOferta", "SerieOferta", "NumeroOferta", "FechaPedido")).Count -eq 0) -and (Tiene "CabeceraOfertaCliente" "SerieOferta")
+  if (-not $enlace) { Avisar $avisosDeArranque "ofertas una a una: no se puede enlazar con los pedidos; sale sin conversion" }
+  return @{
+    Serie = (Elegir "CabeceraOfertaCliente" @("SerieOferta"))
+    Presentacion = (Elegir "CabeceraOfertaCliente" @("FechaPresentacionOferta"))
+    Validez = (Elegir "CabeceraOfertaCliente" @("_TS_FechaValidez", "FechaValidez"))
+    Cierre = (Elegir "CabeceraOfertaCliente" @("FechaPrevistaCierreLc"))
+    Cliente = (Elegir "CabeceraOfertaCliente" @("CodigoCliente"))
+    Comercial = (Elegir "CabeceraOfertaCliente" @("CodigoComisionista"))
+    Estado = (Elegir "CabeceraOfertaCliente" @("Estado", "StatusOferta"))
+    Probabilidad = (Elegir "CabeceraOfertaCliente" @("CodigoTipoProbabilidadCierreLc"))
+    Motivo = (Elegir "CabeceraOfertaCliente" @("CP_MotivoRechazo", "MotivoRechazo"))
+    Detalle = (Elegir "CabeceraOfertaCliente" @("CP_Detalle_perdida_oferta"))
+    Importe = (Elegir "CabeceraOfertaCliente" @("BaseImponible", "ImporteNeto", "ImporteLiquido"))
+    Lineas = (Elegir "CabeceraOfertaCliente" @("NumeroLineas"))
+    ImporteLinea = (Elegir "LineasPedidoCliente" @("BaseImponible", "ImporteNeto", "ImporteLiquido"))
+    Enlace = $enlace
+  }
+}
+
+function Sql-OfertasDetalle($cfg, $desde, $hasta) {
+  $serie = if ($cfg.Serie) { "isnull(ltrim(rtrim(o.[$($cfg.Serie)])), '')" } else { "''" }
+  $estado = if ($cfg.Estado) { "cast(o.[$($cfg.Estado)] as int)" } else { "cast(null as int)" }
+  $pedido = "cast(0 as decimal(14, 2))"
+  $primerPedido = "cast(null as date)"
+  $unir = ""
+  if ($cfg.Enlace -and $cfg.ImporteLinea) {
+    $pedido = "isnull(p.Pedido, 0)"
+    $primerPedido = "p.PrimerPedido"
+    $unir = @"
+left join (
+  select l.CodigoEmpresa, l.EjercicioOferta, isnull(ltrim(rtrim(l.SerieOferta)), '') as SerieOferta, l.NumeroOferta,
+    sum(isnull(l.[$($cfg.ImporteLinea)], 0)) as Pedido, cast(min(l.FechaPedido) as date) as PrimerPedido
+  from LineasPedidoCliente l
+  where isnull(l.NumeroOferta, 0) <> 0
+  group by l.CodigoEmpresa, l.EjercicioOferta, isnull(ltrim(rtrim(l.SerieOferta)), ''), l.NumeroOferta
+) p on p.CodigoEmpresa = o.CodigoEmpresa and p.EjercicioOferta = o.EjercicioOferta
+   and p.SerieOferta = $serie and p.NumeroOferta = o.NumeroOferta
+"@
+  }
+  return @"
+select o.CodigoEmpresa, o.EjercicioOferta as Ejercicio, $serie as Serie, o.NumeroOferta as Numero,
+  cast(o.FechaOferta as date) as Fecha,
+  $(Sql-Fecha "o" $cfg.Presentacion) as Presentacion,
+  $(Sql-Fecha "o" $cfg.Validez) as Validez,
+  $(Sql-Fecha "o" $cfg.Cierre) as Cierre,
+  $(Sql-Texto "o" $cfg.Cliente 40) as Cliente,
+  $(Sql-Comercial "o" $cfg.Comercial) as Comercial,
+  $estado as Estado,
+  $(Sql-Texto "o" $cfg.Probabilidad 40) as Probabilidad,
+  $(Sql-Texto "o" $cfg.Motivo 120) as Motivo,
+  $(Sql-Texto "o" $cfg.Detalle 300) as Detalle,
+  $(Sql-Numero "o" $cfg.Importe) as Neto,
+  $(Sql-Numero "o" $cfg.Lineas) as Lineas,
+  $pedido as Pedido,
+  $primerPedido as PrimerPedido
+from CabeceraOfertaCliente o
+$unir
+where $(Sql-Entre "o.FechaOferta" $desde $hasta)
+  and o.CodigoEmpresa not in ($excluidas);
+"@
+}
+
+function Filas-OfertasDetalle($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode   = [int]$fila["CodigoEmpresa"]
+      year          = [int]$fila["Ejercicio"]
+      series        = (Texto $fila["Serie"] 20)
+      number        = [int]$fila["Numero"]
+      offerDate     = ([datetime]$fila["Fecha"]).ToString("yyyy-MM-dd")
+      presentedOn   = (Fecha-O-Nulo $fila["Presentacion"])
+      validUntil    = (Fecha-O-Nulo $fila["Validez"])
+      expectedClose = (Fecha-O-Nulo $fila["Cierre"])
+      customerCode  = (Texto-O-Nulo $fila["Cliente"] 40)
+      repCode       = (Entero-O-Nulo $fila["Comercial"])
+      status        = (Entero-O-Nulo $fila["Estado"])
+      probability   = (Texto-O-Nulo $fila["Probabilidad"] 40)
+      rejectReason  = (Texto-O-Nulo $fila["Motivo"] 120)
+      lossDetail    = (Texto-O-Nulo $fila["Detalle"] 300)
+      netAmount     = (Numero $fila["Neto"])
+      lines         = [int](Numero $fila["Lineas"])
+      orderedAmount = (Numero $fila["Pedido"])
+      firstOrderOn  = (Fecha-O-Nulo $fila["PrimerPedido"])
+    })
+  }
+  return ,$lista
+}
+
+# --- Pedidos uno a uno: pendiente, fechas y cuándo empezó a servirse --------
+function Preparar-PedidosDetalle {
+  $faltan = Faltan "CabeceraPedidoCliente" @("CodigoEmpresa", "EjercicioPedido", "NumeroPedido", "FechaPedido")
+  if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "pedidos uno a uno: faltan $($faltan -join ', ')"; return $null }
+  $enlace = (@(Faltan "CabeceraAlbaranCliente" @("EjercicioPedido", "SeriePedido", "NumeroPedido")).Count -eq 0) -and (Tiene "CabeceraPedidoCliente" "SeriePedido")
+  return @{
+    Serie = (Elegir "CabeceraPedidoCliente" @("SeriePedido"))
+    Necesaria = (Elegir "CabeceraPedidoCliente" @("FechaNecesaria"))
+    Entrega = (Elegir "CabeceraPedidoCliente" @("FechaEntrega"))
+    Cliente = (Elegir "CabeceraPedidoCliente" @("CodigoCliente"))
+    Comercial = (Elegir "CabeceraPedidoCliente" @("CodigoComisionista"))
+    Estado = (Elegir "CabeceraPedidoCliente" @("Estado", "StatusPedido"))
+    Importe = (Elegir "CabeceraPedidoCliente" @("BaseImponible", "ImporteNeto", "ImporteLiquido"))
+    Pendiente = (Elegir "CabeceraPedidoCliente" @("BaseImponiblePendiente", "ImporteNetoLineasPendiente"))
+    Lineas = (Elegir "CabeceraPedidoCliente" @("NumeroLineas"))
+    Oferta = (Elegir "CabeceraPedidoCliente" @("NumeroOferta"))
+    Enlace = $enlace
+  }
+}
+
+function Sql-PedidosDetalle($cfg, $desde, $hasta) {
+  $serie = if ($cfg.Serie) { "isnull(ltrim(rtrim(p.[$($cfg.Serie)])), '')" } else { "''" }
+  $estado = if ($cfg.Estado) { "cast(p.[$($cfg.Estado)] as int)" } else { "cast(null as int)" }
+  $deOferta = if ($cfg.Oferta) { "case when isnull(p.[$($cfg.Oferta)], 0) <> 0 then 1 else 0 end" } else { "0" }
+  $servido = "cast(0 as decimal(14, 2))"
+  $primerAlbaran = "cast(null as date)"
+  $unir = ""
+  if ($cfg.Enlace) {
+    $servido = "isnull(s.Servido, 0)"
+    $primerAlbaran = "s.PrimerAlbaran"
+    $unir = @"
+left join (
+  select a.CodigoEmpresa, a.EjercicioPedido, isnull(ltrim(rtrim(a.SeriePedido)), '') as SeriePedido, a.NumeroPedido,
+    sum(isnull(a.BaseImponible, 0)) as Servido, cast(min(a.FechaAlbaran) as date) as PrimerAlbaran
+  from CabeceraAlbaranCliente a
+  where isnull(a.NumeroPedido, 0) <> 0
+  group by a.CodigoEmpresa, a.EjercicioPedido, isnull(ltrim(rtrim(a.SeriePedido)), ''), a.NumeroPedido
+) s on s.CodigoEmpresa = p.CodigoEmpresa and s.EjercicioPedido = p.EjercicioPedido
+   and s.SeriePedido = $serie and s.NumeroPedido = p.NumeroPedido
+"@
+  }
+  return @"
+select p.CodigoEmpresa, p.EjercicioPedido as Ejercicio, $serie as Serie, p.NumeroPedido as Numero,
+  cast(p.FechaPedido as date) as Fecha,
+  $(Sql-Fecha "p" $cfg.Necesaria) as Necesaria,
+  $(Sql-Fecha "p" $cfg.Entrega) as Entrega,
+  $(Sql-Texto "p" $cfg.Cliente 40) as Cliente,
+  $(Sql-Comercial "p" $cfg.Comercial) as Comercial,
+  $estado as Estado,
+  $(Sql-Numero "p" $cfg.Importe) as Neto,
+  $(Sql-Numero "p" $cfg.Pendiente) as Pendiente,
+  $(Sql-Numero "p" $cfg.Lineas) as Lineas,
+  $deOferta as DeOferta,
+  $servido as Servido,
+  $primerAlbaran as PrimerAlbaran
+from CabeceraPedidoCliente p
+$unir
+where $(Sql-Entre "p.FechaPedido" $desde $hasta)
+  and p.CodigoEmpresa not in ($excluidas);
+"@
+}
+
+function Filas-PedidosDetalle($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode     = [int]$fila["CodigoEmpresa"]
+      year            = [int]$fila["Ejercicio"]
+      series          = (Texto $fila["Serie"] 20)
+      number          = [int]$fila["Numero"]
+      orderDate       = ([datetime]$fila["Fecha"]).ToString("yyyy-MM-dd")
+      neededOn        = (Fecha-O-Nulo $fila["Necesaria"])
+      deliveryOn      = (Fecha-O-Nulo $fila["Entrega"])
+      customerCode    = (Texto-O-Nulo $fila["Cliente"] 40)
+      repCode         = (Entero-O-Nulo $fila["Comercial"])
+      status          = (Entero-O-Nulo $fila["Estado"])
+      netAmount       = (Numero $fila["Neto"])
+      pendingAmount   = (Numero $fila["Pendiente"])
+      lines           = [int](Numero $fila["Lineas"])
+      fromOffer       = ([int]$fila["DeOferta"] -eq 1)
+      deliveredAmount = (Numero $fila["Servido"])
+      firstDeliveryOn = (Fecha-O-Nulo $fila["PrimerAlbaran"])
+    })
+  }
+  return ,$lista
+}
+
+# --- Abonos (devoluciones) e incidencias apuntadas en los albaranes ---------
+function Sql-Incidencias($desde, $hasta) {
+  $serie = "isnull(ltrim(rtrim(a.SerieAlbaran)), '')"
+  $comercial = "case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end"
+  # Sin columna de motivo va vacío y fuera del group by (no se agrupa por un fijo).
+  $motivo = "''"
+  $grupos = @("a.CodigoEmpresa", "cast(a.FechaAlbaran as date)", $serie, $comercial)
+  if (Tiene "CabeceraAlbaranCliente" "CodigoMotivoAbonoLc") {
+    $motivo = "isnull(ltrim(rtrim(cast(a.CodigoMotivoAbonoLc as nvarchar(60)))), '')"
+    $grupos += $motivo
+  }
+  $partes = @(@"
+select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, 'abono' as Tipo, $motivo as Motivo, $serie as Serie, $comercial as Comercial,
+  count(*) as Documentos, sum(isnull(a.BaseImponible, 0)) as Neto
+from CabeceraAlbaranCliente a
+where $(Sql-Entre "a.FechaAlbaran" $desde $hasta) and a.CodigoEmpresa not in ($excluidas) and isnull(a.BaseImponible, 0) < 0
+group by $($grupos -join ", ")
+"@)
+  if (Tiene "CabeceraAlbaranCliente" "IncidenciaAlbaran") {
+    $incidencia = "left(isnull(ltrim(rtrim(cast(a.IncidenciaAlbaran as nvarchar(400)))), ''), 120)"
+    $partes += @"
+select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, 'incidencia' as Tipo, $incidencia as Motivo, $serie as Serie, $comercial as Comercial,
+  count(*) as Documentos, sum(isnull(a.BaseImponible, 0)) as Neto
+from CabeceraAlbaranCliente a
+where $(Sql-Entre "a.FechaAlbaran" $desde $hasta) and a.CodigoEmpresa not in ($excluidas)
+  and isnull(ltrim(rtrim(cast(a.IncidenciaAlbaran as nvarchar(400)))), '') <> ''
+group by a.CodigoEmpresa, cast(a.FechaAlbaran as date), $incidencia, $serie, $comercial
+"@
+  }
+  return ($partes -join "`nunion all`n") + ";"
+}
+
+function Filas-Incidencias($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode = [int]$fila["CodigoEmpresa"]
+      day         = ([datetime]$fila["Dia"]).ToString("yyyy-MM-dd")
+      kind        = [string]$fila["Tipo"]
+      reason      = (Texto $fila["Motivo"] 120)
+      series      = (Texto $fila["Serie"] 20)
+      repCode     = (Entero-O-Nulo $fila["Comercial"])
+      documents   = [int]$fila["Documentos"]
+      netAmount   = (Numero $fila["Neto"])
+    })
+  }
+  return ,$lista
+}
+
+# --- Tablas de códigos: el nombre de cada motivo, tipo, grupo... ------------
+# Tablas pequeñas cuyo nombre suena a catálogo. De cada una se coge la primera
+# columna de código y la de descripción. No son datos de nadie, solo nombres.
+function Leer-Codigos {
+  $candidatas = Consultar $servidorBueno @"
+select t.name as Tabla, sum(p.rows) as Filas
 from sys.tables t
-join sys.columns c on c.object_id = t.object_id
-join sys.types ty on ty.user_type_id = c.user_type_id
-where t.name in ('CabeceraAlbaranCliente', 'LineasAlbaranCliente', 'CabeceraOfertaCliente', 'LineasOfertaCliente',
-                 'CabeceraPedidoCliente', 'LineasPedidoCliente', 'Articulos', 'Familias', 'Clientes', 'Comisionistas')
-   or t.name like '%Efecto%' or t.name like '%Cartera%' or t.name like '%Cobro%' or t.name like '%Remesa%'
-order by t.name, c.column_id;
+join sys.partitions p on p.object_id = t.object_id and p.index_id in (0, 1)
+where (t.name like '%Motivo%' or t.name like '%Probabilidad%' or t.name like '%TipoCliente%' or t.name like '%TiposCliente%'
+    or t.name like '%GrupoCliente%' or t.name like '%GruposCliente%' or t.name like '%Actividad%' or t.name like '%Marca%'
+    or t.name like '%Fabricante%' or t.name like '%Incidencia%' or t.name like '%Categoria%' or t.name like '%Sector%'
+    or t.name like '%TipoAccion%' or t.name like '%ClaseLlamada%' or t.name like '%ClasesLlamada%' or t.name = 'Provincias')
+  and t.name not like '%bak%' and t.name not like 'Tmp%'
+group by t.name
+having sum(p.rows) between 1 and 2000
+order by t.name;
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  $tablas = 0
+  foreach ($candidata in $candidatas.Rows) {
+    if ($tablas -ge 40 -or $lista.Count -ge 18000) { break }
+    $nombreTabla = [string]$candidata["Tabla"]
+    try {
+      $columnas = Consultar $servidorBueno "select c.name from sys.columns c join sys.tables t on t.object_id = c.object_id where t.name = '$nombreTabla' order by c.column_id;"
+      $codigo = $null
+      $descripcion = $null
+      foreach ($c in $columnas.Rows) {
+        $n = [string]$c["name"]
+        if (-not $codigo -and $n -like "Codigo*" -and $n -ne "CodigoEmpresa") { $codigo = $n }
+        if (-not $descripcion -and ($n -like "*Descripcion*" -or $n -like "Nombre*" -or $n -eq "Motivo" -or $n -like "Denominacion*")) { $descripcion = $n }
+      }
+      if (-not $codigo -or -not $descripcion) { continue }
+      $filas = Consultar $servidorBueno @"
+select top 2000 ltrim(rtrim(cast([$codigo] as nvarchar(60)))) as Codigo, max(ltrim(rtrim(cast([$descripcion] as nvarchar(200))))) as Nombre
+from [$nombreTabla]
+group by ltrim(rtrim(cast([$codigo] as nvarchar(60))));
+"@
+      foreach ($f in $filas.Rows) {
+        $cod = Texto $f["Codigo"] 60
+        $nom = Texto $f["Nombre"] 200
+        if ($cod -ne "" -and $nom -ne "") { $lista.Add([PSCustomObject]@{ table = $nombreTabla; code = $cod; name = $nom }) }
+      }
+      $tablas++
+    } catch { }
+  }
+  return ,$lista
+}
+
+# --- Estructura: nombres de columnas, para ampliar la lectura sin adivinar ---
+# Con las tablas de visitas, acciones comerciales, objetivos y motivos a la
+# vista se puede preparar la siguiente parte sin entrar en el servidor. La fila
+# "__filas__" de cada tabla dice cuántos registros tiene (si se usa o no).
+function Leer-Estructura {
+  $filtro = @"
+t.name in ('CabeceraAlbaranCliente', 'LineasAlbaranCliente', 'CabeceraOfertaCliente', 'LineasOfertaCliente',
+           'CabeceraPedidoCliente', 'LineasPedidoCliente', 'Articulos', 'Familias', 'Clientes', 'Comisionistas')
+   or t.name like '%Accion%' or t.name like '%Visita%' or t.name like '%Llamada%' or t.name like '%Agenda%'
+   or t.name like '%Objetivo%' or t.name like '%Presupuesto%' or t.name like '%Motivo%' or t.name like '%Probabilidad%'
+   or t.name like '%Incidencia%' or t.name like '%Marca%' or t.name like '%Oportunidad%' or t.name like '%Tarea%'
+   or t.name like '%Actividad%' or t.name like '%Contacto%'
+"@
+  $tabla = Consultar $servidorBueno @"
+select top 14000 x.Tabla, x.Columna, x.Tipo from (
+  select t.name as Tabla, c.name as Columna, ty.name as Tipo, c.column_id as Orden
+  from sys.tables t
+  join sys.columns c on c.object_id = t.object_id
+  join sys.types ty on ty.user_type_id = c.user_type_id
+  where ($filtro) and t.name not like '%bak%' and t.name not like 'Tmp%'
+  union all
+  select t.name, '__filas__', cast(sum(p.rows) as varchar(20)), 0
+  from sys.tables t
+  join sys.partitions p on p.object_id = t.object_id and p.index_id in (0, 1)
+  where ($filtro) and t.name not like '%bak%' and t.name not like 'Tmp%'
+  group by t.name
+) x
+order by x.Tabla, x.Orden;
 "@
   $lista = New-Object System.Collections.Generic.List[object]
   foreach ($fila in $tabla.Rows) {
@@ -555,133 +1216,62 @@ order by t.name, c.column_id;
   return ,$lista
 }
 
+# ---------------------------------------------------------------------------
+# Qué se puede leer en esta instalación
+# ---------------------------------------------------------------------------
 $cfgOfertas = $null
 $cfgPedidos = $null
 $cfgFamilias = $null
+$cfgArticulos = $null
+$cfgClientes = $null
+$cfgOfertasDetalle = $null
+$cfgPedidosDetalle = $null
 if (-not $SoloVentas) {
   try { $cfgOfertas = Preparar-Documentos "ofertas" "CabeceraOfertaCliente" "FechaOferta" @("SerieOferta") } catch { Avisar $avisosDeArranque "ofertas: $($_.Exception.Message)" }
   try { $cfgPedidos = Preparar-Documentos "pedidos" "CabeceraPedidoCliente" "FechaPedido" @("SeriePedido") } catch { Avisar $avisosDeArranque "pedidos: $($_.Exception.Message)" }
   try { $cfgFamilias = Preparar-Familias } catch { Avisar $avisosDeArranque "familias: $($_.Exception.Message)" }
-}
-
-# Lo que se manda una sola vez por ejecución, en el primer bloque.
-$nombresFamilia = $null
-$cartera = $null
-$dormidos = $null
-$estructura = $null
-if (-not $SoloVentas) {
-  if ($cfgFamilias) { try { $nombresFamilia = Leer-NombresFamilia } catch { Avisar $avisosDeArranque "nombres de familia: $($_.Exception.Message)" } }
-  try { $cartera = Leer-Cartera } catch { Avisar $avisosDeArranque "cartera de pedidos: $($_.Exception.Message)" }
-  if ($clientesListos) { try { $dormidos = Leer-Dormidos } catch { Avisar $avisosDeArranque "clientes dormidos: $($_.Exception.Message)" } }
-  # La estructura solo hace falta de vez en cuando: en la lectura de la noche o
-  # cuando se pide.
-  if ($Reconocer -or $Dias -ge 30) {
-    try { $estructura = Leer-Estructura } catch { Avisar $avisosDeArranque "estructura: $($_.Exception.Message)" }
-  }
+  try { $cfgArticulos = Preparar-Articulos } catch { Avisar $avisosDeArranque "articulos: $($_.Exception.Message)" }
+  try { $cfgClientes = Preparar-Clientes } catch { Avisar $avisosDeArranque "ficha de clientes: $($_.Exception.Message)" }
+  if ($cfgOfertas) { try { $cfgOfertasDetalle = Preparar-OfertasDetalle } catch { Avisar $avisosDeArranque "ofertas una a una: $($_.Exception.Message)" } }
+  if ($cfgPedidos) { try { $cfgPedidosDetalle = Preparar-PedidosDetalle } catch { Avisar $avisosDeArranque "pedidos uno a uno: $($_.Exception.Message)" } }
+  if ($cfgFamilias -and -not $cfgFamilias.ConArticulo) { Avisar $avisosDeArranque "venta por articulo: las lineas no traen CodigoArticulo" }
 }
 
 # ---------------------------------------------------------------------------
-# Se envía por bloques de días, no todo de una vez.
-#
-# Con años de histórico son decenas de miles de filas, y un envío así no cabe:
-# ni en el tope de la ruta ni en el tamaño máximo que admite el servidor. Cada
-# bloque lleva su propia ventana de fechas, y el Hub reescribe justo esa, así
-# que partirlo no cambia el resultado.
+# El envío. Todo va en bloques pequeños: con años de histórico, mandarlo junto
+# no cabe ni en la ruta ni en el tamaño máximo del servidor. Cada envío lleva
+# su ventana de fechas y el Hub reescribe justo esa, así que partirlo no cambia
+# el resultado. Hay cuatro clases de envío:
+#   1. por días: ventas, ofertas y pedidos, compras por cliente, incidencias;
+#   2. por meses: lo que se cuenta por mes entero (clientes, artículos...);
+#   3. de noche, un repaso de las ofertas y pedidos del último año;
+#   4. un anexo: cartera, nombres, tablas de códigos y estructura.
 # ---------------------------------------------------------------------------
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $inicioVentana = (Get-Date).AddDays(-$Dias).Date
 $finVentana = (Get-Date).AddDays(1).Date
 $hoy = (Get-Date).ToString("yyyy-MM-dd")
 $totalEnviado = 0
-$bloques = 0
+$envios = 0
+$lecturaLarga = ($Dias -ge 30)
 
-$cursor = $inicioVentana
-while ($cursor -lt $finVentana) {
-  $corte = $cursor.AddDays($DiasPorEnvio)
-  if ($corte -gt $finVentana) { $corte = $finVentana }
-
-  # Dos formatos para las mismas fechas. El de SQL Server va sin guiones y se
-  # convierte con el estilo 112: con guiones, un servidor configurado en español
-  # lee "2026-09-17" como día 2026 y revienta. El otro, con guiones, es el que
-  # entiende el Hub.
-  $desdeSql = $cursor.ToString("yyyyMMdd")
-  $hastaSql = $corte.ToString("yyyyMMdd")
-
-  $porAlbaran = Consultar $servidorBueno (Sql-Ventas "FechaAlbaran" "" $desdeSql $hastaSql)
-  # Solo los albaranes ya facturados tienen fecha de factura. En Sage el sí/no
-  # se guarda como -1, no como 1.
-  $porFactura = Consultar $servidorBueno (Sql-Ventas "FechaFactura" "and a.StatusFacturado = -1" $desdeSql $hastaSql)
-
-  $ventas = New-Object System.Collections.Generic.List[object]
-  $ventas.AddRange((Filas-Venta $porAlbaran "albaran"))
-  $ventas.AddRange((Filas-Venta $porFactura "factura"))
-
-  $etiqueta = "$($cursor.ToString('yyyy-MM-dd')) a $($corte.AddDays(-1).ToString('yyyy-MM-dd'))"
-  $bloques++
-
-  $envio = [ordered]@{
-    coveredFrom = $cursor.ToString("yyyy-MM-dd")
-    coveredTo   = $corte.AddDays(-1).ToString("yyyy-MM-dd")
+function Nuevo-Envio($desde, $hastaExclusivo) {
+  return [ordered]@{
+    coveredFrom = $desde.ToString("yyyy-MM-dd")
+    coveredTo   = $hastaExclusivo.AddDays(-1).ToString("yyyy-MM-dd")
     takenOn     = $hoy
     companies   = $sociedades
     reps        = $vendedores
-    sales       = $ventas
   }
+}
 
-  # Cada parte nueva va en su propio intento: si una falla, se queda fuera de
-  # este envío (y el Hub no toca lo que ya tenía de ella) y las demás siguen.
-  $avisos = New-Object System.Collections.Generic.List[string]
-  if ($bloques -eq 1) { foreach ($a in $avisosDeArranque) { $avisos.Add($a) } }
-
-  if ($cfgOfertas) {
-    try { $envio.offers = Filas-Documentos (Consultar $servidorBueno (Sql-Documentos $cfgOfertas $desdeSql $hastaSql)) }
-    catch { Avisar $avisos "ofertas ($etiqueta): $($_.Exception.Message)" }
-  }
-  if ($cfgPedidos) {
-    try { $envio.orders = Filas-Documentos (Consultar $servidorBueno (Sql-Documentos $cfgPedidos $desdeSql $hastaSql)) }
-    catch { Avisar $avisos "pedidos ($etiqueta): $($_.Exception.Message)" }
-  }
-  if ($cfgFamilias) {
-    try { $envio.familySales = Filas-Familias (Consultar $servidorBueno (Sql-Familias $cfgFamilias $desdeSql $hastaSql)) }
-    catch { Avisar $avisos "familias ($etiqueta): $($_.Exception.Message)" }
-  }
-  if ($clientesListos) {
-    # Los clientes se cuentan por mes entero, así que se recalculan completos
-    # los meses que toca el bloque.
-    $mesDesde = (Get-Date -Year $cursor.Year -Month $cursor.Month -Day 1).Date
-    $ultimoDia = $corte.AddDays(-1)
-    $mesHasta = (Get-Date -Year $ultimoDia.Year -Month $ultimoDia.Month -Day 1).Date.AddMonths(1)
-    try {
-      $tablaClientes = Consultar $servidorBueno (Sql-Clientes $mesDesde.ToString("yyyyMMdd") $mesHasta.ToString("yyyyMMdd"))
-      $clientes = New-Object System.Collections.Generic.List[object]
-      foreach ($fila in $tablaClientes.Rows) {
-        $clientes.Add([PSCustomObject]@{
-          companyCode     = [int]$fila["CodigoEmpresa"]
-          month           = "$([string]$fila["Mes"])-01"
-          activeCustomers = [int]$fila["Activos"]
-          newCustomers    = [int]$fila["Nuevos"]
-        })
-      }
-      $envio.customers = $clientes
-    } catch { Avisar $avisos "clientes ($etiqueta): $($_.Exception.Message)" }
-  }
-
-  if ($bloques -eq 1) {
-    if ($null -ne $nombresFamilia) { $envio.families = $nombresFamilia }
-    if ($null -ne $cartera) { $envio.backlog = $cartera }
-    if ($null -ne $dormidos) { $envio.dormant = $dormidos }
-    if ($null -ne $estructura) { $envio.schema = $estructura }
-  }
-  if ($avisos.Count -gt 0) { $envio.notes = $avisos }
-
+function Enviar($envio, $etiqueta) {
   if ($SoloProbar) {
     $muestra = Join-Path (Split-Path -Parent $Registro) "agente-sage-muestra.json"
     $envio | ConvertTo-Json -Depth 6 | Set-Content -Path $muestra -Encoding UTF8
-    Apuntar "prueba: no se ha enviado nada. Lo del bloque $etiqueta esta en $muestra"
-    exit 0
+    Apuntar "prueba: no se ha enviado nada. Lo de $etiqueta esta en $muestra"
+    Terminar 0 "Prueba sin enviar."
   }
-
   try {
     $json = $envio | ConvertTo-Json -Depth 6 -Compress
     # El cuerpo va como UTF-8 explícito: con acentos, dejarlo al azar rompe los
@@ -691,18 +1281,213 @@ while ($cursor -lt $finVentana) {
       -ContentType "application/json; charset=utf-8" `
       -Headers @{ Authorization = "Bearer $Token" } `
       -TimeoutSec 300
-    $totalEnviado += [int]$respuesta.rowsWritten
+    $script:totalEnviado += [int]$respuesta.rowsWritten
+    $script:envios++
     $detalle = ""
-    if ($respuesta.written) { $detalle = " | " + (($respuesta.written.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join " ") }
-    Apuntar "  $etiqueta -> $($respuesta.rowsWritten) filas de venta ($($ventas.Count) enviadas)$detalle"
+    if ($respuesta.written) { $detalle = (($respuesta.written.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join " ") }
+    Apuntar "  $etiqueta -> $detalle ($([Math]::Round($cuerpo.Length / 1024)) KB)"
   } catch {
-    Apuntar "ERROR al enviar el bloque $etiqueta : $($_.Exception.Message)"
+    Apuntar "ERROR al enviar $etiqueta : $($_.Exception.Message)"
     if ($_.ErrorDetails -and $_.ErrorDetails.Message) { Apuntar "respuesta: $($_.ErrorDetails.Message)" }
-    exit 1
+    Terminar 1 "No se pudo enviar $etiqueta al Hub."
   }
+}
 
+# Cada parte va en su propio intento: si una falla, se queda fuera de ese envío
+# (y el Hub no toca lo que ya tenía de ella) y las demás siguen.
+function Intentar($envio, $clave, $avisos, $nombre, [scriptblock]$leer) {
+  try { $envio[$clave] = (& $leer) }
+  catch { Avisar $avisos "${nombre}: $($_.Exception.Message)" }
+}
+
+$avisosPendientes = $true
+# Los avisos que salen después (por ejemplo al leer la cartera en el anexo) se
+# mandan en el anexo: se recuerda cuántos se enviaron ya.
+$avisosEnviados = 0
+
+# ----- 1. Por días -----
+$cursor = $inicioVentana
+while ($cursor -lt $finVentana) {
+  $corte = $cursor.AddDays($DiasPorEnvio)
+  if ($corte -gt $finVentana) { $corte = $finVentana }
+  # Dos formatos para las mismas fechas. El de SQL Server va sin guiones y se
+  # convierte con el estilo 112: con guiones, un servidor configurado en español
+  # lee "2026-09-17" como día 2026 y revienta. El otro, con guiones, es el que
+  # entiende el Hub.
+  $desdeSql = $cursor.ToString("yyyyMMdd")
+  $hastaSql = $corte.ToString("yyyyMMdd")
+  $etiqueta = "dias $($cursor.ToString('yyyy-MM-dd')) a $($corte.AddDays(-1).ToString('yyyy-MM-dd'))"
+
+  $porAlbaran = Consultar $servidorBueno (Sql-Ventas "FechaAlbaran" "" $desdeSql $hastaSql)
+  # Solo los albaranes ya facturados tienen fecha de factura. En Sage el sí/no
+  # se guarda como -1, no como 1.
+  $porFactura = Consultar $servidorBueno (Sql-Ventas "FechaFactura" "and a.StatusFacturado = -1" $desdeSql $hastaSql)
+  $ventas = New-Object System.Collections.Generic.List[object]
+  $ventas.AddRange((Filas-Venta $porAlbaran "albaran"))
+  $ventas.AddRange((Filas-Venta $porFactura "factura"))
+
+  $envio = Nuevo-Envio $cursor $corte
+  $envio.sales = $ventas
+  $avisos = New-Object System.Collections.Generic.List[string]
+  if ($avisosPendientes) { foreach ($a in $avisosDeArranque) { $avisos.Add($a) }; $avisosPendientes = $false; $avisosEnviados = $avisosDeArranque.Count }
+
+  if ($cfgOfertas) { Intentar $envio "offers" $avisos "ofertas ($etiqueta)" { Filas-Documentos (Consultar $servidorBueno (Sql-Documentos $cfgOfertas $desdeSql $hastaSql)) } }
+  if ($cfgPedidos) { Intentar $envio "orders" $avisos "pedidos ($etiqueta)" { Filas-Documentos (Consultar $servidorBueno (Sql-Documentos $cfgPedidos $desdeSql $hastaSql)) } }
+  if ($cfgFamilias) { Intentar $envio "familySales" $avisos "familias ($etiqueta)" { Filas-Familias (Consultar $servidorBueno (Sql-Familias $cfgFamilias $desdeSql $hastaSql)) } }
+  if ($clientesListos) { Intentar $envio "customerDays" $avisos "compras por cliente ($etiqueta)" { Filas-ClientesDia (Consultar $servidorBueno (Sql-ClientesDia $desdeSql $hastaSql)) } }
+  if ($cfgOfertasDetalle) { Intentar $envio "offerDocuments" $avisos "ofertas una a una ($etiqueta)" { Filas-OfertasDetalle (Consultar $servidorBueno (Sql-OfertasDetalle $cfgOfertasDetalle $desdeSql $hastaSql)) } }
+  if ($cfgPedidosDetalle) { Intentar $envio "orderDocuments" $avisos "pedidos uno a uno ($etiqueta)" { Filas-PedidosDetalle (Consultar $servidorBueno (Sql-PedidosDetalle $cfgPedidosDetalle $desdeSql $hastaSql)) } }
+  if (-not $SoloVentas) { Intentar $envio "incidents" $avisos "abonos e incidencias ($etiqueta)" { Filas-Incidencias (Consultar $servidorBueno (Sql-Incidencias $desdeSql $hastaSql)) } }
+
+  if ($avisos.Count -gt 0) { $envio.notes = $avisos }
+  Enviar $envio $etiqueta
   $cursor = $corte
 }
 
-Apuntar "enviado correctamente: $totalEnviado filas de venta guardadas en $bloques bloque(s)"
-exit 0
+# ----- 2. Por meses: los meses que toca la ventana, enteros -----
+if (-not $SoloVentas) {
+  $mes = (Get-Date -Year $inicioVentana.Year -Month $inicioVentana.Month -Day 1).Date
+  $ultimoMes = (Get-Date).Date
+  while ($mes -le $ultimoMes) {
+    $siguiente = $mes.AddMonths(1)
+    $desdeSql = $mes.ToString("yyyyMMdd")
+    $hastaSql = $siguiente.ToString("yyyyMMdd")
+    $etiqueta = "mes $($mes.ToString('yyyy-MM'))"
+    $envio = Nuevo-Envio $mes $siguiente
+    $avisos = New-Object System.Collections.Generic.List[string]
+
+    if ($clientesListos) {
+      Intentar $envio "customers" $avisos "clientes ($etiqueta)" {
+        $tablaClientes = Consultar $servidorBueno (Sql-Clientes $desdeSql $hastaSql)
+        $clientes = New-Object System.Collections.Generic.List[object]
+        foreach ($fila in $tablaClientes.Rows) {
+          $clientes.Add([PSCustomObject]@{
+            companyCode     = [int]$fila["CodigoEmpresa"]
+            month           = "$([string]$fila["Mes"])-01"
+            activeCustomers = [int]$fila["Activos"]
+            newCustomers    = [int]$fila["Nuevos"]
+          })
+        }
+        ,$clientes
+      }
+    }
+    if ($cfgFamilias) {
+      Intentar $envio "customerFamilies" $avisos "familias por cliente ($etiqueta)" {
+        $tabla = Consultar $servidorBueno (Sql-ClientesFamilia $cfgFamilias $desdeSql $hastaSql)
+        $lista = New-Object System.Collections.Generic.List[object]
+        foreach ($fila in $tabla.Rows) {
+          $lista.Add([PSCustomObject]@{
+            companyCode    = [int]$fila["CodigoEmpresa"]
+            customerCode   = (Texto $fila["Cliente"] 40)
+            month          = "$([string]$fila["Mes"])-01"
+            familyCode     = (Texto $fila["Familia"] 40)
+            netAmount      = (Numero $fila["Neto"])
+            costAmount     = (Numero $fila["Coste"])
+            netWithoutCost = (Numero $fila["NetoSinCoste"])
+          })
+        }
+        ,$lista
+      }
+    }
+    if ($cfgFamilias -and $cfgFamilias.ConArticulo) {
+      Intentar $envio "articleSales" $avisos "venta por articulo ($etiqueta)" {
+        $tabla = Consultar $servidorBueno (Sql-ArticulosVenta $cfgFamilias $desdeSql $hastaSql)
+        $lista = New-Object System.Collections.Generic.List[object]
+        foreach ($fila in $tabla.Rows) {
+          $lista.Add([PSCustomObject]@{
+            companyCode    = [int]$fila["CodigoEmpresa"]
+            month          = "$([string]$fila["Mes"])-01"
+            articleCode    = (Texto $fila["Articulo"] 40)
+            familyCode     = (Texto $fila["Familia"] 40)
+            subfamilyCode  = (Texto $fila["Subfamilia"] 40)
+            units          = (Numero $fila["Unidades"])
+            documents      = [int]$fila["Documentos"]
+            netAmount      = (Numero $fila["Neto"])
+            costAmount     = (Numero $fila["Coste"])
+            netWithoutCost = (Numero $fila["NetoSinCoste"])
+          })
+        }
+        ,$lista
+      }
+    }
+    if ($cfgArticulos -and $cfgFamilias) {
+      Intentar $envio "articleList" $avisos "ficha de articulos ($etiqueta)" {
+        $tabla = Consultar $servidorBueno (Sql-ArticulosLista $cfgArticulos $cfgFamilias $desdeSql $hastaSql)
+        $lista = New-Object System.Collections.Generic.List[object]
+        foreach ($fila in $tabla.Rows) {
+          $codigo = Texto $fila["Codigo"] 40
+          if ($codigo -eq "") { continue }
+          $nombre = Texto $fila["Nombre"] 200
+          if ($nombre -eq "") { $nombre = "Articulo $codigo" }
+          $lista.Add([PSCustomObject]@{
+            companyCode   = [int]$fila["CodigoEmpresa"]
+            code          = $codigo
+            name          = $nombre
+            familyCode    = (Texto-O-Nulo $fila["Familia"] 40)
+            subfamilyCode = (Texto-O-Nulo $fila["Subfamilia"] 40)
+            brand         = (Texto-O-Nulo $fila["Marca"] 80)
+            supplierCode  = (Texto-O-Nulo $fila["Proveedor"] 40)
+            manufacturer  = (Texto-O-Nulo $fila["Fabricante"] 80)
+            abc           = (Texto-O-Nulo $fila["Abc"] 10)
+            createdOn     = (Fecha-O-Nulo $fila["Alta"])
+            obsolete      = ([int]$fila["Obsoleto"] -eq 1)
+          })
+        }
+        ,$lista
+      }
+    }
+    if ($cfgClientes) {
+      Intentar $envio "customerList" $avisos "ficha de clientes ($etiqueta)" { Filas-ClientesLista (Consultar $servidorBueno (Sql-ClientesLista $cfgClientes $desdeSql $hastaSql)) }
+    }
+
+    if ($avisos.Count -gt 0) { $envio.notes = $avisos }
+    Enviar $envio $etiqueta
+    $mes = $siguiente
+  }
+}
+
+# ----- 3. De noche: repaso de ofertas y pedidos del último año -----
+# Una oferta de hace cinco meses puede ganarse hoy. La lectura de cada hora no
+# la vería, así que por la noche se repasa todo el año, sin tocar las ventas.
+if ($lecturaLarga -and -not $SoloVentas -and ($cfgOfertasDetalle -or $cfgPedidosDetalle) -and $DiasDocumentos -gt $Dias) {
+  $cursor = (Get-Date).AddDays(-$DiasDocumentos).Date
+  while ($cursor -lt $inicioVentana) {
+    $corte = $cursor.AddDays($DiasPorEnvio)
+    if ($corte -gt $inicioVentana) { $corte = $inicioVentana }
+    $desdeSql = $cursor.ToString("yyyyMMdd")
+    $hastaSql = $corte.ToString("yyyyMMdd")
+    $etiqueta = "repaso de ofertas y pedidos $($cursor.ToString('yyyy-MM-dd')) a $($corte.AddDays(-1).ToString('yyyy-MM-dd'))"
+    $envio = Nuevo-Envio $cursor $corte
+    $avisos = New-Object System.Collections.Generic.List[string]
+    if ($cfgOfertasDetalle) { Intentar $envio "offerDocuments" $avisos "ofertas una a una ($etiqueta)" { Filas-OfertasDetalle (Consultar $servidorBueno (Sql-OfertasDetalle $cfgOfertasDetalle $desdeSql $hastaSql)) } }
+    if ($cfgPedidosDetalle) { Intentar $envio "orderDocuments" $avisos "pedidos uno a uno ($etiqueta)" { Filas-PedidosDetalle (Consultar $servidorBueno (Sql-PedidosDetalle $cfgPedidosDetalle $desdeSql $hastaSql)) } }
+    if ($avisos.Count -gt 0) { $envio.notes = $avisos }
+    Enviar $envio $etiqueta
+    $cursor = $corte
+  }
+}
+
+# ----- 4. El anexo: fotos del día, nombres y, de noche, códigos y estructura -----
+if (-not $SoloVentas) {
+  $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+  $avisos = New-Object System.Collections.Generic.List[string]
+  if ($cfgFamilias) {
+    Intentar $envio "families" $avisos "nombres de familia" { Leer-NombresFamilia $false }
+    Intentar $envio "subfamilies" $avisos "nombres de subfamilia" { Leer-NombresFamilia $true }
+    if ($null -eq $envio["subfamilies"]) { $envio.Remove("subfamilies") }
+  }
+  Intentar $envio "backlog" $avisos "cartera de pedidos" { Leer-Cartera }
+  if ($null -eq $envio["backlog"]) { $envio.Remove("backlog") }
+  if ($clientesListos) { Intentar $envio "dormant" $avisos "clientes dormidos" { Leer-Dormidos } }
+  if ($lecturaLarga -or $Reconocer) {
+    Intentar $envio "lookups" $avisos "tablas de codigos" { Leer-Codigos }
+    Intentar $envio "schema" $avisos "estructura" { Leer-Estructura }
+  }
+  if ($null -eq $envio["families"]) { $envio.Remove("families") }
+  for ($k = $avisosEnviados; $k -lt $avisosDeArranque.Count; $k++) { if ($avisos.Count -lt 30) { $avisos.Add($avisosDeArranque[$k]) } }
+  if ($avisos.Count -gt 0) { $envio.notes = $avisos }
+  Enviar $envio "anexo"
+}
+
+Apuntar "enviado correctamente: $totalEnviado filas de venta en $envios envio(s)"
+Terminar 0 "Sage leido: $envios envio(s)."

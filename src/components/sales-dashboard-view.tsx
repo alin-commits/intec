@@ -14,6 +14,7 @@ import { INVOICE_DATES_FROM, invoiceComparisonAvailable, invoiceYears } from "@/
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { SalesExtrasPanels } from "@/components/sales-extras-panels";
+import { SageRefreshButton } from "@/components/sage-refresh-button";
 
 /** Una fila del resumen mensual que devuelve la base de datos. */
 type SummaryRow = {
@@ -152,6 +153,8 @@ export function SalesDashboardView() {
    * línea cae a cero, que es justo lo que parece un hundimiento.
    */
   const [dataYear, setDataYear] = useState<number | null>(null);
+  /** Sube cuando termina una lectura pedida con el botón: todo el panel se recarga. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Quién entra y qué años hay con datos. Solo una vez.
   useEffect(() => {
@@ -212,7 +215,7 @@ export function SalesDashboardView() {
         // con 2025 sería comparar contra casi nada. Entonces no se pide el año
         // anterior y el panel dice "sin comparación" en vez de un +400 %.
         const comparable = basis === "albaran" || invoiceComparisonAvailable(year);
-        const [current, before] = await Promise.all([
+        const [current, before, runRows] = await Promise.all([
           supabase.rpc("sage_sales_summary", { p_from: `${year}-01-01`, p_to: `${year}-12-31`, p_basis: basis }),
           comparable
             ? supabase.rpc("sage_sales_summary", {
@@ -221,10 +224,13 @@ export function SalesDashboardView() {
                 p_basis: basis,
               })
             : Promise.resolve({ data: [], error: null }),
+          // La última lectura, para el pie: cambia cada vez que se lee Sage.
+          supabase.from("sage_sync_runs").select("started_at, ok, covered_from, covered_to").eq("ok", true).order("started_at", { ascending: false }).limit(1),
         ]);
         const failure = current.error ?? before.error;
         if (failure) throw failure;
         if (!active) return;
+        if (!runRows.error) setLastRun(((runRows.data ?? [])[0] as SyncRun) ?? null);
         setComparisonIsPartial(partial);
         setComparisonAvailable(comparable);
         setRows((current.data ?? []) as SummaryRow[]);
@@ -239,7 +245,7 @@ export function SalesDashboardView() {
       }
     })();
     return () => { active = false; };
-  }, [stage, year, basis]);
+  }, [stage, year, basis, reloadKey]);
 
   /**
    * En Sage la misma persona está dada de alta varias veces: un código por
@@ -726,6 +732,7 @@ export function SalesDashboardView() {
           </p>
         </div>
         <div className="panel-heading-trailing">
+          <SageRefreshButton onUpdated={() => setReloadKey((key) => key + 1)} />
           <select className="panel-heading-select" value={String(companyCode)} onChange={(event) => setCompanyCode(event.target.value === "all" ? "all" : Number(event.target.value))} aria-label="Sociedad">
             <option value="all">Todas las sociedades</option>
             {companies.filter((company) => company.is_active).map((company) => (
@@ -1071,7 +1078,7 @@ export function SalesDashboardView() {
         </article>
       </section>
 
-      <SalesExtrasPanels year={shownYear} companyCode={companyCode} companyLabel={companyLabel} repLabel={repLabel} />
+      <SalesExtrasPanels year={shownYear} companyCode={companyCode} companyLabel={companyLabel} repLabel={repLabel} reloadKey={reloadKey} />
 
       <section className="panel sales-footnote">
         <p className="muted">

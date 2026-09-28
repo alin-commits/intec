@@ -62,6 +62,49 @@ test("el envío nuevo pasa todo, con los nombres de columna de la base de datos"
   assert.match(summary, /Avisos del agente: ofertas: faltan SerieOferta/);
 });
 
+test("los envíos parciales del agente nuevo no tocan las ventas", () => {
+  // El envío de un mes y el anexo no llevan ventas: la base de datos no debe borrarlas.
+  const body = sageIngestSchema.parse({
+    coveredFrom: "2026-09-01",
+    coveredTo: "2026-09-30",
+    customerList: [{ companyCode: 1, code: "C0001", name: "TALLERES MARTÍNEZ, S.L.", tradeName: "", phone: " 961234567 ", createdOn: "2019-03-02" }],
+    articleSales: [{ companyCode: 1, month: "2026-09-01", articleCode: "CMP-100", netAmount: 9800 }],
+  });
+  const payload = toDatabasePayload(body);
+  assert.equal("sales" in payload, false);
+  assert.deepEqual(payload.companies, []);
+  const customer = (payload.customer_list as Record<string, unknown>[])[0];
+  assert.equal(customer.trade_name, null, "un texto vacío se guarda como que falta");
+  assert.equal(customer.phone, "961234567");
+  assert.equal(customer.email, null);
+  assert.deepEqual((payload.article_sales as object[])[0], {
+    company_code: 1, month: "2026-09-01", article_code: "CMP-100", family_code: "", subfamily_code: "",
+    units: 0, documents: 0, net_amount: 9800, cost_amount: 0, net_without_cost: 0,
+  });
+  assert.match(describeIngest(body, { customer_list: 1, article_sales: 1 }), /1 clientes, 1 de venta por artículo/);
+});
+
+test("ofertas y pedidos uno a uno llegan con su enlace y sus fechas", () => {
+  const body = sageIngestSchema.parse({
+    coveredFrom: "2026-09-26",
+    coveredTo: "2026-09-28",
+    offerDocuments: [{ companyCode: 1, year: 2026, series: "OF", number: 881, offerDate: "2026-09-28", status: 2, netAmount: 8200, orderedAmount: 8200, firstOrderOn: "2026-09-28" }],
+    orderDocuments: [{ companyCode: 1, year: 2026, number: 1523, orderDate: "2026-09-28", neededOn: "2026-09-25", netAmount: 2500, pendingAmount: 1200, fromOffer: true }],
+    incidents: [{ companyCode: 1, day: "2026-09-28", kind: "abono", reason: "02", documents: 1, netAmount: -340 }],
+  });
+  const payload = toDatabasePayload(body);
+  const offer = (payload.offer_documents as Record<string, unknown>[])[0];
+  assert.equal(offer.ordered_amount, 8200);
+  assert.equal(offer.reject_reason, null);
+  const order = (payload.order_documents as Record<string, unknown>[])[0];
+  assert.equal(order.series, "", "sin serie va vacía, que es parte de la clave");
+  assert.equal(order.needed_on, "2026-09-25");
+  assert.equal(order.from_offer, true);
+  assert.equal((payload.incidents as Record<string, unknown>[])[0].kind, "abono");
+  const unknownKind = sageIngestSchema.safeParse({ coveredFrom: "2026-09-26", coveredTo: "2026-09-28", incidents: [{ companyCode: 1, day: "2026-09-28", kind: "queja", documents: 1, netAmount: 0 }] });
+  assert.equal(unknownKind.success, false, "solo abonos e incidencias");
+});
+
 test("un hueco en la lista de ventas se rechaza en vez de guardarse a medias", () => {
   const result = sageIngestSchema.safeParse({ ...oldAgentBody, sales: [...oldAgentBody.sales, null] });
   assert.equal(result.success, false);

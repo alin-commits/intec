@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { isSageAgent } from "@/lib/sage-agent-auth";
 import { describeIngest, sageIngestSchema, toDatabasePayload, type SageIngestBody } from "@/lib/sage-ingest";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -21,19 +21,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 60;
 
-function isAuthorized(request: Request): boolean {
-  // Con trim: al pegar la clave en Vercel es fácil llevarse un salto de línea
-  // o un espacio detrás, y eso bastaba para rechazar al agente sin más pista
-  // que un 401.
-  const secret = process.env.SAGE_INGEST_TOKEN?.trim();
-  if (!secret) return false;
-  const received = Buffer.from(request.headers.get("authorization") ?? "");
-  const expected = Buffer.from(`Bearer ${secret}`);
-  return received.length === expected.length && timingSafeEqual(received, expected);
-}
-
 export async function POST(request: Request) {
-  if (!isAuthorized(request)) {
+  if (!isSageAgent(request)) {
     return NextResponse.json({ error: "No autorizado." }, { status: 401 });
   }
   const admin = createAdminClient();
