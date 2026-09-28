@@ -10,8 +10,10 @@ import { numberFormatter, formatPercent } from "@/lib/format";
 /** El ticket medio son dos o tres dígitos: ahí el céntimo sí dice algo. */
 const ticketFormatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 import { hasAnyRole, SALES_ROLES } from "@/lib/constants";
+import { INVOICE_DATES_FROM, invoiceComparisonAvailable, invoiceYears } from "@/lib/sage-panel";
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
+import { SalesExtrasPanels } from "@/components/sales-extras-panels";
 
 /** Una fila del resumen mensual que devuelve la base de datos. */
 type SummaryRow = {
@@ -140,6 +142,8 @@ export function SalesDashboardView() {
   const [lastRun, setLastRun] = useState<SyncRun | null>(null);
   /** True cuando se compara contra el mismo tramo del año anterior, no el año entero. */
   const [comparisonIsPartial, setComparisonIsPartial] = useState(false);
+  /** False cuando el año anterior no tiene datos con los que comparar (por fecha de factura antes de oct. 2025). */
+  const [comparisonAvailable, setComparisonAvailable] = useState(true);
   const [busy, setBusy] = useState(false);
   /**
    * A qué año pertenecen las filas que hay ahora mismo. Mientras llega el año
@@ -204,18 +208,25 @@ export function SalesDashboardView() {
         // ha vendido un 30 % menos.
         const today = new Date();
         const partial = year === today.getFullYear();
+        // Por fecha de factura no hay nada antes del 16/10/2025: comparar 2026
+        // con 2025 sería comparar contra casi nada. Entonces no se pide el año
+        // anterior y el panel dice "sin comparación" en vez de un +400 %.
+        const comparable = basis === "albaran" || invoiceComparisonAvailable(year);
         const [current, before] = await Promise.all([
           supabase.rpc("sage_sales_summary", { p_from: `${year}-01-01`, p_to: `${year}-12-31`, p_basis: basis }),
-          supabase.rpc("sage_sales_summary", {
-            p_from: `${year - 1}-01-01`,
-            p_to: partial ? sameDayPreviousYear(year, today) : `${year - 1}-12-31`,
-            p_basis: basis,
-          }),
+          comparable
+            ? supabase.rpc("sage_sales_summary", {
+                p_from: `${year - 1}-01-01`,
+                p_to: partial ? sameDayPreviousYear(year, today) : `${year - 1}-12-31`,
+                p_basis: basis,
+              })
+            : Promise.resolve({ data: [], error: null }),
         ]);
         const failure = current.error ?? before.error;
         if (failure) throw failure;
         if (!active) return;
         setComparisonIsPartial(partial);
+        setComparisonAvailable(comparable);
         setRows((current.data ?? []) as SummaryRow[]);
         setPreviousRows((before.data ?? []) as SummaryRow[]);
         setDataYear(year);
@@ -277,6 +288,15 @@ export function SalesDashboardView() {
       isPerson: rep?.is_person ?? false,
     };
   }, [reps, repIdentities]);
+
+  /** Lo mismo para las secciones de ofertas, pedidos y cartera, que no son filas de venta. */
+  const repLabel = useMemo(
+    () => (companyCode: number, repCode: number | null) => {
+      const who = repOf({ company_code: companyCode, rep_code: repCode } as SummaryRow);
+      return { key: who.key, label: who.label };
+    },
+    [repOf],
+  );
 
   /**
    * Un canal o un comercial elegido en un año puede no existir en otro: las
@@ -657,7 +677,18 @@ export function SalesDashboardView() {
   }
 
   const isCurrentYear = year === new Date().getFullYear();
-  const comparisonHelper = comparisonIsPartial ? `frente al mismo tramo de ${shownYear - 1}` : `frente a ${shownYear - 1}`;
+  const comparisonHelper = !comparisonAvailable
+    ? `${shownYear - 1} no tiene fecha de factura`
+    : comparisonIsPartial ? `frente al mismo tramo de ${shownYear - 1}` : `frente a ${shownYear - 1}`;
+  /** Por fecha de factura solo tienen sentido los años desde el cambio de series. */
+  const yearOptions = basis === "factura" ? invoiceYears(years) : years;
+  const invoiceStart = new Date(`${INVOICE_DATES_FROM}T12:00:00`).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
+  function changeBasis(next: "albaran" | "factura") {
+    setBasis(next);
+    // Un año sin fechas de factura se quedaría en blanco: se salta al último que sí las tiene.
+    const allowed = next === "factura" ? invoiceYears(years) : years;
+    if (allowed.length > 0 && !allowed.includes(year)) setYear(allowed[0]);
+  }
   // De `companies`, no de las ventas del año: una sociedad sin ventas en el año
   // elegido dejaría la frase en "en ." y el chip del filtro sin texto.
   const companyLabel = companyCode === "all"
@@ -702,13 +733,13 @@ export function SalesDashboardView() {
             ))}
           </select>
           <select className="panel-heading-select" value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Año">
-            {years.map((value) => <option key={value} value={value}>{value}</option>)}
+            {yearOptions.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
           <select className="panel-heading-select" value={activeChannel ?? "all"} onChange={(event) => setChannel(event.target.value === "all" ? null : event.target.value)} aria-label="Canal">
             <option value="all">Todos los canales</option>
             {[...byChannel.real].sort().map((label) => <option key={label} value={label}>{label}</option>)}
           </select>
-          <select className="panel-heading-select" value={basis} onChange={(event) => setBasis(event.target.value as "albaran" | "factura")} aria-label="Qué fecha manda">
+          <select className="panel-heading-select" value={basis} onChange={(event) => changeBasis(event.target.value as "albaran" | "factura")} aria-label="Qué fecha manda">
             <option value="albaran">Por fecha de albarán</option>
             <option value="factura">Por fecha de factura</option>
           </select>
@@ -759,6 +790,9 @@ export function SalesDashboardView() {
           <span>
             Lo servido y todavía sin facturar no aparece aquí, así que el mes en curso siempre parece más pequeño de
             lo que es. Para saber cuánto se ha vendido, mira por fecha de albarán.
+            {" "}Además, por fecha de factura solo hay datos desde el {invoiceStart}, cuando se cambiaron las series en
+            Sage: antes los albaranes no guardaban la fecha de factura.
+            {comparisonAvailable ? "" : ` Por eso aquí no se compara con ${shownYear - 1}.`}
           </span>
         </section>
       ) : null}
@@ -1036,6 +1070,8 @@ export function SalesDashboardView() {
           </div>
         </article>
       </section>
+
+      <SalesExtrasPanels year={shownYear} companyCode={companyCode} companyLabel={companyLabel} repLabel={repLabel} />
 
       <section className="panel sales-footnote">
         <p className="muted">

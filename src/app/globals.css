@@ -1426,3 +1426,8 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
   .export-range-fields { grid-template-columns: 1fr; }
   .export-range-mode { min-height: 44px; flex: 1 1 auto; }
 }
+
+/* Ventas: ofertas, pedidos, familias y clientes de Sage */
+.sales-extras-heading { margin-top: 10px; padding-top: 22px; border-top: 1px solid var(--border); }
+.sales-rank-row.is-static { cursor: default; }
+.sales-rank-row.is-static:hover { background: transparent; }
