@@ -1295,8 +1295,10 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 /* ---- Panel de ventas de Sage: rejilla tipo cuadro de mando ---- */
 
 /* Cinco o seis tarjetas según haya mes en curso que enseñar, así que se dejan
-   colocarse solas en vez de fijar el número de columnas. */
-.kpi-grid-sales { grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); }
+   colocarse solas en vez de fijar el número de columnas. El mínimo es el que
+   permite que las seis quepan en una fila en un portátil de 1440: con 195 px el
+   ticket medio se caía solo a una segunda fila. */
+.kpi-grid-sales { grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 14px; }
 
 /* Los filtros puestos, visibles y quitables de un clic: si no se ven, alguien
    acaba leyendo un total filtrado creyendo que es el de la empresa entera. */
@@ -1336,6 +1338,11 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 
 .sales-channel-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 
+/* Por debajo de esto no caben seis tarjetas en una fila y quedaría una sola
+   descolgada abajo; en dos filas de tres se lee mejor. A 1440 sí caben. */
+@media (max-width: 1430px) {
+  .kpi-grid-sales { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 1280px) {
   .sales-board-wide, .sales-board-narrow, .sales-board-half { grid-column: span 12; }
   .sales-board-quarter, .sales-board-third { grid-column: span 6; }
