@@ -118,16 +118,24 @@ create policy meta_sync_runs_select on public.meta_sync_runs
 -- ---------- Las cinco cuentas que hay hoy ----------
 -- Una por marca. Sumifluid no tiene cuenta publicitaria; el día que la tenga,
 -- se añade aquí y aparece sola en la aplicación.
-insert into public.meta_ad_accounts (account_id, name, portfolio, token_key, business_unit_id)
+--
+-- Los cuatro primeros identificadores están comprobados contra la API: Meta
+-- devuelve la cuenta, su moneda y su gasto. El de Jender no, porque su token
+-- todavía no existe, y el primer número que se dio para CST resultó no ser una
+-- cuenta publicitaria sino otro activo. Por eso Jender entra desactivada: así
+-- no se intenta sincronizar algo que puede estar mal, y se activa en cuanto se
+-- confirme con su token.
+insert into public.meta_ad_accounts (account_id, name, portfolio, token_key, business_unit_id, is_active)
 values
-  ('911349541712627',  'BlizzCool',         'Tools Place',           'TOOLS_PLACE', (select id from public.business_units where name = 'BlizzCool')),
-  ('999570263051123',  'Blizztherm',        'Tools Place',           'TOOLS_PLACE', (select id from public.business_units where name = 'Blizztherm')),
-  ('1525607822046950', 'Suministros Intec', 'CP Suministros INTEC',  'INTEC',       (select id from public.business_units where name = 'Suministros Intec')),
-  ('1008213302374939', 'CST Ibérica',       'CST Iberica',           'CST',         (select id from public.business_units where name = 'CST IBERICA')),
-  ('1517746023265320', 'Jender Ibérica',    'Jender',                'JENDER',      (select id from public.business_units where name = 'Jender'))
+  ('911349541712627',  'BlizzCool',         'Tools Place',           'TOOLS_PLACE', (select id from public.business_units where name = 'BlizzCool'),         true),
+  ('999570263051123',  'Blizztherm',        'Tools Place',           'TOOLS_PLACE', (select id from public.business_units where name = 'Blizztherm'),        true),
+  ('1525607822046950', 'Suministros Intec', 'CP Suministros INTEC',  'INTEC',       (select id from public.business_units where name = 'Suministros Intec'), true),
+  ('1341286147546643', 'CST Ibérica',       'CST Iberica',           'CST',         (select id from public.business_units where name = 'CST IBERICA'),       true),
+  ('1517746023265320', 'Jender Ibérica',    'Jender',                'JENDER',      (select id from public.business_units where name = 'Jender'),            false)
 on conflict (account_id) do update
   set name = excluded.name,
       portfolio = excluded.portfolio,
       token_key = excluded.token_key,
       business_unit_id = excluded.business_unit_id,
+      is_active = excluded.is_active,
       updated_at = now();
