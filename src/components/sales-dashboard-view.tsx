@@ -5,7 +5,10 @@ import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
 import { ConsultasIcon, ConversionIcon, EuroIcon, UsuariosIcon } from "@/components/icons";
-import { currencyFormatter, numberFormatter, formatPercent } from "@/lib/format";
+import { numberFormatter, formatPercent } from "@/lib/format";
+
+/** El ticket medio son dos o tres dígitos: ahí el céntimo sí dice algo. */
+const ticketFormatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 import { hasAnyRole, SALES_ROLES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -95,6 +98,26 @@ function bucketMargin(bucket: Bucket): { amount: number; percent: number } | nul
   return { amount: base - bucket.cost, percent: ((base - bucket.cost) / base) * 100 };
 }
 
+/**
+ * Euros sin céntimos. En un panel de dirección los decimales son ruido: nadie
+ * decide nada por setenta céntimos sobre cinco millones, y encima se comen el
+ * ancho que necesitan los nombres de los comerciales. La cifra al céntimo está
+ * en Sage, y el pie de la página ya avisa de que manda Sage.
+ */
+const euros = (value: number) => `${numberFormatter.format(Math.round(value))} €`;
+
+/**
+ * El mismo día del año anterior. Un 29 de febrero daría "2027-02-29", que no
+ * existe: Postgres responde "date/time field value out of range" y el panel se
+ * quedaría sin datos. Se recorta al último día que tenga ese mes.
+ */
+function sameDayPreviousYear(year: number, today: Date): string {
+  const month = today.getMonth();
+  const lastDay = new Date(year - 1, month + 1, 0).getDate();
+  const day = Math.min(today.getDate(), lastDay);
+  return `${year - 1}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 /** Lo que el panel señala solo, para que no haya que ir buscándolo. */
 type Finding = { tone: "bad" | "warn" | "good"; text: string };
 
@@ -108,15 +131,23 @@ export function SalesDashboardView() {
   /** Filtros que se ponen pulsando en el propio panel, como en Power BI. */
   const [channel, setChannel] = useState<string | null>(null);
   const [repKey, setRepKey] = useState<string | null>(null);
+  /** Mes a mes se ve el ritmo; acumulado se ve si se va por delante o por detrás. */
+  const [chartMode, setChartMode] = useState<"mensual" | "acumulado">("mensual");
   const [rows, setRows] = useState<SummaryRow[]>([]);
   const [previousRows, setPreviousRows] = useState<SummaryRow[]>([]);
-  /** El año anterior entero, solo para dibujarlo detrás en el gráfico. */
-  const [previousFullRows, setPreviousFullRows] = useState<SummaryRow[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
   const [lastRun, setLastRun] = useState<SyncRun | null>(null);
   /** True cuando se compara contra el mismo tramo del año anterior, no el año entero. */
   const [comparisonIsPartial, setComparisonIsPartial] = useState(false);
+  const [busy, setBusy] = useState(false);
+  /**
+   * A qué año pertenecen las filas que hay ahora mismo. Mientras llega el año
+   * nuevo se sigue pintando el viejo, y el gráfico busca los meses de ESTE año,
+   * no del que acaban de elegir: si no, se queda sin encontrar ninguno y la
+   * línea cae a cero, que es justo lo que parece un hundimiento.
+   */
+  const [dataYear, setDataYear] = useState<number | null>(null);
 
   // Quién entra y qué años hay con datos. Solo una vez.
   useEffect(() => {
@@ -130,19 +161,25 @@ export function SalesDashboardView() {
           return;
         }
         const supabase = createClient();
-        const [{ data: yearRows }, { data: companyRows }, { data: repRows }, { data: runRows }] = await Promise.all([
+        const [years, companyRows, repRows, runRows] = await Promise.all([
           supabase.rpc("sage_sales_years"),
           supabase.from("sage_companies").select("code, name, is_active").order("code"),
           supabase.from("sage_reps").select("company_code, code, name, is_person"),
           supabase.from("sage_sync_runs").select("started_at, ok, covered_from, covered_to").eq("ok", true).order("started_at", { ascending: false }).limit(1),
         ]);
+        // supabase-js no lanza cuando Postgres devuelve un error: resuelve con
+        // data a null. Sin mirar esto, un fallo del servidor se convertiría en
+        // "todavía no han llegado datos de Sage", que es mentira.
+        const failure = years.error ?? companyRows.error ?? repRows.error ?? runRows.error;
+        if (failure) throw failure;
         if (!active) return;
+        const yearRows = years.data;
         const found = (yearRows ?? []).map((row: { year: number }) => row.year);
         setYears(found);
         if (found.length > 0 && !found.includes(year)) setYear(found[0]);
-        setCompanies((companyRows ?? []) as Company[]);
-        setReps((repRows ?? []) as Rep[]);
-        setLastRun(((runRows ?? [])[0] as SyncRun) ?? null);
+        setCompanies((companyRows.data ?? []) as Company[]);
+        setReps((repRows.data ?? []) as Rep[]);
+        setLastRun(((runRows.data ?? [])[0] as SyncRun) ?? null);
         setStage("ready");
       } catch (cause) {
         console.error("No se pudo preparar el panel de ventas:", cause);
@@ -158,6 +195,8 @@ export function SalesDashboardView() {
     if (stage !== "ready") return;
     let active = true;
     void (async () => {
+      setBusy(true);
+      setError(null);
       try {
         const supabase = createClient();
         // Un año en curso se compara contra el mismo tramo del anterior, no
@@ -165,28 +204,27 @@ export function SalesDashboardView() {
         // ha vendido un 30 % menos.
         const today = new Date();
         const partial = year === today.getFullYear();
-        const sameDay = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-        const [{ data: current }, { data: before }] = await Promise.all([
+        const [current, before] = await Promise.all([
           supabase.rpc("sage_sales_summary", { p_from: `${year}-01-01`, p_to: `${year}-12-31`, p_basis: basis }),
           supabase.rpc("sage_sales_summary", {
             p_from: `${year - 1}-01-01`,
-            p_to: partial ? `${year - 1}-${sameDay}` : `${year - 1}-12-31`,
+            p_to: partial ? sameDayPreviousYear(year, today) : `${year - 1}-12-31`,
             p_basis: basis,
           }),
         ]);
-        // Para la línea de detrás hace falta el año anterior completo: con el
-        // tramo parcial se desplomaría a cero a partir de este mes.
-        const full = partial
-          ? await supabase.rpc("sage_sales_summary", { p_from: `${year - 1}-01-01`, p_to: `${year - 1}-12-31`, p_basis: basis })
-          : { data: before };
+        const failure = current.error ?? before.error;
+        if (failure) throw failure;
         if (!active) return;
         setComparisonIsPartial(partial);
-        setRows((current ?? []) as SummaryRow[]);
-        setPreviousRows((before ?? []) as SummaryRow[]);
-        setPreviousFullRows((full.data ?? []) as SummaryRow[]);
+        setRows((current.data ?? []) as SummaryRow[]);
+        setPreviousRows((before.data ?? []) as SummaryRow[]);
+        setDataYear(year);
+        setBusy(false);
       } catch (cause) {
         console.error("No se pudieron cargar las ventas:", cause);
-        if (active) setError("No se pudieron cargar las ventas de ese periodo.");
+        if (!active) return;
+        setError("No se pudieron cargar las ventas de ese periodo.");
+        setBusy(false);
       }
     })();
     return () => { active = false; };
@@ -241,6 +279,21 @@ export function SalesDashboardView() {
   }, [reps, repIdentities]);
 
   /**
+   * Un canal o un comercial elegido en un año puede no existir en otro: las
+   * series nuevas no existen antes de octubre de 2025, y un comercial puede no
+   * haber vendido nada ese año. Si el filtro se quedara puesto, el panel
+   * enseñaría un cero rotundo para un año que sí tuvo ventas, y encima el
+   * desplegable diría "Todos los canales" porque esa opción ya no está en la
+   * lista. Así que un filtro que no existe en lo cargado no se aplica.
+   */
+  const available = useMemo(() => ({
+    channels: new Set(rows.map((row) => channelLabel(row.series))),
+    reps: new Set(rows.map((row) => repOf(row).key)),
+  }), [rows, repOf]);
+  const activeChannel = channel !== null && available.channels.has(channel) ? channel : null;
+  const activeRepKey = repKey !== null && available.reps.has(repKey) ? repKey : null;
+
+  /**
    * Los filtros se aplican todos menos el del propio cuadro que se está
    * pintando: si el ranking de comerciales se filtrase a sí mismo, al pulsar
    * uno desaparecerían los demás y ya no se podría cambiar de opinión.
@@ -248,26 +301,34 @@ export function SalesDashboardView() {
   const filtered = useMemo(() => {
     const pick = (list: SummaryRow[], skip?: "channel" | "rep") => list.filter((row) => {
       if (companyCode !== "all" && row.company_code !== companyCode) return false;
-      if (skip !== "channel" && channel !== null && channelLabel(row.series) !== channel) return false;
-      if (skip !== "rep" && repKey !== null && repOf(row).key !== repKey) return false;
+      if (skip !== "channel" && activeChannel !== null && channelLabel(row.series) !== activeChannel) return false;
+      if (skip !== "rep" && activeRepKey !== null && repOf(row).key !== activeRepKey) return false;
       return true;
     });
     return {
       visible: pick(rows),
       visibleBefore: pick(previousRows),
-      visibleFullBefore: pick(previousFullRows),
       forChannels: pick(rows, "channel"),
       forReps: pick(rows, "rep"),
       forRepsBefore: pick(previousRows, "rep"),
     };
-  }, [rows, previousRows, previousFullRows, companyCode, channel, repKey, repOf]);
+  }, [rows, previousRows, companyCode, activeChannel, activeRepKey, repOf]);
 
   const { visible, visibleBefore } = filtered;
+  /** El año de las filas que hay cargadas, que mientras carga no es el elegido. */
+  const shownYear = dataYear ?? year;
 
   const current = useMemo(() => sumRows(visible), [visible]);
   const previous = useMemo(() => sumRows(visibleBefore), [visibleBefore]);
 
-  const variation = (now: number, before: number) => (before ? ((now - before) / before) * 100 : null);
+  /**
+   * Con un "antes" negativo —un comercial que ya solo arrastra abonos, un canal
+   * con margen en pérdidas— la división invierte el signo: mejorar de -10.000 a
+   * -5.000 saldría como -50 % en rojo. Y con un "antes" ridículo al lado del
+   * "ahora" sale un +499.900 % que no dice nada. En los dos casos es más honesto
+   * no comparar.
+   */
+  const variation = (now: number, before: number) => (before > 0 ? ((now - before) / before) * 100 : null);
   const delta = (value: number | null) =>
     value === null
       ? { delta: "Sin comparación", positive: true }
@@ -275,6 +336,20 @@ export function SalesDashboardView() {
 
   const currentMargin = bucketMargin(current);
   const previousMargin = bucketMargin(previous);
+  /**
+   * El coste solo vale desde noviembre de 2025, así que en 2026 el margen cubre
+   * doce meses y el de 2025 solo dos. Compararlos daría un +500 % con flecha
+   * verde, y justo en ese caso el cartel que avisa del cambio de series ya no
+   * sale, porque en 2026 no hay venta sin coste fiable. Solo se compara cuando
+   * los dos periodos cubren los mismos meses del año.
+   */
+  const trustedMonthsOf = (list: SummaryRow[]) =>
+    new Set(list.filter((row) => row.month >= COST_TRUSTED_FROM_MONTH).map((row) => row.month.slice(5)));
+  const marginSpansMatch = (() => {
+    const now = trustedMonthsOf(visible);
+    const before = trustedMonthsOf(visibleBefore);
+    return now.size > 0 && now.size === before.size && [...now].every((month) => before.has(month));
+  })();
   const withoutCostShare = current.costNet > 0 ? (current.withoutCost / current.costNet) * 100 : 0;
   /** Venta del periodo que se queda fuera del margen por venir de las series viejas. */
   const netBeforeSeriesChange = current.net - current.costNet;
@@ -291,36 +366,59 @@ export function SalesDashboardView() {
       return map;
     };
     const now = byMonth(visible);
-    const before = byMonth(filtered.visibleFullBefore);
+    // El año anterior llega recortado al mismo día que hoy, así que su mes en
+    // curso mide lo mismo que el nuestro: septiembre a medias contra septiembre
+    // a medias. Con el año anterior completo, el mes en curso siempre parecería
+    // una caída.
+    const before = byMonth(visibleBefore);
     // Un año en curso se corta en el mes de hoy: si se pintan los doce, la
     // línea cae a cero en octubre y parece que la empresa se ha hundido.
     const today = new Date();
-    const lastMonth = year === today.getFullYear() ? today.getMonth() : 11;
+    const lastMonth = shownYear === today.getFullYear() ? today.getMonth() : 11;
     const months = Array.from({ length: lastMonth + 1 }, (_, index) => {
       const suffix = String(index + 1).padStart(2, "0");
-      const bucket = now.get(`${year}-${suffix}`) ?? emptyBucket();
+      const bucket = now.get(`${shownYear}-${suffix}`) ?? emptyBucket();
       return {
         index,
         label: monthNames[index],
         bucket,
         margin: bucketMargin(bucket),
-        beforeNet: (before.get(`${year - 1}-${suffix}`) ?? emptyBucket()).net,
+        beforeNet: (before.get(`${shownYear - 1}-${suffix}`) ?? emptyBucket()).net,
       };
     });
+    // El acumulado se calcula aquí y no en el gráfico: el gráfico solo pinta lo
+    // que le den, y así el modo se puede cambiar sin volver a pedir nada.
+    let corridoAhora = 0;
+    let corridoAntes = 0;
+    let corridoMargen = 0;
+    const running = months.map((month) => {
+      corridoAhora += month.bucket.net;
+      corridoAntes += month.beforeNet;
+      corridoMargen += month.margin?.amount ?? 0;
+      return {
+        label: month.label,
+        ventas: Math.round(corridoAhora),
+        anterior: Math.round(corridoAntes),
+        margen: Math.round(corridoMargen),
+      };
+    });
+    const enCurso = shownYear === new Date().getFullYear() ? months[months.length - 1] ?? null : null;
     return {
+      enCurso,
       points: months.map((month) => ({
         label: month.label,
         ventas: Math.round(month.bucket.net),
         anterior: Math.round(month.beforeNet),
         margen: Math.round(month.margin?.amount ?? 0),
       })),
+      running,
       // La línea de margen solo se dibuja si la tienen todos los meses con venta:
       // si no, caería a cero en los de las series viejas y parecería un desplome.
       marginComplete: months.every((month) => month.bucket.net === 0 || month.margin !== null),
       hasBefore: months.some((month) => month.beforeNet > 0),
       months,
     };
-  }, [visible, filtered.visibleFullBefore, year]);
+  }, [visible, visibleBefore, shownYear]);
 
   const byCompany = useMemo(() => {
     const map = new Map<number, Bucket>();
@@ -363,11 +461,20 @@ export function SalesDashboardView() {
   /** Cuántos canales caben en la rosquilla antes de que las etiquetas se corten. */
   const TOP_CHANNELS = 8;
 
+  /** El total del mismo conjunto que alimenta el ranking, para que los avisos
+   *  y sus porcentajes hablen de la misma base que los comerciales que citan. */
+  const repsTotal = useMemo(() => sumRows(filtered.forReps), [filtered.forReps]);
+  const repsMargin = bucketMargin(repsTotal);
+
   const byChannel = useMemo(() => {
     const map = new Map<string, number>();
+    const buckets = new Map<string, Bucket>();
     for (const row of filtered.forChannels) {
       const label = channelLabel(row.series);
       map.set(label, (map.get(label) ?? 0) + Number(row.net_amount));
+      const bucket = buckets.get(label) ?? emptyBucket();
+      addRow(bucket, row);
+      buckets.set(label, bucket);
     }
     // Los abonos van en negativo y una rosquilla no los puede dibujar, así que
     // se apartan y se dicen debajo: si no, el total del centro no cuadraría con
@@ -381,7 +488,7 @@ export function SalesDashboardView() {
     const shown = tail.length > 0
       ? [...head, [`Otras ${tail.length} series`, tail.reduce((sum, [, value]) => sum + value, 0)] as [string, number]]
       : head;
-    return { shown, refunds, real: new Set(positive.map(([label]) => label)) };
+    return { shown, refunds, buckets, real: new Set(positive.map(([label]) => label)) };
   }, [filtered.forChannels]);
 
   const channelItems: DonutItem[] = byChannel.shown.map(([label, value], index) => ({
@@ -395,14 +502,17 @@ export function SalesDashboardView() {
    * si algo se está torciendo, sale escrito con su número al lado.
    */
   const findings = useMemo<Finding[]>(() => {
-    if (current.net <= 0) return [];
+    // Ojo con la base: el ranking se salta el filtro de comercial a propósito,
+    // así que si aquí se usara `current` (que sí lo respeta), al pulsar a
+    // alguien saldrían cosas como "el 112 % del total".
+    if (repsTotal.net <= 0) return [];
 
     // Solo se compara a quien ya vendía el año pasado: el que empezó este año
     // no "cae" ni "sube", es que antes no estaba.
     const comparables = byRep
       .filter((rep) => rep.isPerson && rep.beforeNet > 50000)
       .map((rep) => ({ rep, change: ((rep.bucket.net - rep.beforeNet) / rep.beforeNet) * 100 }));
-    const desde = comparisonIsPartial ? `el mismo tramo de ${year - 1}` : String(year - 1);
+    const desde = comparisonIsPartial ? `el mismo tramo de ${shownYear - 1}` : String(shownYear - 1);
 
     const caidas: Finding[] = comparables
       .filter((item) => item.change <= -15)
@@ -410,7 +520,7 @@ export function SalesDashboardView() {
       .slice(0, 2)
       .map(({ rep, change }) => ({
         tone: "bad",
-        text: `${rep.name} vende un ${formatPercent(Math.abs(change))} menos que en ${desde}: ${currencyFormatter.format(rep.bucket.net)} frente a ${currencyFormatter.format(rep.beforeNet)}.`,
+        text: `${rep.name} vende un ${formatPercent(Math.abs(change))} menos que en ${desde}: ${euros(rep.bucket.net)} frente a ${euros(rep.beforeNet)}.`,
       }));
 
     const subidas: Finding[] = comparables
@@ -419,13 +529,13 @@ export function SalesDashboardView() {
       .slice(0, 1)
       .map(({ rep, change }) => ({
         tone: "good",
-        text: `${rep.name} es quien más sube: un ${formatPercent(change)} más que en ${desde}, hasta ${currencyFormatter.format(rep.bucket.net)}.`,
+        text: `${rep.name} es quien más sube: un ${formatPercent(change)} más que en ${desde}, hasta ${euros(rep.bucket.net)}.`,
       }));
 
     // Vender mucho con poco margen es justo lo que el PDF pide vigilar.
-    const media = currentMargin?.percent ?? null;
+    const media = repsMargin?.percent ?? null;
     const flojos: Finding[] = media === null ? [] : byRep
-      .flatMap((rep) => (rep.isPerson && rep.margin && rep.bucket.net > current.net * 0.03
+      .flatMap((rep) => (rep.isPerson && rep.margin && rep.bucket.net > repsTotal.net * 0.03
         ? [{ rep, percent: rep.margin.percent }]
         : []))
       .filter((item) => item.percent <= media - 8)
@@ -433,14 +543,17 @@ export function SalesDashboardView() {
       .slice(0, 2)
       .map(({ rep, percent }) => ({
         tone: "warn",
-        text: `${rep.name} vende ${currencyFormatter.format(rep.bucket.net)} al ${formatPercent(percent)} de margen, ${formatPercent(media - percent)} por debajo de la media.`,
+        text: `${rep.name} vende ${euros(rep.bucket.net)} al ${formatPercent(percent)} de margen, ${formatPercent(media - percent)} por debajo de la media.`,
       }));
 
     // Si tres personas son media empresa, eso es un riesgo, no un dato.
     const personas = byRep.filter((rep) => rep.isPerson);
     const top3 = personas.slice(0, 3).reduce((sum, rep) => sum + rep.bucket.net, 0);
     const totalPersonas = personas.reduce((sum, rep) => sum + rep.bucket.net, 0);
-    const concentracion: Finding[] = totalPersonas > 0 && personas.length > 4 && top3 / totalPersonas >= 0.55
+    // Si alguien arrastra abonos, su venta es negativa y el total se encoge: el
+    // porcentaje se dispararía por encima de 100 sin querer decir nada.
+    const concentracion: Finding[] = totalPersonas > 0 && personas.length > 4
+      && top3 > 0 && top3 <= totalPersonas && top3 / totalPersonas >= 0.55
       ? [{
           tone: "warn",
           text: `Tres comerciales concentran el ${formatPercent((top3 / totalPersonas) * 100)} de lo que venden las personas: ${personas.slice(0, 3).map((rep) => rep.name.split(" ").slice(0, 2).join(" ")).join(", ")}.`,
@@ -449,17 +562,17 @@ export function SalesDashboardView() {
 
     // Venta que no se sabe de quién es.
     const sinAsignar = byRep.find((rep) => rep.key === "sin");
-    const huerfana: Finding[] = sinAsignar && sinAsignar.bucket.net > current.net * 0.08
+    const huerfana: Finding[] = sinAsignar && sinAsignar.bucket.net > repsTotal.net * 0.08
       ? [{
           tone: "warn",
-          text: `${currencyFormatter.format(sinAsignar.bucket.net)} de venta no tienen comercial asignado en Sage, el ${formatPercent((sinAsignar.bucket.net / current.net) * 100)} del total.`,
+          text: `${euros(sinAsignar.bucket.net)} de venta no tienen comercial asignado en Sage, el ${formatPercent((sinAsignar.bucket.net / repsTotal.net) * 100)} del total.`,
         }]
       : [];
 
     // Decir que agosto es el mes más flojo no es un hallazgo, lo es todos los
     // años. Lo que importa es el mes que vende menos que ese mismo mes del año
     // pasado. El mes en curso se deja fuera porque va por la mitad.
-    const mesEnCurso = year === new Date().getFullYear() ? new Date().getMonth() : 12;
+    const mesEnCurso = shownYear === new Date().getFullYear() ? new Date().getMonth() : 12;
     const caidaMes = monthly.months
       .filter((month) => month.index < mesEnCurso && month.beforeNet > 0 && month.bucket.net > 0)
       .map((month) => ({ month, change: ((month.bucket.net - month.beforeNet) / month.beforeNet) * 100 }))
@@ -468,11 +581,11 @@ export function SalesDashboardView() {
       .slice(0, 1);
     const mesFlojo: Finding[] = caidaMes.map(({ month, change }) => ({
       tone: "bad",
-      text: `En ${month.label} se vendió un ${formatPercent(Math.abs(change))} menos que en ${month.label} de ${year - 1}: ${currencyFormatter.format(month.bucket.net)} frente a ${currencyFormatter.format(month.beforeNet)}.`,
+      text: `En ${month.label} se vendió un ${formatPercent(Math.abs(change))} menos que en ${month.label} de ${shownYear - 1}: ${euros(month.bucket.net)} frente a ${euros(month.beforeNet)}.`,
     }));
 
     return [...caidas, ...subidas, ...flojos, ...concentracion, ...huerfana, ...mesFlojo];
-  }, [byRep, current.net, currentMargin, monthly.months, comparisonIsPartial, year]);
+  }, [byRep, repsTotal, repsMargin, monthly.months, comparisonIsPartial, shownYear]);
 
   if (stage === "denied") {
     return (
@@ -484,7 +597,7 @@ export function SalesDashboardView() {
       </div>
     );
   }
-  if (error) {
+  if (error && dataYear === null) {
     return (
       <div className="page-stack">
         <section className="panel">
@@ -510,14 +623,33 @@ export function SalesDashboardView() {
   }
 
   const isCurrentYear = year === new Date().getFullYear();
-  const comparisonHelper = comparisonIsPartial ? `frente al mismo tramo de ${year - 1}` : `frente a ${year - 1}`;
-  const companyLabel = companyCode === "all" ? "todas las sociedades" : byCompany.find((item) => item.code === companyCode)?.name ?? "";
+  const comparisonHelper = comparisonIsPartial ? `frente al mismo tramo de ${shownYear - 1}` : `frente a ${shownYear - 1}`;
+  // De `companies`, no de las ventas del año: una sociedad sin ventas en el año
+  // elegido dejaría la frase en "en ." y el chip del filtro sin texto.
+  const companyLabel = companyCode === "all"
+    ? "todas las sociedades"
+    : companies.find((item) => item.code === companyCode)?.name ?? `Sociedad ${companyCode}`;
   const repRankMax = Math.max(...byRep.map((rep) => rep.bucket.net), 1);
+  /**
+   * Los filtros puestos, incluidos los que este año no se pueden aplicar. Un
+   * canal elegido que no existe en el año que se está mirando no se aplica,
+   * pero tampoco se tira: se queda dicho y en gris. Si desapareciera sin más,
+   * al volver a un año donde sí existe reaparecería solo y nadie entendería por
+   * qué han cambiado los números.
+   */
   const activeFilters = [
-    companyCode !== "all" ? { label: companyLabel, clear: () => setCompanyCode("all") } : null,
-    channel !== null ? { label: `Canal: ${channel}`, clear: () => setChannel(null) } : null,
-    repKey !== null ? { label: `Comercial: ${byRep.find((rep) => rep.key === repKey)?.name ?? repKey}`, clear: () => setRepKey(null) } : null,
-  ].filter((item): item is { label: string; clear: () => void } => item !== null);
+    companyCode !== "all" ? { label: companyLabel, inactive: false, clear: () => setCompanyCode("all") } : null,
+    channel !== null
+      ? { label: `Canal: ${channel}`, inactive: activeChannel === null, clear: () => setChannel(null) }
+      : null,
+    repKey !== null
+      ? {
+          label: `Comercial: ${byRep.find((item) => item.key === repKey)?.name ?? repKey}`,
+          inactive: activeRepKey === null,
+          clear: () => setRepKey(null),
+        }
+      : null,
+  ].filter((item): item is { label: string; inactive: boolean; clear: () => void } => item !== null);
 
   return (
     <div className="page-stack">
@@ -538,7 +670,7 @@ export function SalesDashboardView() {
           <select className="panel-heading-select" value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Año">
             {years.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-          <select className="panel-heading-select" value={channel ?? "all"} onChange={(event) => setChannel(event.target.value === "all" ? null : event.target.value)} aria-label="Canal">
+          <select className="panel-heading-select" value={activeChannel ?? "all"} onChange={(event) => setChannel(event.target.value === "all" ? null : event.target.value)} aria-label="Canal">
             <option value="all">Todos los canales</option>
             {[...byChannel.real].sort().map((label) => <option key={label} value={label}>{label}</option>)}
           </select>
@@ -549,11 +681,31 @@ export function SalesDashboardView() {
         </div>
       </section>
 
+      {error ? (
+        <section className="panel sales-broken">
+          <div>
+            <strong>{error}</strong>
+            <span>
+              Lo que se ve abajo es de {shownYear}, que es lo último que sí llegó. Vuelve a elegir el año para
+              intentarlo otra vez.
+            </span>
+          </div>
+        </section>
+      ) : null}
+
+      {busy ? <p className="sales-busy" role="status">Actualizando…</p> : null}
+
       {activeFilters.length > 0 ? (
         <section className="sales-chips" aria-label="Filtros puestos">
           {activeFilters.map((filter) => (
-            <button key={filter.label} type="button" className="sales-chip" onClick={filter.clear}>
-              {filter.label}<span aria-hidden="true">×</span>
+            <button
+              key={filter.label}
+              type="button"
+              className={filter.inactive ? "sales-chip sales-chip-off" : "sales-chip"}
+              onClick={filter.clear}
+              title={filter.inactive ? `No se aplica: no hay nada de esto en ${shownYear}` : undefined}
+            >
+              {filter.label}{filter.inactive ? ` · no está en ${shownYear}` : ""}<span aria-hidden="true">×</span>
               <span className="sr-only">Quitar este filtro</span>
             </button>
           ))}
@@ -580,7 +732,7 @@ export function SalesDashboardView() {
       <section className="kpi-grid kpi-grid-sales">
         <KpiCard
           label="Ventas"
-          value={currencyFormatter.format(current.net)}
+          value={euros(current.net)}
           helper={comparisonHelper}
           icon={<EuroIcon />}
           tone="indigo"
@@ -588,11 +740,11 @@ export function SalesDashboardView() {
         />
         <KpiCard
           label="Margen"
-          value={currentMargin ? currencyFormatter.format(currentMargin.amount) : "No disponible"}
+          value={currentMargin ? euros(currentMargin.amount) : "No disponible"}
           helper={currentMargin && !marginCoversEverything ? "solo desde el cambio de series" : "en euros"}
           icon={<ConversionIcon />}
           tone={currentMargin ? "emerald" : "amber"}
-          {...(currentMargin && previousMargin
+          {...(currentMargin && previousMargin && marginSpansMatch
             ? delta(variation(currentMargin.amount, previousMargin.amount))
             : { delta: "Sin comparación", positive: true })}
         />
@@ -602,10 +754,10 @@ export function SalesDashboardView() {
           helper={currentMargin ? "sobre lo que tiene coste" : "el coste de las series antiguas no sirve"}
           icon={<ConversionIcon />}
           tone={currentMargin ? "emerald" : "amber"}
-          delta={currentMargin && previousMargin
+          delta={currentMargin && previousMargin && marginSpansMatch
             ? `${currentMargin.percent - previousMargin.percent >= 0 ? "+" : ""}${(currentMargin.percent - previousMargin.percent).toFixed(1).replace(".", ",")} pts`
             : "Sin comparación"}
-          positive={currentMargin && previousMargin ? currentMargin.percent >= previousMargin.percent : true}
+          positive={currentMargin && previousMargin && marginSpansMatch ? currentMargin.percent >= previousMargin.percent : true}
         />
         <KpiCard
           label="Albaranes"
@@ -615,9 +767,19 @@ export function SalesDashboardView() {
           tone="sky"
           {...delta(variation(current.documents, previous.documents))}
         />
+        {monthly.enCurso ? (
+          <KpiCard
+            label={`Va de ${monthNames[monthly.enCurso.index]}`}
+            value={euros(monthly.enCurso.bucket.net)}
+            helper={`frente a los mismos días de ${monthNames[monthly.enCurso.index]} de ${shownYear - 1}`}
+            icon={<EuroIcon />}
+            tone="sky"
+            {...delta(variation(monthly.enCurso.bucket.net, monthly.enCurso.beforeNet))}
+          />
+        ) : null}
         <KpiCard
           label="Ticket medio"
-          value={currencyFormatter.format(current.documents ? current.net / current.documents : 0)}
+          value={ticketFormatter.format(current.documents ? current.net / current.documents : 0)}
           helper="por albarán"
           icon={<UsuariosIcon />}
           tone="amber"
@@ -633,25 +795,26 @@ export function SalesDashboardView() {
           <div>
             <strong>
               {currentMargin
-                ? `El margen deja fuera ${currencyFormatter.format(netBeforeSeriesChange)} de venta anterior al cambio de series`
+                ? `El margen deja fuera ${euros(netBeforeSeriesChange)} de venta anterior a noviembre de 2025`
                 : "De este periodo no se puede sacar el margen"}
             </strong>
             <span>
               El 16 de octubre de 2025 se cambió el sistema de series en Sage. En las series antiguas el coste está
               mal grabado: suma más que la propia venta, lo que daría un margen negativo imposible. La venta de
               entonces sí es buena y está contada arriba; el coste no, así que esa parte se queda fuera del margen.
+              El corte se hace en noviembre porque octubre tiene las dos series mezcladas.
             </span>
           </div>
         </section>
       ) : null}
 
-      {current.withoutCost > 0 ? (
+      {current.withoutCost > 0 && current.costNet > 0 ? (
         <section className="panel sales-warning">
           <div>
-            <strong>{currencyFormatter.format(current.withoutCost)} de venta no tienen coste grabado en Sage</strong>
+            <strong>{euros(current.withoutCost)} de venta no tienen coste grabado en Sage</strong>
             <span>
-              Es el {formatPercent(withoutCostShare)} de la venta con la que se mide el margen, que lo deja fuera porque
-              contarla como si no costara nada lo subiría artificialmente. Con ella dentro saldría{" "}
+              Es el {formatPercent(withoutCostShare)} de la venta del periodo que tiene coste fiable. El margen la deja
+              fuera porque contarla como si no costara nada lo subiría artificialmente: con ella dentro saldría{" "}
               {formatPercent(((current.costNet - current.cost) / current.costNet) * 100)}.
             </span>
           </div>
@@ -664,19 +827,34 @@ export function SalesDashboardView() {
             <div>
               <h2>Evolución del año</h2>
               <p className="panel-subtitle">
-                {monthly.marginComplete ? "Ventas y margen por mes" : "Ventas por mes"}
-                {monthly.hasBefore ? `, con ${year - 1} detrás en gris` : ""}
+                {chartMode === "acumulado"
+                  ? `Lo que se lleva vendido a cada mes${monthly.marginComplete ? ", con el margen" : ""}`
+                  : monthly.marginComplete ? "Ventas y margen por mes" : "Ventas por mes"}
+                {monthly.hasBefore ? `, con ${shownYear - 1} detrás en gris` : ""}
               </p>
+            </div>
+            <div className="sales-switch" role="group" aria-label="Cómo se mira la evolución">
+              {(["mensual", "acumulado"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={chartMode === mode ? "is-active" : undefined}
+                  onClick={() => setChartMode(mode)}
+                  aria-pressed={chartMode === mode}
+                >
+                  {mode === "mensual" ? "Mes a mes" : "Acumulado"}
+                </button>
+              ))}
             </div>
           </div>
           <TrendChart
-            data={monthly.points}
+            data={chartMode === "acumulado" ? monthly.running : monthly.points}
             series={[
-              ...(monthly.hasBefore ? [{ key: "anterior", label: String(year - 1), color: "#cbd5e1" }] : []),
+              ...(monthly.hasBefore ? [{ key: "anterior", label: String(shownYear - 1), color: "#cbd5e1" }] : []),
               { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ...(monthly.marginComplete ? [{ key: "margen", label: "Margen", color: "#10b981" }] : []),
             ]}
-            ariaLabel={`Evolución mensual de ventas en ${year}`}
+            ariaLabel={`Evolución mensual de ventas en ${shownYear}`}
           />
         </article>
 
@@ -713,9 +891,9 @@ export function SalesDashboardView() {
                 <li key={rep.key}>
                   <button
                     type="button"
-                    className={`sales-rank-row${repKey === rep.key ? " is-active" : ""}${rep.assigned ? "" : " is-muted"}`}
-                    onClick={() => setRepKey(repKey === rep.key ? null : rep.key)}
-                    aria-pressed={repKey === rep.key}
+                    className={`sales-rank-row${activeRepKey === rep.key ? " is-active" : ""}${rep.assigned ? "" : " is-muted"}`}
+                    onClick={() => setRepKey(activeRepKey === rep.key ? null : rep.key)}
+                    aria-pressed={activeRepKey === rep.key}
                   >
                     <span className="sales-rank-name" title={rep.name}>{rep.name}</span>
                     <span className="sales-rank-track">
@@ -724,7 +902,7 @@ export function SalesDashboardView() {
                         style={{ width: `${Math.max(1.5, (Math.max(rep.bucket.net, 0) / repRankMax) * 100)}%` }}
                       />
                     </span>
-                    <strong className="sales-rank-value">{currencyFormatter.format(rep.bucket.net)}</strong>
+                    <strong className="sales-rank-value">{euros(rep.bucket.net)}</strong>
                     <span className="sales-rank-margin">
                       {rep.margin ? formatPercent(rep.margin.percent) : "—"}
                     </span>
@@ -740,8 +918,8 @@ export function SalesDashboardView() {
             <div>
               <h2>Por canal</h2>
               <p className="panel-subtitle">
-                Pulsa uno para filtrar
-                {byChannel.refunds < 0 ? `. Sin los ${currencyFormatter.format(-byChannel.refunds)} de abonos` : ""}
+                Con su margen al lado. Pulsa uno para filtrar
+                {byChannel.refunds < 0 ? `. Sin los ${euros(-byChannel.refunds)} de abonos` : ""}
               </p>
             </div>
           </div>
@@ -751,33 +929,38 @@ export function SalesDashboardView() {
             ariaLabel="Reparto de las ventas por canal"
             emptyMessage="Sin datos en este periodo."
           />
-          <div className="sales-channel-picks">
-            {byChannel.shown.filter(([label]) => byChannel.real.has(label)).map(([label]) => (
-              <button
-                key={label}
-                type="button"
-                className={`sales-chip sales-chip-pick${channel === label ? " is-active" : ""}`}
-                onClick={() => setChannel(channel === label ? null : label)}
-                aria-pressed={channel === label}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <ul className="sales-channel-list">
+            {byChannel.shown.filter(([label]) => byChannel.real.has(label)).map(([label]) => {
+              const margen = bucketMargin(byChannel.buckets.get(label) ?? emptyBucket());
+              return (
+                <li key={label}>
+                  <button
+                    type="button"
+                    className={`sales-channel-row${activeChannel === label ? " is-active" : ""}`}
+                    onClick={() => setChannel(activeChannel === label ? null : label)}
+                    aria-pressed={activeChannel === label}
+                  >
+                    <span>{label}</span>
+                    <strong>{margen ? formatPercent(margen.percent) : "—"}</strong>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </article>
 
         <article className="panel table-panel sales-board-third">
           <div className="panel-heading">
-            <div><h2>Por sociedad</h2><p className="panel-subtitle">Año {year}, sin filtrar</p></div>
+            <div><h2>Por sociedad</h2><p className="panel-subtitle">Año {shownYear}, sin filtrar</p></div>
           </div>
           <div className="table-scroll">
-            <table className="sales-rep-table">
+            <table className="sales-compact-table">
               <thead><tr><th>Sociedad</th><th>Ventas</th><th>Margen</th></tr></thead>
               <tbody>
                 {byCompany.map((company) => (
                   <tr key={company.code}>
                     <td><strong>{company.name}</strong></td>
-                    <td>{currencyFormatter.format(company.bucket.net)}</td>
+                    <td>{euros(company.bucket.net)}</td>
                     <td>{company.margin ? formatPercent(company.margin.percent) : <span className="muted">—</span>}</td>
                   </tr>
                 ))}

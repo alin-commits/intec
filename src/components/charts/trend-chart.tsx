@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { numberFormatter } from "@/lib/format";
 
 export type TrendSeries = { key: string; label: string; color: string };
@@ -10,30 +10,78 @@ type TrendChartProps = {
   ariaLabel: string;
 };
 
-const width = 720;
-const height = 250;
-const padding = { top: 18, right: 22, bottom: 38, left: 36 };
-const chartWidth = width - padding.left - padding.right;
-const chartHeight = height - padding.top - padding.bottom;
+/**
+ * El lienzo se dibuja en sus propias unidades y luego se estira al ancho que
+ * haya. En un ordenador el de 720 se ve casi a tamaño real, pero en un móvil de
+ * 390 px se encoge a la mitad y las etiquetas de los meses quedan en 6 px, que
+ * no hay quien los lea. Por eso en pantallas estrechas se usa un lienzo casi
+ * del tamaño del hueco: así el texto sale al tamaño que dice el CSS.
+ */
+const WIDE = { width: 720, height: 250, padding: { top: 18, right: 22, bottom: 38, left: 36 } };
+const NARROW = { width: 380, height: 260, padding: { top: 16, right: 12, bottom: 34, left: 40 } };
+/** Por debajo de esto el lienzo ancho ya se estaría encogiendo demasiado. */
+const NARROW_UNDER = 520;
 
-function xForIndex(index: number, count: number): number {
-  return padding.left + (index / Math.max(1, count - 1)) * chartWidth;
+type Geometry = typeof WIDE & { chartWidth: number; chartHeight: number };
+function geometryFor(narrow: boolean): Geometry {
+  const base = narrow ? NARROW : WIDE;
+  return {
+    ...base,
+    chartWidth: base.width - base.padding.left - base.padding.right,
+    chartHeight: base.height - base.padding.top - base.padding.bottom,
+  };
 }
 
-function yForValue(value: number, max: number): number {
-  return padding.top + chartHeight - (value / Math.max(1, max)) * chartHeight;
+function xForIndex(geometry: Geometry, index: number, count: number): number {
+  return geometry.padding.left + (index / Math.max(1, count - 1)) * geometry.chartWidth;
 }
 
-function pointsFor(data: TrendChartProps["data"], key: string, max: number): string {
-  return data.map((row, index) => `${xForIndex(index, data.length)},${yForValue(Number(row[key]) || 0, max)}`).join(" ");
+/**
+ * El eje va de `min` a `max`. Cuando todo es positivo, `min` es cero y sale el
+ * gráfico de siempre; cuando hay un mes en negativo —más abonos que venta, o un
+ * margen en pérdidas— el cero deja de ser el suelo y la línea baja por debajo
+ * en vez de dibujarse encima de las etiquetas de los meses.
+ */
+function yForValue(geometry: Geometry, value: number, min: number, max: number): number {
+  const span = Math.max(1, max - min);
+  return geometry.padding.top + geometry.chartHeight - ((value - min) / span) * geometry.chartHeight;
+}
+
+function pointsFor(geometry: Geometry, data: TrendChartProps["data"], key: string, min: number, max: number): string {
+  return data
+    .map((row, index) => `${xForIndex(geometry, index, data.length)},${yForValue(geometry, Number(row[key]) || 0, min, max)}`)
+    .join(" ");
 }
 
 export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const max = Math.max(...data.flatMap((row) => series.map((item) => Number(row[item.key]) || 0)), 1);
+  const [narrow, setNarrow] = useState(false);
+
+  // El gráfico se mide a sí mismo en vez de preguntar por el ancho de la
+  // ventana: así también acierta cuando está dentro de una columna estrecha de
+  // un escritorio, no solo en un móvil.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const measured = entries[0]?.contentRect.width ?? 0;
+      if (measured > 0) setNarrow(measured < NARROW_UNDER);
+    });
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, []);
+
+  const geometry = geometryFor(narrow);
+  const { width, height, padding, chartWidth } = geometry;
+  const values = data.flatMap((row) => series.map((item) => Number(row[item.key]) || 0));
+  const max = Math.max(...values, 1);
+  // El suelo es el cero salvo que haya negativos, que entonces baja hasta ellos.
+  const min = Math.min(...values, 0);
   const grid = [0, 0.25, 0.5, 0.75, 1];
-  const labelStep = Math.max(1, Math.ceil(data.length / 8));
+  // En estrecho caben menos fechas sin que se solapen unas con otras.
+  const labelStep = Math.max(1, Math.ceil(data.length / (narrow ? 4 : 8)));
 
   function handleMove(event: MouseEvent<SVGRectElement>) {
     const svg = svgRef.current;
@@ -48,8 +96,8 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
   }
 
   const hovered = hoverIndex !== null ? data[hoverIndex] : null;
-  const tooltipX = hoverIndex !== null ? xForIndex(hoverIndex, data.length) : 0;
-  const tooltipWidth = 172;
+  const tooltipX = hoverIndex !== null ? xForIndex(geometry, hoverIndex, data.length) : 0;
+  const tooltipWidth = narrow ? 150 : 172;
   const tooltipHeight = 40 + series.length * 24;
   const tooltipOnLeft = tooltipX > width - padding.right - tooltipWidth - 8;
   const tooltipLeft = tooltipOnLeft ? tooltipX - tooltipWidth - 10 : tooltipX + 10;
@@ -59,21 +107,30 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
   }
 
   return (
-    <div className="chart-wrap" aria-label={ariaLabel}>
+    <div className="chart-wrap" ref={wrapRef} aria-label={ariaLabel}>
       <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} role="img" className="chart-svg">
         {grid.map((ratio) => {
-          const y = padding.top + chartHeight * ratio;
+          const y = padding.top + geometry.chartHeight * ratio;
           return <line key={ratio} x1={padding.left} y1={y} x2={width - padding.right} y2={y} className="chart-grid" />;
         })}
+        {min < 0 ? (
+          <line
+            x1={padding.left}
+            y1={yForValue(geometry, 0, min, max)}
+            x2={width - padding.right}
+            y2={yForValue(geometry, 0, min, max)}
+            className="chart-zero"
+          />
+        ) : null}
         {series.map((item) => (
-          <polyline key={item.key} points={pointsFor(data, item.key, max)} className="chart-line" style={{ stroke: item.color, pointerEvents: "none" }} />
+          <polyline key={item.key} points={pointsFor(geometry, data, item.key, min, max)} className="chart-line" style={{ stroke: item.color, pointerEvents: "none" }} />
         ))}
         {series.map((item) => data.map((row, index) => (
           <circle
             key={`${item.key}-${index}`}
-            cx={xForIndex(index, data.length)}
-            cy={yForValue(Number(row[item.key]) || 0, max)}
-            r={hoverIndex === index ? 5 : 4}
+            cx={xForIndex(geometry, index, data.length)}
+            cy={yForValue(geometry, Number(row[item.key]) || 0, min, max)}
+            r={hoverIndex === index ? (narrow ? 4 : 5) : (narrow ? 3 : 4)}
             fill={item.color}
             stroke="white"
             strokeWidth={2}
@@ -85,7 +142,7 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
           const isFirst = index === 0;
           const isLast = index === data.length - 1;
           const anchor = isLast && !isFirst ? "end" : isFirst && !isLast ? "start" : "middle";
-          return <text key={`label-${index}`} x={xForIndex(index, data.length)} y={height - 12} textAnchor={anchor} className="chart-label" style={{ pointerEvents: "none" }}>{String(row.label)}</text>;
+          return <text key={`label-${index}`} x={xForIndex(geometry, index, data.length)} y={height - 12} textAnchor={anchor} className="chart-label" style={{ pointerEvents: "none" }}>{String(row.label)}</text>;
         })}
         {hoverIndex !== null ? (
           <line x1={tooltipX} y1={padding.top} x2={tooltipX} y2={height - padding.bottom} className="chart-crosshair" />
@@ -94,7 +151,7 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
           x={padding.left}
           y={padding.top}
           width={chartWidth}
-          height={chartHeight}
+          height={geometry.chartHeight}
           fill="#000"
           fillOpacity={0}
           style={{ pointerEvents: "all" }}
