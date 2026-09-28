@@ -1498,3 +1498,10 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sage-refresh-status.is-ok { color: var(--success); }
 .sage-refresh-status.is-bad { color: var(--danger); }
 @media (max-width: 820px) { .sage-refresh { align-items: stretch; max-width: none; width: 100%; } .sage-refresh-status { text-align: left; } }
+
+/* Meta Ads sincronizado: el bloque va antes de la tabla de entradas a mano. */
+.meta-synced { display: grid; gap: 18px; }
+.meta-synced-filters { margin: 0; }
+.meta-manual-note { padding: 14px 18px; border-color: #e8d9b0; background: linear-gradient(90deg, #fdf7e7, #fff 70%); }
+.meta-manual-note strong { display: block; font-size: 14px; color: #78350f; }
+.meta-manual-note span { display: block; margin-top: 4px; color: #92400e; font-size: 13.5px; line-height: 1.5; }

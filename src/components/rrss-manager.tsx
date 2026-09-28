@@ -12,6 +12,7 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
 import { EuroIcon, EyeIcon, HeartIcon, InboxIcon, LeadsIcon, MailIcon, MegaphoneIcon, UsuariosIcon, ConversionIcon, PlusCircleIcon } from "@/components/icons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
+import { MetaAdsSyncedPanel } from "@/components/rrss/meta-ads-synced-panel";
 import {
   RRSS_ROLES,
   adStatusLabels,
@@ -786,7 +787,23 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   );
 }
 
-function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
+function AdsTab(props: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
+  return (
+    <>
+      <MetaAdsSyncedPanel units={props.units} />
+      <section className="panel meta-manual-note">
+        <strong>Lo de abajo son las entradas que se metían a mano</strong>
+        <span>
+          Se conservan porque hay cosas que no están en Meta, pero el gasto y los leads de arriba vienen de la propia
+          API y son los buenos. No sumes los dos: son los mismos anuncios contados dos veces.
+        </span>
+      </section>
+      <AdsManualTab {...props} />
+    </>
+  );
+}
+
+function AdsManualTab({ units, entries, campaignOptions, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
