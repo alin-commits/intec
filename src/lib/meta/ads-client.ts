@@ -71,19 +71,59 @@ async function getAll(path: string, params: Record<string, string>, token: strin
   return rows;
 }
 
-/** Las campañas de una cuenta, con su estado y sus fechas. */
-export async function fetchCampaigns(accountId: string, token: string): Promise<MetaCampaign[]> {
-  const rows = await getAll(`act_${accountId}/campaigns`, {
-    fields: "id,name,objective,status,start_time,stop_time",
-  }, token);
-  return rows.map((row) => ({
+const CAMPOS_CAMPANA = "id,name,objective,status,start_time,stop_time";
+
+function aCampana(row: Record<string, unknown>): MetaCampaign {
+  return {
     id: String(row.id),
     name: String(row.name ?? "(sin nombre)"),
     objective: row.objective ? String(row.objective) : null,
     status: row.status ? String(row.status) : null,
     startedAt: row.start_time ? String(row.start_time) : null,
     stoppedAt: row.stop_time ? String(row.stop_time) : null,
-  }));
+  };
+}
+
+/**
+ * Las campañas de una cuenta.
+ *
+ * Se piden también las archivadas y las borradas: por defecto Meta solo
+ * devuelve las vivas, pero una campaña apagada hace meses sigue teniendo su
+ * gasto en el histórico, y sin su ficha ese gasto se quedaría fuera.
+ */
+export async function fetchCampaigns(accountId: string, token: string): Promise<MetaCampaign[]> {
+  const rows = await getAll(`act_${accountId}/campaigns`, {
+    fields: CAMPOS_CAMPANA,
+    filtering: JSON.stringify([{
+      field: "campaign.effective_status",
+      operator: "IN",
+      value: ["ACTIVE", "PAUSED", "DELETED", "ARCHIVED", "IN_PROCESS", "WITH_ISSUES"],
+    }]),
+  }, token);
+  return rows.map(aCampana);
+}
+
+/**
+ * Campañas sueltas por su identificador. Es la red de seguridad: si aun así
+ * aparece gasto de una campaña que el listado no devolvió, se pide su ficha en
+ * vez de tirar el dato.
+ */
+export async function fetchCampaignsByIds(ids: string[], token: string): Promise<MetaCampaign[]> {
+  const encontradas: MetaCampaign[] = [];
+  // Meta acepta varios objetos por llamada, pero no cientos.
+  for (let i = 0; i < ids.length; i += 40) {
+    const lote = ids.slice(i, i + 40);
+    const response = await fetch(`${BASE}/?ids=${lote.join(",")}&fields=${CAMPOS_CAMPANA}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => ({})) as Record<string, unknown> & { error?: { message?: string } };
+    // Que una ficha no se pueda recuperar no debe tumbar la sincronización.
+    if (!response.ok || body.error) continue;
+    for (const valor of Object.values(body)) {
+      if (valor && typeof valor === "object" && "id" in valor) encontradas.push(aCampana(valor as Record<string, unknown>));
+    }
+  }
+  return encontradas;
 }
 
 /**

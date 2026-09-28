@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthorizedCron } from "@/lib/cron-auth";
-import { fetchCampaigns, fetchDailyInsights, MetaAdsError, tokenFor } from "@/lib/meta/ads-client";
+import { fetchCampaigns, fetchCampaignsByIds, fetchDailyInsights, MetaAdsError, tokenFor, type MetaCampaign } from "@/lib/meta/ads-client";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -69,10 +69,11 @@ export async function GET(request: Request) {
       if (!token) throw new MetaAdsError(`Falta META_ADS_TOKEN_${cuenta.token_key}`);
 
       // Las campañas primero: los datos diarios apuntan a ellas.
-      const campanas = await fetchCampaigns(cuenta.account_id, token);
-      if (campanas.length > 0) {
+      const conocidas = new Set<string>();
+      const guardarCampanas = async (lista: MetaCampaign[]) => {
+        if (lista.length === 0) return;
         const { error } = await admin.from("meta_campaigns").upsert(
-          campanas.map((campana) => ({
+          lista.map((campana) => ({
             account_id: cuenta.account_id,
             meta_id: campana.id,
             name: campana.name,
@@ -85,14 +86,19 @@ export async function GET(request: Request) {
           { onConflict: "meta_id" },
         );
         if (error) throw new Error(error.message);
-      }
-      const conocidas = new Set(campanas.map((campana) => campana.id));
+        for (const campana of lista) conocidas.add(campana.id);
+      };
+
+      const campanas = await fetchCampaigns(cuenta.account_id, token);
+      await guardarCampanas(campanas);
 
       for (const ventana of ventanas(desde, hasta)) {
         const datos = await fetchDailyInsights(cuenta.account_id, token, ventana.from, ventana.to);
-        // Una campaña borrada en Meta puede seguir teniendo gasto histórico y
-        // ya no aparecer en el listado; sin su fila padre, la clave foránea
-        // rechazaría el día entero.
+        // Una campaña puede tener gasto y no venir en el listado. Antes esas
+        // filas se tiraban y faltaban 9,86 € de BlizzCool; ahora se pide su
+        // ficha para poder guardar su gasto.
+        const desconocidas = [...new Set(datos.map((fila) => fila.campaignId))].filter((id) => !conocidas.has(id));
+        if (desconocidas.length > 0) await guardarCampanas(await fetchCampaignsByIds(desconocidas, token));
         const utiles = datos.filter((fila) => conocidas.has(fila.campaignId));
         for (let i = 0; i < utiles.length; i += 500) {
           const { error } = await admin.from("meta_insights_daily").upsert(
