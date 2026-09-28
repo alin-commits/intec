@@ -6,6 +6,12 @@ type DonutChartProps = {
   ariaLabel: string;
   emptyMessage?: string;
   valueFormatter?: (value: number) => string;
+  /**
+   * Con `false` la rosquilla se dibuja sin su lista. Sirve para cuando quien la
+   * usa ya enseña esos mismos nombres al lado con algo más —un margen, un botón
+   * para filtrar—, y repetirlos sería la misma lista dos veces.
+   */
+  showLegend?: boolean;
 };
 
 const SIZE = 160;
@@ -13,7 +19,7 @@ const STROKE = 26;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin datos en este periodo.", valueFormatter }: DonutChartProps) {
+export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin datos en este periodo.", valueFormatter, showLegend = true }: DonutChartProps) {
   const visible = items.filter((item) => item.value > 0);
   const total = visible.reduce((sum, item) => sum + item.value, 0);
   const format = valueFormatter ?? ((value: number) => value.toLocaleString("es-ES"));
@@ -53,7 +59,7 @@ export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin 
       </div>
       {total === 0 ? (
         <p className="muted donut-empty">{emptyMessage}</p>
-      ) : (
+      ) : !showLegend ? null : (
         <ul className="donut-legend">
           {visible.map((item) => (
             <li key={item.label}>

@@ -435,6 +435,19 @@ export function SalesDashboardView() {
     })).sort((a, b) => b.bucket.net - a.bucket.net);
   }, [rows, companies]);
 
+  /** El margen del conjunto de sociedades, para el total de su tabla. */
+  const companiesMargin = useMemo(() => {
+    const total = emptyBucket();
+    for (const company of byCompany) {
+      total.net += company.bucket.net;
+      total.documents += company.bucket.documents;
+      total.costNet += company.bucket.costNet;
+      total.cost += company.bucket.cost;
+      total.withoutCost += company.bucket.withoutCost;
+    }
+    return bucketMargin(total);
+  }, [byCompany]);
+
   const byRep = useMemo(() => {
     const map = new Map<string, { name: string; assigned: boolean; isPerson: boolean; bucket: Bucket }>();
     for (const row of filtered.forReps) {
@@ -491,6 +504,14 @@ export function SalesDashboardView() {
     return { shown, refunds, buckets, real: new Set(positive.map(([label]) => label)) };
   }, [filtered.forChannels]);
 
+  const channelTotal = byChannel.shown.reduce((sum, [, value]) => sum + value, 0);
+  /** El margen de cada canal de verdad, que usan tanto la lista como los avisos. */
+  const channelMargins = useMemo(
+    () => [...byChannel.buckets]
+      .filter(([label]) => byChannel.real.has(label))
+      .map(([label, bucket]) => ({ label, net: bucket.net, margin: bucketMargin(bucket) })),
+    [byChannel],
+  );
   const channelItems: DonutItem[] = byChannel.shown.map(([label, value], index) => ({
     label,
     value: Math.round(value),
@@ -584,8 +605,21 @@ export function SalesDashboardView() {
       text: `En ${month.label} se vendió un ${formatPercent(Math.abs(change))} menos que en ${month.label} de ${shownYear - 1}: ${euros(month.bucket.net)} frente a ${euros(month.beforeNet)}.`,
     }));
 
-    return [...caidas, ...subidas, ...flojos, ...concentracion, ...huerfana, ...mesFlojo];
-  }, [byRep, repsTotal, repsMargin, monthly.months, comparisonIsPartial, shownYear]);
+    // Vender por un canal que apenas deja margen también es de lo que el PDF
+    // manda vigilar, y no se ve mirando solo la venta.
+    const canalFlojo = channelMargins
+      .filter((item) => item.margin !== null && item.net > repsTotal.net * 0.02)
+      .sort((a, b) => (a.margin?.percent ?? 0) - (b.margin?.percent ?? 0))
+      .slice(0, 1);
+    const canales: Finding[] = media === null ? [] : canalFlojo
+      .filter((item) => (item.margin?.percent ?? 0) <= media - 8)
+      .map((item) => ({
+        tone: "warn",
+        text: `El canal con peor margen es ${item.label}: ${euros(item.net)} al ${formatPercent(item.margin?.percent ?? 0)}.`,
+      }));
+
+    return [...caidas, ...subidas, ...flojos, ...canales, ...concentracion, ...huerfana, ...mesFlojo];
+  }, [byRep, repsTotal, repsMargin, channelMargins, monthly.months, comparisonIsPartial, shownYear]);
 
   if (stage === "denied") {
     return (
@@ -918,7 +952,7 @@ export function SalesDashboardView() {
             <div>
               <h2>Por canal</h2>
               <p className="panel-subtitle">
-                Con su margen al lado. Pulsa uno para filtrar
+                Venta, peso y margen de cada uno. Pulsa uno para filtrar
                 {byChannel.refunds < 0 ? `. Sin los ${euros(-byChannel.refunds)} de abonos` : ""}
               </p>
             </div>
@@ -928,21 +962,40 @@ export function SalesDashboardView() {
             centerLabel="ventas"
             ariaLabel="Reparto de las ventas por canal"
             emptyMessage="Sin datos en este periodo."
+            showLegend={false}
           />
+          <div className="sales-channel-head" aria-hidden="true">
+            <span /><span>Canal</span><span>Ventas</span><span>Peso</span><span>Margen</span>
+          </div>
           <ul className="sales-channel-list">
-            {byChannel.shown.filter(([label]) => byChannel.real.has(label)).map(([label]) => {
-              const margen = bucketMargin(byChannel.buckets.get(label) ?? emptyBucket());
+            {channelItems.map((item) => {
+              const real = byChannel.real.has(item.label);
+              const margen = bucketMargin(byChannel.buckets.get(item.label) ?? emptyBucket());
+              const share = channelTotal > 0 ? (item.value / channelTotal) * 100 : 0;
+              const content = (
+                <>
+                  <i style={{ background: item.color }} aria-hidden="true" />
+                  <span>{item.label}</span>
+                  <strong>{euros(item.value)}</strong>
+                  <em>{Math.round(share)}%</em>
+                  <b>{margen ? formatPercent(margen.percent) : "—"}</b>
+                </>
+              );
+              // "Otras N series" no es un canal, así que no se puede filtrar por él.
               return (
-                <li key={label}>
-                  <button
-                    type="button"
-                    className={`sales-channel-row${activeChannel === label ? " is-active" : ""}`}
-                    onClick={() => setChannel(activeChannel === label ? null : label)}
-                    aria-pressed={activeChannel === label}
-                  >
-                    <span>{label}</span>
-                    <strong>{margen ? formatPercent(margen.percent) : "—"}</strong>
-                  </button>
+                <li key={item.label}>
+                  {real ? (
+                    <button
+                      type="button"
+                      className={`sales-channel-row${activeChannel === item.label ? " is-active" : ""}`}
+                      onClick={() => setChannel(activeChannel === item.label ? null : item.label)}
+                      aria-pressed={activeChannel === item.label}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <span className="sales-channel-row is-plain">{content}</span>
+                  )}
                 </li>
               );
             })}
@@ -955,17 +1008,30 @@ export function SalesDashboardView() {
           </div>
           <div className="table-scroll">
             <table className="sales-compact-table">
-              <thead><tr><th>Sociedad</th><th>Ventas</th><th>Margen</th></tr></thead>
+              <thead><tr><th>Sociedad</th><th>Albaranes</th><th>Ventas</th><th>Margen €</th><th>Margen %</th></tr></thead>
               <tbody>
                 {byCompany.map((company) => (
                   <tr key={company.code}>
                     <td><strong>{company.name}</strong></td>
+                    <td>{numberFormatter.format(company.bucket.documents)}</td>
                     <td>{euros(company.bucket.net)}</td>
+                    <td>{company.margin ? euros(company.margin.amount) : <span className="muted">—</span>}</td>
                     <td>{company.margin ? formatPercent(company.margin.percent) : <span className="muted">—</span>}</td>
                   </tr>
                 ))}
-                {byCompany.length === 0 ? <tr><td colSpan={3} className="muted">Sin ventas en este periodo.</td></tr> : null}
+                {byCompany.length === 0 ? <tr><td colSpan={5} className="muted">Sin ventas en este periodo.</td></tr> : null}
               </tbody>
+              {byCompany.length > 1 ? (
+                <tfoot>
+                  <tr>
+                    <td><strong>Todas</strong></td>
+                    <td><strong>{numberFormatter.format(byCompany.reduce((sum, company) => sum + company.bucket.documents, 0))}</strong></td>
+                    <td><strong>{euros(byCompany.reduce((sum, company) => sum + company.bucket.net, 0))}</strong></td>
+                    <td>{companiesMargin ? <strong>{euros(companiesMargin.amount)}</strong> : <span className="muted">—</span>}</td>
+                    <td>{companiesMargin ? <strong>{formatPercent(companiesMargin.percent)}</strong> : <span className="muted">—</span>}</td>
+                  </tr>
+                </tfoot>
+              ) : null}
             </table>
           </div>
         </article>
