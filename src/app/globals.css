@@ -1431,3 +1431,60 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sales-extras-heading { margin-top: 10px; padding-top: 22px; border-top: 1px solid var(--border); }
 .sales-rank-row.is-static { cursor: default; }
 .sales-rank-row.is-static:hover { background: transparent; }
+
+/* ---- Selector de fechas propio (src/components/ui/date-field.tsx) ---- */
+
+.date-field { position: relative; width: 100%; }
+
+/* El disparador se ve igual que un input del resto de formularios: así un
+   formulario con fechas y textos mezclados no parece de dos sitios distintos. */
+.date-field-trigger { width: 100%; min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+.date-field-trigger svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--muted); }
+.date-field-trigger span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.date-field-trigger em { font-style: normal; color: var(--danger); font-weight: 700; }
+.date-field-trigger.is-empty span { color: var(--muted); }
+.date-field-trigger:hover:not(:disabled) { border-color: #d6d3f0; }
+.date-field-trigger:focus-visible, .date-field-trigger.is-open { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.date-field-trigger:disabled { background: var(--surface-muted); color: var(--muted); cursor: default; }
+
+.date-field-popup { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: 290px; max-width: min(290px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 44px rgba(15, 23, 42, .16); }
+.date-field-popup.is-up { top: auto; bottom: calc(100% + 6px); }
+
+.date-field-head { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; gap: 4px; margin-bottom: 10px; }
+.date-field-step { min-height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; transition: background-color .12s ease; }
+.date-field-step:hover { background: var(--surface-muted); color: var(--text); }
+/* Solo la primera letra: `capitalize` dejaba "Marzo De 2024", con la
+   preposición en mayúscula. */
+.date-field-title { min-height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font-size: 14px; font-weight: 800; cursor: pointer; transition: background-color .12s ease; }
+.date-field-title::first-letter { text-transform: uppercase; }
+.date-field-title:hover { background: var(--surface-muted); }
+
+.date-field-weekdays, .date-field-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.date-field-weekdays { margin-bottom: 4px; }
+.date-field-weekdays span { text-align: center; font-size: 11px; font-weight: 800; color: var(--muted); }
+.date-field-day { aspect-ratio: 1; min-height: 34px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--text); font-size: 13px; cursor: pointer; transition: background-color .12s ease, color .12s ease; }
+.date-field-day:hover:not(:disabled) { background: var(--primary-soft); }
+.date-field-day.is-outside { color: #cbd5e1; }
+/* El día de hoy se marca con un punto, no con un relleno: el relleno es para el
+   día elegido, y con los dos rellenos no se distinguía cuál era cuál. */
+.date-field-day.is-today { font-weight: 800; position: relative; }
+.date-field-day.is-today::after { content: ""; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
+.date-field-day.is-selected, .date-field-day.is-selected:hover { background: var(--primary); color: white; font-weight: 700; }
+.date-field-day.is-selected.is-today::after { background: white; }
+.date-field-day:disabled { color: #dbe1ea; cursor: default; }
+
+.date-field-months { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.date-field-cell { min-height: 42px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; text-transform: capitalize; transition: background-color .12s ease, color .12s ease; }
+.date-field-cell:hover:not(:disabled) { background: var(--primary-soft); }
+.date-field-cell.is-selected { background: var(--primary); color: white; font-weight: 700; }
+.date-field-cell:disabled { color: #dbe1ea; cursor: default; }
+
+.date-field-foot { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.date-field-shortcut { flex: 1; min-height: 36px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; transition: border-color .12s ease, background-color .12s ease; }
+.date-field-shortcut:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.date-field-shortcut:disabled { color: var(--muted); cursor: default; }
+
+@media (max-width: 560px) {
+  .date-field-popup { width: 100%; left: 0; right: 0; }
+  .date-field-day { min-height: 40px; }
+}

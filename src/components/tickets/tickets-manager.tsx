@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { DateField, MonthField } from "@/components/ui/date-field";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
@@ -411,7 +412,7 @@ export function TicketsManager() {
           </select>
         </label>
         {chartMode === "month" ? (
-          <label><span>Mes</span><input type="month" value={chartMonth} max={monthKey()} onChange={(event) => setChartMonth(event.target.value)} /></label>
+          <label><span>Mes</span><MonthField value={chartMonth} max={monthKey()} onChange={(value) => setChartMonth(value)} /></label>
         ) : null}
         {chartMode === "year" ? (
           <label><span>Año</span>
@@ -563,7 +564,7 @@ export function TicketsManager() {
           <div className="form-grid export-range-fields">
             <label>
               <span>Mes</span>
-              <input type="month" value={exportMonth} max={monthKey()} onChange={(event) => setExportMonth(event.target.value || monthKey())} />
+              <MonthField value={exportMonth} max={monthKey()} onChange={(value) => setExportMonth(value || monthKey())} />
             </label>
           </div>
         ) : null}
@@ -572,11 +573,11 @@ export function TicketsManager() {
           <div className="form-grid export-range-fields">
             <label>
               <span>Desde</span>
-              <input type="date" value={exportFrom} max={exportTo || undefined} onChange={(event) => setExportFrom(event.target.value)} />
+              <DateField value={exportFrom} max={exportTo || undefined} onChange={(value) => setExportFrom(value)} />
             </label>
             <label>
               <span>Hasta</span>
-              <input type="date" value={exportTo} min={exportFrom || undefined} onChange={(event) => setExportTo(event.target.value)} />
+              <DateField value={exportTo} min={exportFrom || undefined} onChange={(value) => setExportTo(value)} />
             </label>
           </div>
         ) : null}

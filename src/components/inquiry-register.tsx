@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
@@ -1028,7 +1029,7 @@ export function InquiryRegister() {
             </select>
           </label>
           {viewMode === "month" ? (
-            <label><span>Mes</span><input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event) => setSelectedMonth(event.target.value)} /></label>
+            <label><span>Mes</span><MonthField value={selectedMonth} max={currentMonthKey} onChange={(value) => setSelectedMonth(value)} /></label>
           ) : (
             <label>
               <span>Año</span>
@@ -1427,7 +1428,7 @@ export function InquiryRegister() {
                 </select>
               </label>
               <label><span>Semana (elige cualquier día)</span>
-                <input type="date" value={weeklyDate} max={todayKey()} onChange={(event) => setWeeklyDate(event.target.value)} />
+                <DateField value={weeklyDate} max={todayKey()} onChange={(value) => setWeeklyDate(value)} />
               </label>
             </div>
             <p className="muted">Semana del {formatDate(isoWeekStart(weeklyDate))}. Indica cuántas ventas de cada tipo y su valor total en euros.</p>
@@ -1456,7 +1457,7 @@ export function InquiryRegister() {
             </select>
           </label>
           <label><span>Semana (elige cualquier día)</span>
-            <input type="date" value={weeklyInquiryDate} max={todayKey()} onChange={(event) => setWeeklyInquiryDate(event.target.value)} />
+            <DateField value={weeklyInquiryDate} max={todayKey()} onChange={(value) => setWeeklyInquiryDate(value)} />
           </label>
         </div>
         <p className="muted">Semana del {formatDate(isoWeekStart(weeklyInquiryDate))}. Indica cuántas consultas hubo de cada canal.</p>

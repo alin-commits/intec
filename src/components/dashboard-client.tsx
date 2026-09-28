@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { MonthField } from "@/components/ui/date-field";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoCrmContacts, demoInquiries, demoLeads, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
 import { CONSULTAS_ROLES, CRM_ROLES, LEADS_ROLES, campaignStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, leadStatusLabels } from "@/lib/constants";
 import { dateKeyInMadrid, monthKey, monthKeyInMadrid, monthLabel, monthShortLabel, previousMonthKey, previousYearMonthKey, yearOfMonth, yearRange } from "@/lib/dates";
@@ -617,7 +618,7 @@ export function DashboardClient() {
           {viewMode === "month" ? (
             <label>
               <span>Mes</span>
-              <input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event: ChangeEvent<HTMLInputElement>) => setSelectedMonth(event.target.value)} />
+              <MonthField value={selectedMonth} max={currentMonthKey} onChange={(value) => setSelectedMonth(value)} />
             </label>
           ) : (
             <label>

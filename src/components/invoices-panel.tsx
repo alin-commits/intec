@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { DateField } from "@/components/ui/date-field";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { Modal } from "@/components/ui/modal";
@@ -613,7 +614,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
           <div className="form-grid">
             <label><span>Proveedor *</span><input value={draft.supplier} readOnly={!canEdit} maxLength={160} onChange={(event) => updateDraft("supplier", event.target.value)} required /></label>
             <label><span>Nº de factura</span><input value={draft.invoiceNumber ?? ""} readOnly={!canEdit} maxLength={80} onChange={(event) => updateDraft("invoiceNumber", event.target.value)} /></label>
-            <label><span>Fecha de la factura *</span><input type="date" value={draft.invoiceDate} readOnly={!canEdit} onChange={(event) => updateDraft("invoiceDate", event.target.value)} required /></label>
+            <label><span>Fecha de la factura *</span><DateField value={draft.invoiceDate} readOnly={!canEdit} onChange={(value) => updateDraft("invoiceDate", value)} required /></label>
             <label><span>Concepto</span><input value={draft.concept ?? ""} readOnly={!canEdit} maxLength={200} onChange={(event) => updateDraft("concept", event.target.value)} /></label>
             <label><span>Base imponible (€) *</span><input type="number" min="0" step="0.01" value={draft.baseAmount} readOnly={!canEdit} onChange={(event) => updateAmount("baseAmount", Number(event.target.value) || 0)} required /></label>
             <label><span>IVA (€)</span><input type="number" min="0" step="0.01" value={draft.vatAmount} readOnly={!canEdit} onChange={(event) => updateAmount("vatAmount", Number(event.target.value) || 0)} /></label>

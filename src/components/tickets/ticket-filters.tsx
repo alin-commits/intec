@@ -1,4 +1,5 @@
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
+import { DateField } from "@/components/ui/date-field";
 import { ticketCategoryLabels, ticketCategoryOrder, ticketPriorityLabels, ticketPriorityOrder, ticketStatusLabels, ticketStatusOrder } from "@/lib/tickets/constants";
 import type { TicketCategory, TicketPriority, TicketStatus } from "@/lib/tickets/types";
 
@@ -72,8 +73,8 @@ export function TicketFilters({ filters, departments, resultCount, onChange }: T
             {departments.map((department) => <option key={department} value={department}>{department}</option>)}
           </select>
         </label>
-        <label><span>Desde</span><input type="date" value={filters.dateFrom} onChange={(event) => set("dateFrom", event.target.value)} /></label>
-        <label><span>Hasta</span><input type="date" value={filters.dateTo} onChange={(event) => set("dateTo", event.target.value)} /></label>
+        <label><span>Desde</span><DateField value={filters.dateFrom} onChange={(value) => set("dateFrom", value)} /></label>
+        <label><span>Hasta</span><DateField value={filters.dateTo} onChange={(value) => set("dateTo", value)} /></label>
         <label className="ticket-filters-toggle"><span>Solo abiertos</span>
           <input type="checkbox" checked={filters.onlyOpen} onChange={(event) => set("onlyOpen", event.target.checked)} />
         </label>

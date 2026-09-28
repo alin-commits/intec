@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { DateField, MonthField } from "@/components/ui/date-field";
 import { BarChart } from "@/components/charts/bar-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
@@ -640,7 +641,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           </select>
         </label>
         {viewMode === "month" ? (
-          <label><span>Mes</span><input type="month" value={selectedMonth} max={currentMonthKey} onChange={(event) => setSelectedMonth(event.target.value)} /></label>
+          <label><span>Mes</span><MonthField value={selectedMonth} max={currentMonthKey} onChange={(value) => setSelectedMonth(value)} /></label>
         ) : (
           <label><span>Año</span><input type="number" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value) || selectedYear)} /></label>
         )}
@@ -707,8 +708,8 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
             <option value="all">Todas</option>
             {socialNetworkOrder.map((network) => <option key={network} value={network}>{socialNetworkLabels[network]}</option>)}
           </select></label>
-          <label><span>Desde</span><input type="month" value={monthFrom} onChange={(event) => setMonthFrom(event.target.value)} /></label>
-          <label><span>Hasta</span><input type="month" value={monthTo} onChange={(event) => setMonthTo(event.target.value)} /></label>
+          <label><span>Desde</span><MonthField value={monthFrom} onChange={(value) => setMonthFrom(value)} /></label>
+          <label><span>Hasta</span><MonthField value={monthTo} onChange={(value) => setMonthTo(value)} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -767,7 +768,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           <div className="form-grid">
             <label><span>Marca *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => updateDraft("businessUnitId", event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
             <label><span>Red *</span><select value={draft.network} disabled={!canEdit} onChange={(event) => updateDraft("network", event.target.value as SocialNetwork)}>{socialNetworkOrder.map((network) => <option key={network} value={network}>{socialNetworkLabels[network]}</option>)}</select></label>
-            <label><span>Mes *</span><input type="month" value={draft.periodMonth} max={monthKey()} readOnly={!canEdit} onChange={(event) => updateDraft("periodMonth", event.target.value)} /></label>
+            <label><span>Mes *</span><MonthField value={draft.periodMonth} max={monthKey()} readOnly={!canEdit} onChange={(value) => updateDraft("periodMonth", value)} /></label>
             <label><span>Seguidores fin de mes</span><input type="number" min="0" step="1" value={draft.followersEnd} readOnly={!canEdit} onChange={(event) => updateDraft("followersEnd", Number(event.target.value) || 0)} /></label>
             <label><span>Nuevos seguidores</span><input type="number" step="1" value={draft.newFollowers} readOnly={!canEdit} onChange={(event) => updateDraft("newFollowers", Number(event.target.value) || 0)} /></label>
             <label><span>Publicaciones</span><input type="number" min="0" step="1" value={draft.posts} readOnly={!canEdit} onChange={(event) => updateDraft("posts", Number(event.target.value) || 0)} /></label>
@@ -1010,8 +1011,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
             <option value="all">Todos</option>
             {Object.entries(adStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select></label>
-          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
-          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+          <label><span>Desde</span><DateField value={dateFrom} onChange={(value) => setDateFrom(value)} /></label>
+          <label><span>Hasta</span><DateField value={dateTo} onChange={(value) => setDateTo(value)} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -1081,8 +1082,8 @@ function AdsTab({ units, entries, campaignOptions, canEdit, configured, busy, se
             <label><span>Anuncio</span><input value={draft.adName ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("adName", event.target.value)} /></label>
             <label><span>Objetivo</span><input value={draft.objective ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("objective", event.target.value)} placeholder="Leads, Conversiones, Tráfico…" /></label>
             <label><span>Estado</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as AdCampaignStatus)}>{Object.entries(adStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label><span>Fecha inicio</span><input type="date" value={draft.startDate ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("startDate", event.target.value || null)} /></label>
-            <label><span>Fecha fin</span><input type="date" value={draft.endDate ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("endDate", event.target.value || null)} /></label>
+            <label><span>Fecha inicio</span><DateField value={draft.startDate ?? ""} readOnly={!canEdit} onChange={(value) => updateDraft("startDate", value || null)} /></label>
+            <label><span>Fecha fin</span><DateField value={draft.endDate ?? ""} readOnly={!canEdit} onChange={(value) => updateDraft("endDate", value || null)} /></label>
             <label><span>Importe gastado (€)</span><input type="number" min="0" step="0.01" value={draft.amountSpent} readOnly={!canEdit} onChange={(event) => updateDraft("amountSpent", Number(event.target.value) || 0)} /></label>
             <label><span>Impresiones</span><input type="number" min="0" step="1" value={draft.impressions} readOnly={!canEdit} onChange={(event) => updateDraft("impressions", Number(event.target.value) || 0)} /></label>
             <label><span>Clics en el enlace</span><input type="number" min="0" step="1" value={draft.linkClicks} readOnly={!canEdit} onChange={(event) => updateDraft("linkClicks", Number(event.target.value) || 0)} /></label>
@@ -1300,8 +1301,8 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
             <option value="all">Todos</option>
             {mailingTypeOrder.map((type) => <option key={type} value={type}>{mailingTypeLabels[type]}</option>)}
           </select></label>
-          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
-          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+          <label><span>Desde</span><DateField value={dateFrom} onChange={(value) => setDateFrom(value)} /></label>
+          <label><span>Hasta</span><DateField value={dateTo} onChange={(value) => setDateTo(value)} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -1361,7 +1362,7 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
             <label><span>Marca *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => updateDraft("businessUnitId", event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
             <label><span>Nombre de campaña *</span><input value={draft.campaignName} readOnly={!canEdit} onChange={(event) => updateDraft("campaignName", event.target.value)} /></label>
             <label><span>Tipo</span><select value={draft.campaignType} disabled={!canEdit} onChange={(event) => updateDraft("campaignType", event.target.value as MailingCampaignType)}>{mailingTypeOrder.map((type) => <option key={type} value={type}>{mailingTypeLabels[type]}</option>)}</select></label>
-            <label><span>Fecha de envío</span><input type="date" value={draft.sentDate} readOnly={!canEdit} onChange={(event) => updateDraft("sentDate", event.target.value)} /></label>
+            <label><span>Fecha de envío</span><DateField value={draft.sentDate} readOnly={!canEdit} onChange={(value) => updateDraft("sentDate", value)} /></label>
             <label><span>Enviados</span><input type="number" min="0" step="1" value={draft.sentCount} readOnly={!canEdit} onChange={(event) => updateDraft("sentCount", Number(event.target.value) || 0)} /></label>
             <label><span>Entregados</span><input type="number" min="0" step="1" value={draft.deliveredCount} readOnly={!canEdit} onChange={(event) => updateDraft("deliveredCount", Number(event.target.value) || 0)} /></label>
             <label><span>Aperturas</span><input type="number" min="0" step="1" value={draft.opens} readOnly={!canEdit} onChange={(event) => updateDraft("opens", Number(event.target.value) || 0)} /></label>

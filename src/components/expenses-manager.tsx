@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { DateField } from "@/components/ui/date-field";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { TablePagination } from "@/components/ui/table-pagination";
@@ -679,7 +680,7 @@ export function ExpensesManager() {
               </select></label>
             ) : null}
             <label><span>{draft.kind === "subscription" ? "Importe por periodo (€) *" : "Importe (€) *"}</span><input type="number" min="0" step="0.01" value={draft.amount} readOnly={!canEdit} onChange={(event) => updateDraft("amount", Number(event.target.value) || 0)} required /></label>
-            <label><span>{draft.kind === "subscription" ? "Fecha del primer cargo *" : "Fecha del gasto *"}</span><input type="date" value={draft.startDate} readOnly={!canEdit} onChange={(event) => updateDraft("startDate", event.target.value)} required /></label>
+            <label><span>{draft.kind === "subscription" ? "Fecha del primer cargo *" : "Fecha del gasto *"}</span><DateField value={draft.startDate} readOnly={!canEdit} onChange={(value) => updateDraft("startDate", value)} required /></label>
             <label><span>Categoría</span><select value={draft.category} disabled={!canEdit} onChange={(event) => updateDraft("category", event.target.value as ExpenseCategory)}>
               {Object.entries(expenseCategoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
@@ -696,7 +697,7 @@ export function ExpensesManager() {
               </select></label>
             ) : null}
             {draft.kind === "subscription" && draft.status === "cancelled" ? (
-              <label><span>Fecha de baja</span><input type="date" value={draft.cancelledOn ?? today} readOnly={!canEdit} onChange={(event) => updateDraft("cancelledOn", event.target.value || today)} /></label>
+              <label><span>Fecha de baja</span><DateField value={draft.cancelledOn ?? today} readOnly={!canEdit} onChange={(value) => updateDraft("cancelledOn", value || today)} /></label>
             ) : null}
             <label className="form-field-wide"><span>Notas</span><textarea rows={3} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} placeholder="Usuarios incluidos, quién lo usa, cuándo revisar…" /></label>
           </div>

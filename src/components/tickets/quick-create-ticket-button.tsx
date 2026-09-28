@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { DateField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ticketCategoryLabels, ticketCategoryOrder, ticketPriorityLabels, ticketPriorityOrder } from "@/lib/tickets/constants";
@@ -76,7 +77,7 @@ export function QuickCreateTicketButton({ visible, onCreated }: { visible: boole
                 {ticketPriorityOrder.map((value) => <option key={value} value={value}>{ticketPriorityLabels[value]}</option>)}
               </select>
             </label>
-            <label><span>Fecha</span><input type="date" value={occurredOn} max={today()} onChange={(event) => setOccurredOn(event.target.value)} /></label>
+            <label><span>Fecha</span><DateField value={occurredOn} max={today()} onChange={(value) => setOccurredOn(value)} /></label>
             <label className="form-field-wide"><span>Descripción</span><textarea rows={4} value={description} onChange={(event) => setDescription(event.target.value)} maxLength={4000} /></label>
           </div>
           <div className="modal-actions">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { DateField } from "@/components/ui/date-field";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
@@ -438,8 +439,8 @@ export function LeadsTable() {
             <option value="unassigned">Sin asignar</option>
             {team.filter((member) => member.roles.includes("commercial")).map((member) => <option key={member.id} value={member.id}>{member.fullName}</option>)}
           </select></label>
-          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateFrom(event.target.value)} /></label>
-          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
+          <label><span>Desde</span><DateField value={dateFrom} onChange={(value) => setDateFrom(value)} /></label>
+          <label><span>Hasta</span><DateField value={dateTo} onChange={(value) => setDateTo(value)} /></label>
         </div>
       </CollapsibleFilters>
       <section className="kpi-grid">

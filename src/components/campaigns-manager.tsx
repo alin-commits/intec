@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { DateField } from "@/components/ui/date-field";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -405,8 +406,8 @@ export function CampaignsManager() {
             <option value="all">Todos</option>
             {Object.entries(campaignStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select></label>
-          <label><span>Desde</span><input type="date" value={dateFrom} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateFrom(event.target.value)} /></label>
-          <label><span>Hasta</span><input type="date" value={dateTo} onChange={(event: ChangeEvent<HTMLInputElement>) => setDateTo(event.target.value)} /></label>
+          <label><span>Desde</span><DateField value={dateFrom} onChange={(value) => setDateFrom(value)} /></label>
+          <label><span>Hasta</span><DateField value={dateTo} onChange={(value) => setDateTo(value)} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -480,8 +481,8 @@ export function CampaignsManager() {
             <label><span>Nombre *</span><input value={draft.name} readOnly={!canEdit} onChange={(event) => updateDraft("name", event.target.value)} /></label>
             <label><span>Canal</span><input value={draft.channel ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("channel", event.target.value)} placeholder="Email, Web, RRSS…" /></label>
             <label><span>Estado</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as CampaignStatus)}>{Object.entries(campaignStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label><span>Fecha inicio</span><input type="date" value={draft.startDate ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("startDate", event.target.value || null)} /></label>
-            <label><span>Fecha fin</span><input type="date" value={draft.endDate ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("endDate", event.target.value || null)} /></label>
+            <label><span>Fecha inicio</span><DateField value={draft.startDate ?? ""} readOnly={!canEdit} onChange={(value) => updateDraft("startDate", value || null)} /></label>
+            <label><span>Fecha fin</span><DateField value={draft.endDate ?? ""} readOnly={!canEdit} onChange={(value) => updateDraft("endDate", value || null)} /></label>
             <label><span>Presupuesto</span><input type="number" min="0" step="0.01" value={draft.budget ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("budget", event.target.value ? Number(event.target.value) : null)} /></label>
             <label><span>Ventas directas (sin lead)</span><input type="number" min="0" step="1" value={draft.directSalesCount} readOnly={!canEdit} onChange={(event) => updateDraft("directSalesCount", Number(event.target.value) || 0)} /></label>
             <label><span>Valor de ventas directas</span><input type="number" min="0" step="0.01" value={draft.directSaleValue} readOnly={!canEdit} onChange={(event) => updateDraft("directSaleValue", Number(event.target.value) || 0)} /></label>

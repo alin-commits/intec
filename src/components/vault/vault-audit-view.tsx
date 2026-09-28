@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { DateField } from "@/components/ui/date-field";
 import { useEffect, useMemo, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { VaultTabs } from "@/components/vault/vault-tabs";
@@ -122,8 +123,8 @@ export function VaultAuditView() {
             <option value="all">Todas</option>
             {(data?.people ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select></label>
-          <label><span>Desde</span><input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(0); }} /></label>
-          <label><span>Hasta</span><input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(0); }} /></label>
+          <label><span>Desde</span><DateField value={from} onChange={(value) => { setFrom(value); setPage(0); }} /></label>
+          <label><span>Hasta</span><DateField value={to} onChange={(value) => { setTo(value); setPage(0); }} /></label>
         </div>
         <div className="table-scroll vault-audit-scroll">
           <table>
