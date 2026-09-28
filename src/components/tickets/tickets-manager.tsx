@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
-import { inDateKeyRange, monthKey, monthKeyInMadrid, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, yearOfMonth, yearRange } from "@/lib/dates";
+import { dateKeyInMadrid, inDateKeyRange, madridMidnightIso, monthKey, monthKeyInMadrid, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, shiftDateKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -22,6 +22,7 @@ import { EmptyState } from "./empty-state";
 import { ItNotesPanel } from "./it-notes-panel";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
+import { Modal } from "@/components/ui/modal";
 
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
 const PAGE_SIZE = 5;
@@ -51,6 +52,17 @@ export function TicketsManager() {
   const [chartMonth, setChartMonth] = useState(() => monthKey());
   const [chartYear, setChartYear] = useState(() => yearOfMonth(monthKey()));
   const [tab, setTab] = useState<"tickets" | "notes">("tickets");
+  /**
+   * Qué se está exportando, o null si no hay nada a medias. Antes el informe
+   * salía con el periodo del selector de arriba del gráfico, que no se ve al
+   * pulsar "Exportar": se pedía un PDF creyendo que era de un mes y salía del
+   * año entero. Ahora se pregunta antes de generarlo.
+   */
+  const [exportTarget, setExportTarget] = useState<"csv" | "pdf" | null>(null);
+  const [exportMode, setExportMode] = useState<"mes" | "rango" | "actual">("mes");
+  const [exportMonth, setExportMonth] = useState(() => monthKey());
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
 
   async function loadTickets() {
     const supabase = createClient();
@@ -103,7 +115,8 @@ export function TicketsManager() {
     });
   }, [tickets, filters, sort]);
 
-  // Un único selector de "Periodo" gobierna tarjetas, gráficos y exportación.
+  // El selector de "Periodo" gobierna tarjetas y gráficos. El informe tiene el
+  // suyo propio, que se pregunta al exportar.
   const period = useMemo(() => {
     if (chartMode === "month") return monthRange(chartMonth);
     if (chartMode === "year") return yearRange(chartYear);
@@ -111,13 +124,41 @@ export function TicketsManager() {
   }, [chartMode, chartMonth, chartYear]);
   const periodLabel = chartMode === "month" ? monthLabel(chartMonth) : chartMode === "year" ? String(chartYear) : "todo el histórico";
   const counts = useMemo(() => computeTicketDashboardCounts(visibleTickets, period, tickets), [visibleTickets, period, tickets]);
-  // Lo que se exporta (CSV/PDF) sigue el mismo periodo elegido arriba: "Todo
-  // el histórico" exporta todo, un mes/año concreto exporta solo ese tramo.
-  const exportTickets = useMemo(
-    () => (period ? visibleTickets.filter((t) => t.createdAt >= period.start && t.createdAt < period.end) : visibleTickets),
-    [visibleTickets, period],
-  );
 
+  /**
+   * El tramo elegido en el diálogo de exportar. "Lo que se ve ahora" respeta el
+   * periodo del selector de arriba, que es como se comportaba antes.
+   */
+  const exportSelection = useMemo(() => {
+    if (exportMode === "mes") {
+      const { start, end } = monthRange(exportMonth);
+      return { period: { start, end }, label: monthLabel(exportMonth), phrase: `de ${monthLabel(exportMonth)}`, slug: exportMonth, valid: true as const };
+    }
+    if (exportMode === "rango") {
+      const ready = Boolean(exportFrom) && Boolean(exportTo) && exportFrom <= exportTo;
+      if (!ready) return { period: undefined, label: "", phrase: "", slug: "", valid: false as const };
+      const dayStart = (key: string) => {
+        const [year, month, day] = key.split("-").map(Number);
+        return madridMidnightIso(year, month - 1, day);
+      };
+      return {
+        // El "hasta" es inclusivo para quien lo escribe, así que el corte se
+        // pone en la medianoche del día siguiente.
+        period: { start: dayStart(exportFrom), end: dayStart(shiftDateKey(exportTo, 1)) },
+        label: `del ${formatDate(exportFrom)} al ${formatDate(exportTo)}`,
+        phrase: `del ${formatDate(exportFrom)} al ${formatDate(exportTo)}`,
+        slug: `${exportFrom}_${exportTo}`,
+        valid: true as const,
+      };
+    }
+    return { period, label: periodLabel, phrase: `de ${periodLabel}`, slug: chartMode === "month" ? chartMonth : chartMode === "year" ? String(chartYear) : "historico", valid: true as const };
+  }, [exportMode, exportMonth, exportFrom, exportTo, period, periodLabel, chartMode, chartMonth, chartYear]);
+
+  const exportSelectionTickets = useMemo(() => {
+    const range = exportSelection.period;
+    if (!range) return visibleTickets;
+    return visibleTickets.filter((ticket) => ticket.createdAt >= range.start && ticket.createdAt < range.end);
+  }, [visibleTickets, exportSelection]);
 
   const activeTickets = useMemo(() => visibleTickets.filter((ticket) => OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
   const completedTickets = useMemo(() => visibleTickets.filter((ticket) => !OPEN_TICKET_STATUSES.includes(ticket.status)), [visibleTickets]);
@@ -158,22 +199,50 @@ export function TicketsManager() {
 
   const monthlyChartData = useMemo(() => monthlyCounts.map(({ label, count }) => ({ label, count })), [monthlyCounts]);
 
+  /**
+   * El desglose que acompaña al informe. Un solo mes se parte por semanas, que
+   * si no sería una única fila que repite el total; varios meses, por meses.
+   */
+  function exportBreakdown(): { label: string; count: number }[] {
+    const range = exportSelection.period;
+    if (range) {
+      const firstMonth = monthKeyInMadrid(range.start);
+      const lastDay = shiftDateKey(dateKeyInMadrid(range.end), -1);
+      if (firstMonth === lastDay.slice(0, 7)) {
+        return monthWeekBuckets(firstMonth).map((bucket) => ({
+          label: `Semana ${bucket.label}`,
+          count: exportSelectionTickets.filter((ticket) => ticket.createdAt >= bucket.start && ticket.createdAt < bucket.end).length,
+        }));
+      }
+    }
+    const byMonth = new Map<string, number>();
+    for (const ticket of exportSelectionTickets) {
+      const month = monthKeyInMadrid(ticket.createdAt);
+      byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
+    }
+    return Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, count]) => ({ label: monthShortLabel(month), count }));
+  }
+
   function exportReportCsv() {
+    const label = exportSelection.label;
+    const exportCounts = computeTicketDashboardCounts(visibleTickets, exportSelection.period, tickets);
     const summary: CsvSummaryItem[] = [
-      { label: `Tickets exportados (${periodLabel})`, value: exportTickets.length },
-      { label: `Tickets nuevos (${periodLabel})`, value: counts.newCount },
-      { label: `Tickets abiertos (${periodLabel})`, value: counts.openCount },
-      { label: `En curso (${periodLabel})`, value: counts.inProgressCount },
-      { label: `Pendientes (${periodLabel})`, value: counts.pendingCount },
-      { label: `Resueltos (${periodLabel})`, value: counts.resolvedPeriodCount },
-      { label: "Resueltos en total", value: counts.resolvedTotalCount },
-      { label: `Tardaron +3 días (${periodLabel})`, value: counts.staleCount },
-      { label: `Prioridad alta (${periodLabel})`, value: counts.highPriorityCount },
-      { label: `Prioridad media (${periodLabel})`, value: counts.mediumPriorityCount },
-      { label: `Prioridad baja (${periodLabel})`, value: counts.lowPriorityCount },
-      ...monthlyCounts.map(({ label, count }) => ({ label: `Tickets en ${label}`, value: count })),
+      { label: `Tickets exportados (${label})`, value: exportSelectionTickets.length },
+      { label: `Tickets nuevos (${label})`, value: exportCounts.newCount },
+      { label: `Tickets abiertos (${label})`, value: exportCounts.openCount },
+      { label: `En curso (${label})`, value: exportCounts.inProgressCount },
+      { label: `Pendientes (${label})`, value: exportCounts.pendingCount },
+      { label: `Resueltos (${label})`, value: exportCounts.resolvedPeriodCount },
+      { label: "Resueltos en total", value: exportCounts.resolvedTotalCount },
+      { label: `Tardaron +3 días (${label})`, value: exportCounts.staleCount },
+      { label: `Prioridad alta (${label})`, value: exportCounts.highPriorityCount },
+      { label: `Prioridad media (${label})`, value: exportCounts.mediumPriorityCount },
+      { label: `Prioridad baja (${label})`, value: exportCounts.lowPriorityCount },
+      ...exportBreakdown().map(({ label: bucket, count }) => ({ label: `Tickets en ${bucket}`, value: count })),
     ];
-    downloadCsvReport(`informe_tickets_${new Date().toISOString().slice(0, 10)}.csv`, summary, exportTickets, [
+    downloadCsvReport(`informe_tickets_${exportSelection.slug}.csv`, summary, exportSelectionTickets, [
       { header: "Ticket", value: (ticket) => ticket.ticketNumber },
       { header: "Fecha", value: (ticket) => formatDate(ticket.createdAt) },
       { header: "Solicitante", value: (ticket) => ticket.reporterName },
@@ -194,12 +263,24 @@ export function TicketsManager() {
   async function exportReportPdf() {
     setPdfBusy(true);
     try {
-      await exportTicketReportPdf({ periodLabel, counts, tickets: exportTickets });
+      await exportTicketReportPdf({
+        periodLabel: exportSelection.label,
+        counts: computeTicketDashboardCounts(visibleTickets, exportSelection.period, tickets),
+        tickets: exportSelectionTickets,
+        fileSlug: exportSelection.slug,
+      });
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
     } finally {
       setPdfBusy(false);
     }
+  }
+
+  function runExport() {
+    const target = exportTarget;
+    setExportTarget(null);
+    if (target === "csv") exportReportCsv();
+    if (target === "pdf") void exportReportPdf();
   }
 
   function handleSort(column: TicketSortColumn) {
@@ -304,7 +385,7 @@ export function TicketsManager() {
         {tab === "tickets" ? (
           <div className="panel-heading-trailing">
             <QuickCreateTicketButton visible={canManage} onCreated={() => void loadTickets()} />
-            <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+            <ReportExportButtons onExportCsv={() => setExportTarget("csv")} onExportPdf={() => setExportTarget("pdf")} pdfBusy={pdfBusy} />
           </div>
         ) : null}
       </section>
@@ -339,7 +420,7 @@ export function TicketsManager() {
             </select>
           </label>
         ) : null}
-        <p className="muted">Afecta a las tarjetas, los gráficos y a lo que se exporta en CSV y PDF.</p>
+        <p className="muted">Afecta a las tarjetas y a los gráficos. El periodo del informe se elige al exportar.</p>
       </section>
 
       <TicketDashboardCards counts={counts} periodLabel={periodLabel} />
@@ -448,6 +529,78 @@ export function TicketsManager() {
             : `${selectedIds.size} ticket${selectedIds.size === 1 ? "" : "s"} se archivará${selectedIds.size === 1 ? "" : "n"} y dejará${selectedIds.size === 1 ? "" : "n"} de aparecer en esta lista, pero se conserva${selectedIds.size === 1 ? "" : "n"} en el historial.`}
         </p>
       </ConfirmationDialog>
+
+      <Modal
+        open={exportTarget !== null}
+        eyebrow="Tickets informáticos"
+        title={exportTarget === "csv" ? "Exportar a CSV" : "Exportar a PDF"}
+        onClose={() => setExportTarget(null)}
+      >
+        <p className="muted export-range-intro">
+          Elige qué periodo quieres en el informe. Los filtros que tengas puestos arriba se siguen aplicando.
+        </p>
+
+        <div className="export-range-modes" role="radiogroup" aria-label="Periodo del informe">
+          {([
+            { value: "mes", label: "Un mes" },
+            { value: "rango", label: "Entre dos fechas" },
+            { value: "actual", label: "Lo que se ve ahora" },
+          ] as const).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={exportMode === option.value}
+              className={exportMode === option.value ? "export-range-mode is-active" : "export-range-mode"}
+              onClick={() => setExportMode(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {exportMode === "mes" ? (
+          <div className="form-grid export-range-fields">
+            <label>
+              <span>Mes</span>
+              <input type="month" value={exportMonth} max={monthKey()} onChange={(event) => setExportMonth(event.target.value || monthKey())} />
+            </label>
+          </div>
+        ) : null}
+
+        {exportMode === "rango" ? (
+          <div className="form-grid export-range-fields">
+            <label>
+              <span>Desde</span>
+              <input type="date" value={exportFrom} max={exportTo || undefined} onChange={(event) => setExportFrom(event.target.value)} />
+            </label>
+            <label>
+              <span>Hasta</span>
+              <input type="date" value={exportTo} min={exportFrom || undefined} onChange={(event) => setExportTo(event.target.value)} />
+            </label>
+          </div>
+        ) : null}
+
+        <p className={exportSelection.valid ? "export-range-summary" : "export-range-summary is-warning"}>
+          {!exportSelection.valid
+            ? "Pon las dos fechas, y que la de inicio no sea posterior a la de fin."
+            : exportSelectionTickets.length === 0
+              ? `No hay ningún ticket ${exportSelection.phrase}.`
+              : `Se exportarán ${exportSelectionTickets.length} ticket${exportSelectionTickets.length === 1 ? "" : "s"} ${exportSelection.phrase}.`}
+        </p>
+
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={() => setExportTarget(null)}>Cancelar</button>
+          <button
+            type="button"
+            className="button"
+            disabled={!exportSelection.valid || exportSelectionTickets.length === 0}
+            onClick={runExport}
+          >
+            {exportTarget === "csv" ? "Descargar CSV" : "Generar PDF"}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

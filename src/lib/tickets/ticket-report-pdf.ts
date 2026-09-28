@@ -35,9 +35,11 @@ type TicketReportOptions = {
   periodLabel: string;
   counts: TicketDashboardCounts;
   tickets: Ticket[];
+  /** Va en el nombre del fichero, para que dos periodos no se llamen igual. */
+  fileSlug?: string;
 };
 
-function ticketReportOptions({ periodLabel, counts, tickets }: TicketReportOptions): ReportOptions<Ticket> {
+function ticketReportOptions({ periodLabel, counts, tickets, fileSlug }: TicketReportOptions): ReportOptions<Ticket> {
   const stats: ReportStat[] = [
     { label: "Nuevos", value: String(counts.newCount) },
     { label: "Abiertos", value: String(counts.openCount) },
@@ -59,7 +61,7 @@ function ticketReportOptions({ periodLabel, counts, tickets }: TicketReportOptio
     sectionTitle: "Detalle de tickets",
     columns: COLUMNS,
     rows: tickets,
-    filename: `informe_tickets_${new Date().toISOString().slice(0, 10)}.pdf`,
+    filename: `informe_tickets_${fileSlug ?? new Date().toISOString().slice(0, 10)}.pdf`,
   };
 }
 

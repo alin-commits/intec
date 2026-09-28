@@ -1411,3 +1411,18 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 
 /* El total de la tabla de sociedades, separado de las filas. */
 .sales-compact-table tfoot td { border-top: 2px solid var(--border); padding-top: 10px; }
+
+/* Elegir el periodo antes de generar el informe de tickets. */
+.export-range-intro { margin: 0 0 16px; font-size: 13.5px; line-height: 1.5; }
+.export-range-modes { display: flex; flex-wrap: wrap; gap: 8px; }
+.export-range-mode { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 9px 15px; font-size: 13px; font-weight: 700; cursor: pointer; min-height: 40px; transition: border-color .12s ease, background-color .12s ease; }
+.export-range-mode:hover { border-color: var(--primary); }
+.export-range-mode.is-active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.export-range-fields { margin-top: 16px; }
+.export-range-summary { margin: 16px 0 0; padding: 11px 13px; border-radius: 10px; background: var(--surface-muted); color: var(--text); font-size: 13.5px; line-height: 1.5; }
+.export-range-summary.is-warning { background: #fffbeb; color: #78350f; }
+
+@media (max-width: 560px) {
+  .export-range-fields { grid-template-columns: 1fr; }
+  .export-range-mode { min-height: 44px; flex: 1 1 auto; }
+}
