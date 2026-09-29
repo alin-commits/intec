@@ -22,9 +22,11 @@ type LeadReportOptions = {
   wonValue: number;
   leads: Lead[];
   units: BusinessUnit[];
+  /** Los nombres de quien lleva cada lead; los ids solos no dicen nada impresos. */
+  ownerNames: (lead: Lead) => string;
 };
 
-export async function exportLeadReportPdf({ activeUnitLabel, totalLeads, wonCount, conversionLabel, wonValue, leads, units }: LeadReportOptions) {
+export async function exportLeadReportPdf({ activeUnitLabel, totalLeads, wonCount, conversionLabel, wonValue, leads, units, ownerNames }: LeadReportOptions) {
   const unitName = (unitId: string) => units.find((unit) => unit.id === unitId)?.name ?? "—";
 
   const stats: ReportStat[] = [
@@ -43,6 +45,7 @@ export async function exportLeadReportPdf({ activeUnitLabel, totalLeads, wonCoun
     { header: "Teléfono", value: (l) => l.phone, width: 24 },
     { header: "Campaña", value: (l) => l.campaign || "General", width: 26 },
     { header: "Estado", value: (l) => leadStatusLabels[l.status], width: 24, align: "center", badge: (l) => STATUS_COLORS[l.status] },
+    { header: "Responsables", value: ownerNames, width: 30 },
     { header: "Interés", value: (l) => l.productInterest },
     { header: "Fuente", value: (l) => l.source, width: 22 },
     { header: "Valor", value: (l) => (l.saleValue != null ? formatEuroForPdf(l.saleValue) : "—"), width: 26, align: "right" },

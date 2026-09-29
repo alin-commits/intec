@@ -451,6 +451,7 @@ export function LeadsTable() {
         wonValue: totalValue,
         leads: visibleRows,
         units,
+        ownerNames,
       });
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
