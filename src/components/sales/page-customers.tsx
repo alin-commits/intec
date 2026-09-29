@@ -9,7 +9,7 @@ import { euros, monthName, monthNames, ticketFormatter, variation, delta } from 
 import { createClient } from "@/lib/supabase/client";
 import type { CustomerKind, SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
-import { DataTable, LoadFailed, Panel, share, shortDate, useSageQuery, type Column } from "./sales-ui";
+import { DataTable, LoadFailed, Panel, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
 import type { CustomerRow } from "./sales-list-modal";
 
 /*
@@ -166,7 +166,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         <Panel
           title={`Clientes por mes en ${shownYear}`}
           subtitle={`Cuántos compran cada mes${showNew ? " y cuántos por primera vez" : ""}${hasBefore ? `, con ${shownYear - 1} en gris` : ""}${!ctx.detail.customers && filters.company === null ? " (suma de sociedades)" : ""}. Pulsa un mes para ver sus clientes`}
-          className="panel chart-panel sales-board-full"
+          className="panel chart-panel sales-board-wide"
         >
           {monthly.failed ? <LoadFailed what="los clientes por mes" /> : (
             <TrendChart
@@ -184,6 +184,25 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
           {!ctx.detail.customers && (filters.channel || filters.repKey || filters.family) ? (
             <p className="sales-section-note">Estos totales no se pueden partir por canal, comercial ni familia: son de la sociedad entera.</p>
           ) : null}
+        </Panel>
+
+        <Panel
+          title="Mes a mes"
+          subtitle={showNew ? "Clientes con compra y, a la derecha, cuántos son nuevos. Pulsa uno para filtrar" : "Clientes con compra. Pulsa uno para filtrar"}
+          className="panel panel-padded sales-board-narrow"
+        >
+          <RankList
+            items={monthKeys.map((key, index) => ({
+              key,
+              label: monthName(key).replace(/^./, (letter) => letter.toUpperCase()),
+              value: points[index].activos,
+              valueLabel: numberFormatter.format(points[index].activos),
+              extra: newTrusted(key) ? `+${numberFormatter.format(points[index].nuevos)}` : "",
+            })).reverse()}
+            activeKey={filters.month}
+            onSelect={(key) => ctx.toggle("month", key)}
+            empty="Sin clientes este año."
+          />
         </Panel>
 
         {ctx.detail.customers ? (
