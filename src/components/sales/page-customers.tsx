@@ -135,17 +135,17 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
           <section className="sales-section">
             <div className="sales-section-heading">
               <h2>A quién llamar</h2>
-              <p>Contado hasta el {shortDate(period.to)}. Clientes del último año que han dejado de comprar o llevan tiempo sin hacerlo.</p>
+              <p>Contado hasta el {shortDate(period.to)}. Clientes habituales (con compras en 2 días o más) que han dejado de comprar o llevan tiempo sin hacerlo. Los de una sola compra no cuentan aquí.</p>
             </div>
             <div className="kpi-grid kpi-grid-sales">
               <KpiCard label="Han dejado de comprar" value={card(counts.data, "perdidos")} helper={counts.data ? `compraban ${euros(counts.data.neto_perdidos)}` : "cargando"} delta="Sin comparación" icon={<XCircleIcon />} tone="rose"
-                onClick={() => open("perdidos", "Clientes que han dejado de comprar", "Compraban en el año anterior a los últimos 90 días y desde entonces nada.")} actionLabel="Ver a quién llamar" />
-              <KpiCard label="Más de 30 días sin comprar" value={card(counts.data, "sin_compra_30")} helper="clientes del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="amber"
-                onClick={() => open("sin_compra", "Clientes con más de 30 días sin comprar", "Compraron en el último año, pero no en los últimos 30 días.", 30)} actionLabel="Ver lista" />
-              <KpiCard label="Más de 60 días" value={card(counts.data, "sin_compra_60")} helper="clientes del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="amber"
-                onClick={() => open("sin_compra", "Clientes con más de 60 días sin comprar", "Compraron en el último año, pero no en los últimos 60 días.", 60)} actionLabel="Ver lista" />
-              <KpiCard label="Más de 90 días" value={card(counts.data, "sin_compra_90")} helper="clientes del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="rose"
-                onClick={() => open("sin_compra", "Clientes con más de 90 días sin comprar", "Compraron en el último año, pero no en los últimos 90 días.", 90)} actionLabel="Ver lista" />
+                onClick={() => open("perdidos", "Clientes que han dejado de comprar", "Clientes habituales (compraron en 2 días o más) en el año anterior a los últimos 90 días, que desde entonces no han vuelto. Los de una sola compra no cuentan.")} actionLabel="Ver a quién llamar" />
+              <KpiCard label="Más de 30 días sin comprar" value={card(counts.data, "sin_compra_30")} helper="habituales del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="amber"
+                onClick={() => open("sin_compra", "Clientes con más de 30 días sin comprar", "Clientes habituales del último año (compraron en 2 días o más) que no compran desde hace más de 30 días.", 30)} actionLabel="Ver lista" />
+              <KpiCard label="Más de 60 días" value={card(counts.data, "sin_compra_60")} helper="habituales del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="amber"
+                onClick={() => open("sin_compra", "Clientes con más de 60 días sin comprar", "Clientes habituales del último año (compraron en 2 días o más) que no compran desde hace más de 60 días.", 60)} actionLabel="Ver lista" />
+              <KpiCard label="Más de 90 días" value={card(counts.data, "sin_compra_90")} helper="habituales del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="rose"
+                onClick={() => open("sin_compra", "Clientes con más de 90 días sin comprar", "Clientes habituales del último año (compraron en 2 días o más) que no compran desde hace más de 90 días.", 90)} actionLabel="Ver lista" />
             </div>
           </section>
         </>

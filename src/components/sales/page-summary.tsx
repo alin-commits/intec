@@ -197,17 +197,17 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
                 delta="Sin comparación"
                 icon={<XCircleIcon />}
                 tone="rose"
-                onClick={() => ctx.openList({ type: "clientes", kind: "perdidos", title: "Clientes que han dejado de comprar", description: "Compraban en el año anterior a los últimos 90 días y desde entonces nada. Son los primeros a los que llamar." })}
+                onClick={() => ctx.openList({ type: "clientes", kind: "perdidos", title: "Clientes que han dejado de comprar", description: "Clientes habituales (compraron en 2 días o más) en el año anterior a los últimos 90 días, que desde entonces no han vuelto. Son los primeros a los que llamar. Los de una sola compra no cuentan." })}
                 actionLabel="Ver a quién llamar"
               />
               <KpiCard
                 label="Más de 60 días sin comprar"
                 value={counts.data ? numberFormatter.format(counts.data.sin_compra_60) : "…"}
-                helper="clientes del último año"
+                helper="habituales del último año"
                 delta="Sin comparación"
                 icon={<CalendarIcon />}
                 tone="amber"
-                onClick={() => ctx.openList({ type: "clientes", kind: "sin_compra", days: 60, title: "Clientes con más de 60 días sin comprar", description: "Compraron en el último año, pero no en los últimos 60 días." })}
+                onClick={() => ctx.openList({ type: "clientes", kind: "sin_compra", days: 60, title: "Clientes con más de 60 días sin comprar", description: "Clientes habituales del último año (compraron en 2 días o más) que no compran desde hace más de 60 días." })}
                 actionLabel="Ver lista"
               />
             </>

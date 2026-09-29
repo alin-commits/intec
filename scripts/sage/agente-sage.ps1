@@ -153,6 +153,15 @@ function Consultar($servidor, $sql) {
   $conexion = New-Object System.Data.SqlClient.SqlConnection (Nueva-Cadena $servidor)
   try {
     $conexion.Open()
+    # Sage se usa a la vez que se lee: en horario de oficina hay quien graba
+    # y factura, y eso bloquea filas. Leyendo sin bloqueos, el agente no espera
+    # a nadie ni hace esperar a nadie (el 29/09 se quedó parado minutos en un
+    # mes). Si algo se leyera a medio grabar, la lectura siguiente lo corrige.
+    # Y si aun así algo le obliga a esperar más de un minuto, esa consulta
+    # falla, se apunta como aviso y el resto sigue.
+    $ajustes = $conexion.CreateCommand()
+    $ajustes.CommandText = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; SET LOCK_TIMEOUT 60000;"
+    [void]$ajustes.ExecuteNonQuery()
     $comando = $conexion.CreateCommand()
     $comando.CommandText = $sql
     $comando.CommandTimeout = 600
@@ -1317,8 +1326,13 @@ function Enviar($envio, $etiqueta) {
 # (y el Hub no toca lo que ya tenía de ella) y las demás siguen.
 # (La parte se llama $parte y no $clave: con $clave tapaba la contraseña de Sage.)
 function Intentar($envio, $parte, $avisos, $nombre, [scriptblock]$leer) {
+  $reloj = [Diagnostics.Stopwatch]::StartNew()
   try { $envio[$parte] = (& $leer) }
   catch { Avisar $avisos "${nombre}: $($_.Exception.Message)" }
+  # Lo normal es que cada parte tarde uno o dos segundos. Si una tarda mucho,
+  # queda dicho cuál, para no tener que adivinarlo.
+  $segundos = [Math]::Round($reloj.Elapsed.TotalSeconds)
+  if ($segundos -ge 20) { Apuntar "  $nombre tardo $segundos s" }
 }
 
 $avisosPendientes = $true
