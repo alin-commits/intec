@@ -317,7 +317,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
       await onChanged();
       onMessage(createdExpenseId ? `Factura guardada y suscripción «${payload.supplier}» creada.` : editingId ? "Factura actualizada." : "Factura guardada.");
       // Solo se pregunta al subir una nueva con PDF: al editar ya se decidió en su día.
-      if (!editingId && savedId && payload.file_path) setPendingSend({ id: savedId, supplier: payload.supplier });
+      if (!editingId && savedId && payload.file_path) setPendingSend({ id: savedId, supplier: payload.supplier, unitSlug: unitSlug(payload.business_unit_id) });
     } catch (cause) {
       onMessage(reportSafeError(cause, "No se pudo guardar la factura."));
     } finally {
