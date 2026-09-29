@@ -99,18 +99,22 @@ alter table public.meta_sync_runs enable row level security;
 --
 -- La llamada va envuelta en un select para que Postgres la resuelva una vez por
 -- consulta y no una vez por fila, como el resto de políticas del proyecto.
+drop policy if exists meta_ad_accounts_select on public.meta_ad_accounts;
 create policy meta_ad_accounts_select on public.meta_ad_accounts
   for select
   using ((select public.current_user_has_any_role(ARRAY['admin','direction','marketing']::app_role[])));
 
+drop policy if exists meta_campaigns_select on public.meta_campaigns;
 create policy meta_campaigns_select on public.meta_campaigns
   for select
   using ((select public.current_user_has_any_role(ARRAY['admin','direction','marketing']::app_role[])));
 
+drop policy if exists meta_insights_daily_select on public.meta_insights_daily;
 create policy meta_insights_daily_select on public.meta_insights_daily
   for select
   using ((select public.current_user_has_any_role(ARRAY['admin','direction','marketing']::app_role[])));
 
+drop policy if exists meta_sync_runs_select on public.meta_sync_runs;
 create policy meta_sync_runs_select on public.meta_sync_runs
   for select
   using ((select public.current_user_has_any_role(ARRAY['admin','direction','marketing']::app_role[])));

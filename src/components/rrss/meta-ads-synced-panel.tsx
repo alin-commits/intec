@@ -145,10 +145,23 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cargar depende solo del rango
   }, [desde, hasta]);
 
+  /**
+   * De qué marca es cada campaña.
+   *
+   * Normalmente sale de la cuenta publicitaria, porque cada cuenta es de una
+   * marca. Pero una campaña se puede lanzar desde la cuenta de otra: "Leads |
+   * Filtros Línea Jender" se hizo desde la cuenta de Intec y es de Jender. Si
+   * está atada a una campaña de la aplicación, manda la marca de esa, que es
+   * la que alguien ha decidido a mano.
+   */
   const marcaDe = useMemo(() => {
     const porCuenta = new Map(cuentas.map((c) => [c.account_id, c.business_unit_id]));
-    return new Map(campanas.map((c) => [c.meta_id, porCuenta.get(c.account_id) ?? null]));
-  }, [cuentas, campanas]);
+    const marcaDeApp = new Map(campanasApp.map((c) => [c.id, c.business_unit_id]));
+    return new Map(campanas.map((c) => [
+      c.meta_id,
+      (c.campaign_id ? marcaDeApp.get(c.campaign_id) : null) ?? porCuenta.get(c.account_id) ?? null,
+    ]));
+  }, [cuentas, campanas, campanasApp]);
   const extraDe = useMemo(() => new Map(extras.map((e) => [e.meta_campaign_id, e])), [extras]);
 
   const visibles = useMemo(() => dias.filter((d) => {
@@ -592,17 +605,15 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
             <span>Campaña de la aplicación</span>
             <select value={enlace} onChange={(event) => setEnlace(event.target.value)}>
               <option value="">Sin atar a ninguna</option>
-              {campanasApp
-                .filter((c) => {
-                  // Solo las de la misma marca: atar la campaña de una marca a
-                  // la de otra es meter su gasto donde no es.
-                  const suya = cuentas.find((cu) => cu.account_id === campanas.find((mc) => mc.meta_id === editando?.id)?.account_id);
-                  return !suya?.business_unit_id || c.business_unit_id === suya.business_unit_id;
-                })
-                .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {campanasApp.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {units.find((u) => u.id === c.business_unit_id)?.name ?? "?"} · {c.name}
+                </option>
+              ))}
             </select>
             <small className="muted">
-              Atarla hace que su gasto y sus leads salgan en la pestaña de Campañas.
+              Atarla hace que su gasto y sus leads salgan en la pestaña de Campañas. Y si la campaña se lanzó desde
+              la cuenta de otra marca, atarla aquí la coloca en la suya.
             </small>
           </label>
         </div>

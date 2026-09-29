@@ -8,6 +8,10 @@
 -- Eso se sigue escribiendo a mano, pero ya no en una tabla paralela con el
 -- gasto duplicado: solo lo que falta, colgado de la campaña de Meta por su
 -- identificador. Así el gasto viene de un sitio y nadie suma dos veces.
+--
+-- Se puede volver a ejecutar entera sin romper nada: las tablas llevan
+-- "if not exists", las políticas se borran antes de crearse y los datos se
+-- insertan con "on conflict".
 
 create table if not exists public.meta_campaign_extras (
   meta_campaign_id text primary key references public.meta_campaigns(meta_id) on delete cascade,
@@ -22,10 +26,12 @@ create table if not exists public.meta_campaign_extras (
 alter table public.meta_campaign_extras enable row level security;
 
 -- Ver, quien ve marketing. Escribir, solo quien además puede editar.
+drop policy if exists meta_campaign_extras_select on public.meta_campaign_extras;
 create policy meta_campaign_extras_select on public.meta_campaign_extras
   for select
   using ((select public.current_user_has_any_role(ARRAY['admin','direction','marketing']::app_role[])));
 
+drop policy if exists meta_campaign_extras_write on public.meta_campaign_extras;
 create policy meta_campaign_extras_write on public.meta_campaign_extras
   for all
   using ((select public.current_user_has_any_role(ARRAY['admin','marketing']::app_role[])))
