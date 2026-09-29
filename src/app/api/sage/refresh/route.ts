@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { hasAnyRole, SALES_ROLES } from "@/lib/constants";
+import { hasAnyRole, SAGE_REFRESH_ROLES } from "@/lib/constants";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/types";
@@ -33,7 +33,7 @@ async function allowedClient() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "No autorizado." }, { status: 401 }) };
   const { data: profile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
-  if (!profile?.is_active || !hasAnyRole(profile.roles as AppRole[], SALES_ROLES)) {
+  if (!profile?.is_active || !hasAnyRole(profile.roles as AppRole[], SAGE_REFRESH_ROLES)) {
     return { error: NextResponse.json({ error: "No tienes permiso para leer Sage." }, { status: 403 }) };
   }
   return { supabase, userId: user.id };

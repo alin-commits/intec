@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isSageAgent } from "@/lib/sage-agent-auth";
-import { describeIngest, sageIngestSchema, toDatabasePayload, type SageIngestBody } from "@/lib/sage-ingest";
+import { describeIngest, hasPaymentParts, sageIngestSchema, toDatabasePayload, toPaymentsPayload, type SageIngestBody } from "@/lib/sage-ingest";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /*
@@ -33,14 +33,14 @@ export const maxDuration = 150;
 const ATTEMPT_MS = 40_000;
 const ATTEMPTS = 3;
 
-async function saveBlock(admin: NonNullable<ReturnType<typeof createAdminClient>>, payload: Record<string, unknown>) {
-  let result = await admin.rpc("sage_ingest", { p: payload }).abortSignal(AbortSignal.timeout(ATTEMPT_MS));
+async function saveBlock(admin: NonNullable<ReturnType<typeof createAdminClient>>, payload: Record<string, unknown>, fn = "sage_ingest") {
+  let result = await admin.rpc(fn, { p: payload }).abortSignal(AbortSignal.timeout(ATTEMPT_MS));
   for (let attempt = 2; attempt <= ATTEMPTS; attempt += 1) {
     // Solo se repite lo que no llegó a contestar (status 0) o lo que cortó la
     // pasarela. Un error de la propia base de datos daría lo mismo otra vez.
     if (!result.error || (result.status !== 0 && result.status < 502)) break;
     console.warn(`Sage: el intento ${attempt - 1} de guardar no contestó (${result.error.message}); se repite.`);
-    result = await admin.rpc("sage_ingest", { p: payload }).abortSignal(AbortSignal.timeout(ATTEMPT_MS));
+    result = await admin.rpc(fn, { p: payload }).abortSignal(AbortSignal.timeout(ATTEMPT_MS));
   }
   return result;
 }
@@ -76,7 +76,14 @@ export async function POST(request: Request) {
     .single();
   const runId = run?.id as string | undefined;
 
-  const { data, error, status } = await saveBlock(admin, toDatabasePayload(body));
+  let { data, error, status } = await saveBlock(admin, toDatabasePayload(body));
+  // Lo de pagos (proveedores, remesas, cartera) va a su propia función. Si el
+  // envío solo trae eso, sage_ingest no toca nada más que sociedades y comerciales.
+  if (!error && hasPaymentParts(body)) {
+    const payments = await saveBlock(admin, toPaymentsPayload(body), "sage_ingest_payments");
+    if (payments.error) ({ error, status } = payments);
+    else data = { ...(data ?? {}), ...(payments.data ?? {}) };
+  }
   if (error) {
     const message = `No se guardó nada de este envío: ${error.message}`;
     if (runId) await admin.from("sage_sync_runs").update({ finished_at: new Date().toISOString(), ok: false, message: message.slice(0, 2000) }).eq("id", runId);

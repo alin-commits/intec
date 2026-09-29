@@ -1678,3 +1678,51 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
   .sales-targets-grid input, .sales-targets-actions input { min-height: 44px; }
   .sales-weeks li { grid-template-columns: 70px minmax(0, 1fr) auto 56px; }
 }
+
+/* ---- Pagos a proveedores: confirming, tesorería y bancos ---- */
+
+/* Un botón que se ve como enlace, fuera de los subtítulos. */
+button.text-link { border: 0; background: none; padding: 0; font: inherit; color: var(--primary); font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+.payments-modal { display: grid; gap: 16px; }
+.payments-bank-line { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-muted); font-size: 13px; line-height: 1.5; }
+.payments-issues { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; line-height: 1.45; }
+.payments-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 13px; line-height: 1.45; font-weight: 650; cursor: pointer; }
+.payments-check input { width: 18px; height: 18px; margin: 1px 0 0; flex-shrink: 0; accent-color: var(--primary); }
+.payments-files ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.payments-files li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 9px; background: var(--surface-muted); font-size: 13px; }
+.payments-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; }
+
+/* Bancos y contratos: una ficha por sociedad y banco de Sage. */
+.payments-banks { display: grid; gap: 14px; }
+.payments-bank { border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; display: grid; gap: 12px; background: var(--surface); }
+.payments-bank.is-new { border-color: #f2d49b; background: linear-gradient(180deg, #fffbeb, #fff 60%); }
+.payments-bank header, .payments-bank footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.payments-bank header div { display: grid; gap: 2px; }
+.payments-bank header small { color: var(--muted); font-size: 12px; }
+.payments-bank header > span { font-size: 12.5px; font-weight: 750; white-space: nowrap; }
+.payments-bank footer { align-items: center; font-size: 12.5px; }
+.payments-bank-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 12px; }
+.payments-bank-fields label { display: grid; gap: 4px; min-width: 0; align-content: start; }
+.payments-bank-fields label.is-wide { grid-column: span 2; }
+.payments-bank-fields label > span { color: var(--muted); font-size: 11.5px; font-weight: 750; }
+.payments-bank-fields label > small { color: var(--muted); font-size: 11.5px; }
+.payments-bank-fields input:not([type="checkbox"]), .payments-bank-fields select { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; background: white; font-size: 13px; }
+.payments-bank-fields input:focus, .payments-bank-fields select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.payments-bank-fields .payments-check { margin-top: 0; font-weight: 500; color: #475569; }
+.payments-add-bank { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.payments-add-bank .sales-subheading { margin: 0; }
+.payments-add-bank input { min-height: 38px; border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; font-size: 13px; min-width: 220px; }
+
+/* Tesorería: la tabla de semanas al lado del gráfico. */
+.payments-weeks td, .payments-weeks th { padding-top: 7px; padding-bottom: 7px; }
+
+@media (max-width: 1100px) {
+  .payments-bank-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .payments-bank-fields { grid-template-columns: 1fr; }
+  .payments-bank-fields label.is-wide { grid-column: auto; }
+  .payments-bank-fields input:not([type="checkbox"]), .payments-bank-fields select, .payments-add-bank input { min-height: 44px; }
+  .payments-actions .button { width: 100%; }
+}

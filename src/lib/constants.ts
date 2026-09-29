@@ -29,6 +29,7 @@ export const roleLabels: Record<AppRole, string> = {
   direction: "Dirección",
   employee: "Empleado",
   vault_admin: "Admin. de contraseñas",
+  accounting: "Administración",
 };
 
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
@@ -51,13 +52,21 @@ export const LEAD_ASSIGN_ROLES: AppRole[] = ["admin", "marketing"];
 export const EXPENSES_ROLES: AppRole[] = ["admin", "marketing", "direction"];
 /** Las ventas que llegan de Sage: cifras de negocio, solo dirección y administración. */
 export const SALES_ROLES: AppRole[] = ["admin", "direction"];
+/**
+ * Pagos a proveedores (confirming, tesorería, contratos con los bancos): del
+ * departamento de Administración y de quien administra la plataforma. Dirección
+ * no entra. Tiene que cuadrar con las políticas de 202609290012.
+ */
+export const PAYMENTS_ROLES: AppRole[] = ["admin", "owner", "accounting"];
+/** Quién puede pedir una lectura de Sage con el botón: los que ven Ventas o Pagos. */
+export const SAGE_REFRESH_ROLES: AppRole[] = ["admin", "direction", "accounting"];
 export const EXPENSES_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
 /** Manages the password vault: permissions and audit log (not access to personal entries). */
 export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];
 /** Everyone except the employee role, whose only page is Contraseñas. */
 export const DASHBOARD_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "vault_admin"];
 
-export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "employee", "vault_admin"];
+export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "accounting", "employee", "vault_admin"];
 
 /**
  * Los roles del gestor de contraseñas no se reparten desde la pantalla de

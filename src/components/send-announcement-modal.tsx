@@ -10,7 +10,7 @@ type Member = { id: string; fullName: string; roles: AppRole[] };
 
 const GROUP_LABELS: Record<AppRole, string> = {
   owner: "Propietario",
-  admin: "Administración",
+  admin: "Administradores",
   commercial: "Comerciales",
   viewer: "Solo lectura",
   it: "Informática",
@@ -18,6 +18,7 @@ const GROUP_LABELS: Record<AppRole, string> = {
   direction: "Dirección",
   employee: "Empleados",
   vault_admin: "Admin. de contraseñas",
+  accounting: "Administración",
 };
 
 export function SendAnnouncementModal({ open, onClose, onSent }: { open: boolean; onClose: () => void; onSent: (message: string) => void }) {

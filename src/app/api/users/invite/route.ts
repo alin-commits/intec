@@ -6,7 +6,7 @@ import { buildInviteEmail } from "@/lib/email-templates";
 import { appOrigin } from "@/lib/app-origin";
 import type { AppRole } from "@/lib/types";
 
-const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer", "it", "marketing", "direction"]);
+const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer", "it", "marketing", "direction", "accounting"]);
 
 function normalizeRoles(input: unknown): AppRole[] | null {
   if (!Array.isArray(input) || input.length === 0) return null;

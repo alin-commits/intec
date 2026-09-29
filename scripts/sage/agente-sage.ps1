@@ -1206,6 +1206,8 @@ t.name in ('CabeceraAlbaranCliente', 'LineasAlbaranCliente', 'CabeceraOfertaClie
    or t.name like '%Objetivo%' or t.name like '%Presupuesto%' or t.name like '%Motivo%' or t.name like '%Probabilidad%'
    or t.name like '%Incidencia%' or t.name like '%Marca%' or t.name like '%Oportunidad%' or t.name like '%Tarea%'
    or t.name like '%Actividad%' or t.name like '%Contacto%'
+   or t.name in ('Proveedores', 'Empresas', 'Remesas', 'CarteraEfectos', 'Domicilios', 'Naciones')
+   or t.name like '%Banco%'
 "@
   $tabla = Consultar $servidorBueno @"
 select top 14000 x.Tabla, x.Columna, x.Tipo from (
@@ -1231,8 +1233,280 @@ order by x.Tabla, x.Orden;
 }
 
 # ---------------------------------------------------------------------------
+# Pagos a proveedores: remesas de Sage, proveedores y cartera pendiente
+# ---------------------------------------------------------------------------
+# Las remesas de pagos se hacen en Sage; el Hub las convierte en el fichero de
+# confirming de cada banco. Para eso necesita cada remesa con sus efectos
+# (factura del proveedor, vencimiento, importe, IBAN), los datos del proveedor
+# y los de la sociedad que paga. La cartera pendiente es para la tesorería.
+function Preparar-Pagos {
+  $faltan = Faltan "CarteraEfectos" @("CodigoEmpresa", "Prevision", "CodigoClienteProveedor", "FechaVencimiento", "ImportePendiente")
+  if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "pagos: faltan $($faltan -join ', ') en CarteraEfectos"; return $null }
+  $cfg = @{
+    Mov          = (Elegir "CarteraEfectos" @("MovPosicion", "MovCartera"))
+    NumeroEfecto = (Elegir "CarteraEfectos" @("NumeroEfecto"))
+    Orden        = (Elegir "CarteraEfectos" @("NumeroOrdenEfecto"))
+    SuFactura    = (Elegir "CarteraEfectos" @("SuFacturaNo"))
+    Factura      = (Elegir "CarteraEfectos" @("Factura"))
+    Serie        = (Elegir "CarteraEfectos" @("SerieFactura"))
+    FechaFactura = (Elegir "CarteraEfectos" @("FechaFactura", "FechaEmision"))
+    Importe      = (Elegir "CarteraEfectos" @("ImporteEfecto"))
+    Iban         = (Elegir "CarteraEfectos" @("IBAN"))
+    Remesa       = (Elegir "CarteraEfectos" @("NumeroRemesa"))
+    BancoRemesa  = (Elegir "CarteraEfectos" @("BancoRemesa"))
+    TipoEfecto   = (Elegir "CarteraEfectos" @("TipoEfecto"))
+    Borrado      = (Elegir "CarteraEfectos" @("StatusBorrado"))
+    ConRemesas   = ((Faltan "Remesas" @("CodigoEmpresa", "NumeroRemesa", "FechaRemesa")).Count -eq 0)
+    RFechaValor  = (Elegir "Remesas" @("FechaValor"))
+    RBanco       = (Elegir "Remesas" @("BancoRemesa"))
+    RTipo        = (Elegir "Remesas" @("TipoRemesa"))
+    RNorma       = (Elegir "Remesas" @("NormaCSB"))
+    RTotal       = (Elegir "Remesas" @("ImporteTotal"))
+    REfectos     = (Elegir "Remesas" @("NumeroEfectos"))
+    RProvisional = (Elegir "Remesas" @("Provisional"))
+    Proveedores  = $null
+  }
+  if (-not $cfg.Remesa) { Avisar $avisosDeArranque "remesas de pagos: CarteraEfectos no tiene NumeroRemesa" }
+  if (-not $cfg.ConRemesas) { Avisar $avisosDeArranque "remesas de pagos: no se encuentra la tabla Remesas" }
+  if ((Faltan "Proveedores" @("CodigoEmpresa", "CodigoProveedor")).Count -eq 0) {
+    $cfg.Proveedores = @{
+      Razon        = (Elegir "Proveedores" @("RazonSocial"))
+      Nombre       = (Elegir "Proveedores" @("Nombre"))
+      Nif          = (Elegir "Proveedores" @("CifDni", "CifEuropeo", "Nif"))
+      Domicilio    = (Elegir "Proveedores" @("Domicilio", "Direccion"))
+      CodigoPostal = (Elegir "Proveedores" @("CodigoPostal"))
+      Municipio    = (Elegir "Proveedores" @("Municipio", "Poblacion"))
+      Provincia    = (Elegir "Proveedores" @("Provincia"))
+      Nacion       = (Elegir "Proveedores" @("Nacion", "CodigoNacion"))
+      Telefono     = (Elegir "Proveedores" @("Telefono", "Telefono2"))
+      Correo       = (Elegir "Proveedores" @("EMail1", "Email1", "EMail2", "E_Mail"))
+    }
+  } else {
+    Avisar $avisosDeArranque "proveedores: no se encuentra la tabla Proveedores"
+  }
+  return $cfg
+}
+
+# El número de factura que ve el proveedor es el suyo (SuFacturaNo); si falta,
+# el de Sage (serie y número).
+function Sql-FacturaEfecto($cfg) {
+  $propia = if ($cfg.Factura) { "nullif(ltrim(rtrim(isnull(cast(e.[$($cfg.Serie)] as nvarchar(20)), '') + cast(e.[$($cfg.Factura)] as nvarchar(20)))), '0')" } else { "cast(null as nvarchar(40))" }
+  if (-not $cfg.Serie -and $cfg.Factura) { $propia = "nullif(cast(e.[$($cfg.Factura)] as nvarchar(40)), '0')" }
+  $suya = Sql-Texto "e" $cfg.SuFactura 40
+  return "coalesce($suya, $propia)"
+}
+function Sql-MovEfecto($cfg) {
+  $partes = @("cast(e.CodigoEmpresa as nvarchar(10))")
+  if ($cfg.NumeroEfecto) { $partes += "cast(e.[$($cfg.NumeroEfecto)] as nvarchar(20))" }
+  if ($cfg.Orden) { $partes += "cast(e.[$($cfg.Orden)] as nvarchar(10))" }
+  $respaldo = $partes -join " + '-' + "
+  if ($cfg.Mov) { return "coalesce(cast(e.[$($cfg.Mov)] as nvarchar(60)), $respaldo)" }
+  return $respaldo
+}
+function Sql-NoBorrado($cfg) {
+  if ($cfg.Borrado) { return "and isnull(e.[$($cfg.Borrado)], 0) = 0" }
+  return ""
+}
+
+# Las remesas de pagos de los últimos 180 días, con sus efectos.
+function Leer-RemesasPagos($cfg) {
+  # Las remesas con algún pago se sacan de una sola pasada por la cartera.
+  $remesas = Consultar $servidorBueno @"
+with pagos as (
+  select distinct e.CodigoEmpresa, e.[$($cfg.Remesa)] as NumeroRemesa
+  from CarteraEfectos e
+  where e.Prevision = 'P' and isnull(e.[$($cfg.Remesa)], 0) > 0 and e.CodigoEmpresa not in ($excluidas)
+)
+select r.CodigoEmpresa, r.NumeroRemesa, cast(r.FechaRemesa as date) as FechaRemesa,
+  $(Sql-Fecha "r" $cfg.RFechaValor) as FechaValor,
+  $(Sql-Texto "r" $cfg.RBanco 40) as Banco,
+  $(Sql-Texto "r" $cfg.RTipo 20) as Tipo,
+  $(Sql-Texto "r" $cfg.RNorma 20) as Norma,
+  $(Sql-Numero "r" $cfg.RTotal) as Total,
+  $(Sql-Numero "r" $cfg.REfectos) as Efectos,
+  $(Sql-Numero "r" $cfg.RProvisional) as Provisional
+from Remesas r
+join pagos x on x.CodigoEmpresa = r.CodigoEmpresa and x.NumeroRemesa = r.NumeroRemesa
+where r.FechaRemesa >= dateadd(day, -180, getdate());
+"@
+  $efectos = Consultar $servidorBueno @"
+select e.CodigoEmpresa, e.[$($cfg.Remesa)] as Remesa, $(Sql-MovEfecto $cfg) as Mov,
+  $(if ($cfg.NumeroEfecto) { "e.[$($cfg.NumeroEfecto)]" } else { "cast(null as int)" }) as NumeroEfecto,
+  ltrim(rtrim(cast(e.CodigoClienteProveedor as nvarchar(40)))) as Proveedor,
+  $(Sql-FacturaEfecto $cfg) as Factura,
+  $(Sql-Fecha "e" $cfg.FechaFactura) as FechaFactura,
+  cast(e.FechaVencimiento as date) as Vencimiento,
+  $(Sql-Numero "e" $cfg.Importe) as Importe,
+  isnull(e.ImportePendiente, 0) as Pendiente,
+  $(Sql-Texto "e" $cfg.Iban 40) as Iban
+from CarteraEfectos e
+join Remesas r on r.CodigoEmpresa = e.CodigoEmpresa and r.NumeroRemesa = e.[$($cfg.Remesa)]
+where e.CodigoEmpresa not in ($excluidas) and e.Prevision = 'P'
+  and r.FechaRemesa >= dateadd(day, -180, getdate())
+  $(Sql-NoBorrado $cfg);
+"@
+  $cabeceras = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $remesas.Rows) {
+    $cabeceras.Add([PSCustomObject]@{
+      companyCode    = [int]$fila["CodigoEmpresa"]
+      number         = [int]$fila["NumeroRemesa"]
+      remittanceDate = (Fecha-O-Nulo $fila["FechaRemesa"])
+      valueDate      = (Fecha-O-Nulo $fila["FechaValor"])
+      bankCode       = (Texto $fila["Banco"] 40)
+      remittanceType = (Texto-O-Nulo $fila["Tipo"] 20)
+      csbNorm        = (Texto-O-Nulo $fila["Norma"] 20)
+      total          = (Numero $fila["Total"])
+      effects        = [int](Numero $fila["Efectos"])
+      provisional    = ((Numero $fila["Provisional"]) -ne 0)
+    })
+  }
+  $lineas = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $efectos.Rows) {
+    $lineas.Add([PSCustomObject]@{
+      companyCode      = [int]$fila["CodigoEmpresa"]
+      remittanceNumber = [int]$fila["Remesa"]
+      movementId       = (Texto $fila["Mov"] 60)
+      effectNumber     = (Entero-O-Nulo $fila["NumeroEfecto"])
+      supplierCode     = (Texto $fila["Proveedor"] 40)
+      invoiceNumber    = (Texto-O-Nulo $fila["Factura"] 40)
+      invoiceDate      = (Fecha-O-Nulo $fila["FechaFactura"])
+      dueDate          = (Fecha-O-Nulo $fila["Vencimiento"])
+      amount           = (Numero $fila["Importe"])
+      pending          = (Numero $fila["Pendiente"])
+      iban             = (Texto-O-Nulo $fila["Iban"] 40)
+    })
+  }
+  return @{ Remesas = $cabeceras; Efectos = $lineas }
+}
+
+# Los proveedores con pagos en el último año y pico: los de las remesas y los de la cartera.
+function Leer-Proveedores($cfg) {
+  $p = $cfg.Proveedores
+  # Primero los códigos con pagos (una pasada por la cartera) y luego su ficha.
+  $tabla = Consultar $servidorBueno @"
+with pagados as (
+  select distinct e.CodigoEmpresa, ltrim(rtrim(cast(e.CodigoClienteProveedor as nvarchar(40)))) as Codigo
+  from CarteraEfectos e
+  where e.Prevision = 'P' and e.CodigoEmpresa not in ($excluidas)
+    and e.FechaVencimiento >= dateadd(day, -400, getdate())
+)
+select pr.CodigoEmpresa, ltrim(rtrim(cast(pr.CodigoProveedor as nvarchar(40)))) as Codigo,
+  $(Sql-Texto "pr" $p.Razon 200) as Razon,
+  $(Sql-Texto "pr" $p.Nombre 200) as Nombre,
+  $(Sql-Texto "pr" $p.Nif 30) as Nif,
+  $(Sql-Texto "pr" $p.Domicilio 200) as Domicilio,
+  $(Sql-Texto "pr" $p.CodigoPostal 20) as CodigoPostal,
+  $(Sql-Texto "pr" $p.Municipio 100) as Municipio,
+  $(Sql-Texto "pr" $p.Provincia 100) as Provincia,
+  $(Sql-Texto "pr" $p.Nacion 60) as Nacion,
+  $(Sql-Texto "pr" $p.Telefono 40) as Telefono,
+  $(Sql-Texto "pr" $p.Correo 160) as Correo
+from Proveedores pr
+join pagados x on x.CodigoEmpresa = pr.CodigoEmpresa and x.Codigo = ltrim(rtrim(cast(pr.CodigoProveedor as nvarchar(40))));
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $codigo = Texto $fila["Codigo"] 40
+    if ($codigo -eq "") { continue }
+    $razon = Texto-O-Nulo $fila["Razon"] 200
+    $comercial = Texto-O-Nulo $fila["Nombre"] 200
+    $nombre = if ($razon) { $razon } elseif ($comercial) { $comercial } else { "Proveedor $codigo" }
+    $lista.Add([PSCustomObject]@{
+      companyCode = [int]$fila["CodigoEmpresa"]
+      code        = $codigo
+      name        = $nombre
+      tradeName   = $(if ($comercial -and $comercial -ne $nombre) { $comercial } else { $null })
+      nif         = (Texto-O-Nulo $fila["Nif"] 30)
+      address     = (Texto-O-Nulo $fila["Domicilio"] 200)
+      postalCode  = (Texto-O-Nulo $fila["CodigoPostal"] 20)
+      city        = (Texto-O-Nulo $fila["Municipio"] 100)
+      province    = (Texto-O-Nulo $fila["Provincia"] 100)
+      country     = (Texto-O-Nulo $fila["Nacion"] 60)
+      phone       = (Texto-O-Nulo $fila["Telefono"] 40)
+      email       = (Texto-O-Nulo $fila["Correo"] 160)
+    })
+  }
+  return ,$lista
+}
+
+# NIF y domicilio de cada sociedad: el ordenante del fichero.
+function Leer-EmpresasDetalle {
+  $nif = Elegir "Empresas" @("CifDni", "CifEuropeo", "Nif")
+  $domicilio = Elegir "Empresas" @("Domicilio", "Direccion")
+  $cp = Elegir "Empresas" @("CodigoPostal")
+  $municipio = Elegir "Empresas" @("Municipio", "Poblacion")
+  $provincia = Elegir "Empresas" @("Provincia")
+  $tabla = Consultar $servidorBueno @"
+select em.CodigoEmpresa,
+  $(Sql-Texto "em" $nif 30) as Nif,
+  $(Sql-Texto "em" $domicilio 200) as Domicilio,
+  $(Sql-Texto "em" $cp 20) as CodigoPostal,
+  $(Sql-Texto "em" $municipio 100) as Municipio,
+  $(Sql-Texto "em" $provincia 100) as Provincia
+from Empresas em
+where em.CodigoEmpresa not in ($excluidas);
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode = [int]$fila["CodigoEmpresa"]
+      nif         = (Texto-O-Nulo $fila["Nif"] 30)
+      address     = (Texto-O-Nulo $fila["Domicilio"] 200)
+      postalCode  = (Texto-O-Nulo $fila["CodigoPostal"] 20)
+      city        = (Texto-O-Nulo $fila["Municipio"] 100)
+      province    = (Texto-O-Nulo $fila["Provincia"] 100)
+    })
+  }
+  return ,$lista
+}
+
+# La cartera pendiente de cobros y pagos que vencen entre hace un año y dentro de 13 meses.
+function Leer-CarteraPendiente($cfg) {
+  $tabla = Consultar $servidorBueno @"
+select e.CodigoEmpresa, e.Prevision, $(Sql-MovEfecto $cfg) as Mov,
+  ltrim(rtrim(cast(e.CodigoClienteProveedor as nvarchar(40)))) as Tercero,
+  $(Sql-FacturaEfecto $cfg) as Factura,
+  $(Sql-Fecha "e" $cfg.FechaFactura) as FechaFactura,
+  cast(e.FechaVencimiento as date) as Vencimiento,
+  $(Sql-Numero "e" $cfg.Importe) as Importe,
+  e.ImportePendiente as Pendiente,
+  $(if ($cfg.Remesa) { "nullif(e.[$($cfg.Remesa)], 0)" } else { "cast(null as int)" }) as Remesa,
+  $(Sql-Texto "e" $cfg.BancoRemesa 40) as Banco,
+  $(Sql-Texto "e" $cfg.TipoEfecto 20) as TipoEfecto
+from CarteraEfectos e
+where e.CodigoEmpresa not in ($excluidas)
+  and e.Prevision in ('C', 'P')
+  and isnull(e.ImportePendiente, 0) <> 0
+  and e.FechaVencimiento >= dateadd(day, -365, getdate())
+  and e.FechaVencimiento < dateadd(day, 400, getdate())
+  $(Sql-NoBorrado $cfg);
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $tercero = Texto $fila["Tercero"] 40
+    if ($tercero -eq "") { continue }
+    $lista.Add([PSCustomObject]@{
+      companyCode      = [int]$fila["CodigoEmpresa"]
+      kind             = $(if ((Texto $fila["Prevision"] 1) -eq "C") { "cobro" } else { "pago" })
+      movementId       = (Texto-O-Nulo $fila["Mov"] 60)
+      counterpartCode  = $tercero
+      invoiceNumber    = (Texto-O-Nulo $fila["Factura"] 40)
+      invoiceDate      = (Fecha-O-Nulo $fila["FechaFactura"])
+      dueDate          = (Fecha-O-Nulo $fila["Vencimiento"])
+      amount           = (Numero $fila["Importe"])
+      pending          = (Numero $fila["Pendiente"])
+      remittanceNumber = (Entero-O-Nulo $fila["Remesa"])
+      bankCode         = (Texto-O-Nulo $fila["Banco"] 40)
+      effectType       = (Texto-O-Nulo $fila["TipoEfecto"] 20)
+    })
+  }
+  return ,$lista
+}
+
+# ---------------------------------------------------------------------------
 # Qué se puede leer en esta instalación
 # ---------------------------------------------------------------------------
+$cfgPagos = $null
 $cfgOfertas = $null
 $cfgPedidos = $null
 $cfgFamilias = $null
@@ -1249,6 +1523,7 @@ if (-not $SoloVentas) {
   if ($cfgOfertas) { try { $cfgOfertasDetalle = Preparar-OfertasDetalle } catch { Avisar $avisosDeArranque "ofertas una a una: $($_.Exception.Message)" } }
   if ($cfgPedidos) { try { $cfgPedidosDetalle = Preparar-PedidosDetalle } catch { Avisar $avisosDeArranque "pedidos uno a uno: $($_.Exception.Message)" } }
   if ($cfgFamilias -and -not $cfgFamilias.ConArticulo) { Avisar $avisosDeArranque "venta por articulo: las lineas no traen CodigoArticulo" }
+  try { $cfgPagos = Preparar-Pagos } catch { Avisar $avisosDeArranque "pagos: $($_.Exception.Message)" }
 }
 
 # ---------------------------------------------------------------------------
@@ -1522,6 +1797,78 @@ if (-not $SoloVentas) {
   for ($k = $avisosEnviados; $k -lt $avisosDeArranque.Count; $k++) { if ($avisos.Count -lt 30) { $avisos.Add($avisosDeArranque[$k]) } }
   if ($avisos.Count -gt 0) { $envio.notes = $avisos }
   Enviar $envio "anexo"
+}
+
+# ----- 5. Pagos: remesas de pagos, proveedores y, de noche, la cartera pendiente -----
+# Las remesas y los proveedores van en cada lectura (son pocos y así una remesa
+# recién hecha en Sage sale enseguida en el Hub). Cada remesa va entera en un
+# mismo envío, con todos sus efectos: el Hub la reescribe con lo que llega.
+if (-not $SoloVentas -and $cfgPagos) {
+  $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+  $avisos = New-Object System.Collections.Generic.List[string]
+  Intentar $envio "companyDetails" $avisos "datos de las sociedades" { Leer-EmpresasDetalle }
+  if ($cfgPagos.Proveedores) { Intentar $envio "suppliers" $avisos "proveedores" { Leer-Proveedores $cfgPagos } }
+  $remesasPagos = $null
+  if ($cfgPagos.ConRemesas -and $cfgPagos.Remesa) {
+    try { $remesasPagos = Leer-RemesasPagos $cfgPagos } catch { Avisar $avisos "remesas de pagos: $($_.Exception.Message)" }
+  }
+  foreach ($parte in @("companyDetails", "suppliers")) { if ($null -eq $envio[$parte]) { $envio.Remove($parte) } }
+  if ($avisos.Count -gt 0) { $envio.notes = $avisos }
+
+  if ($remesasPagos -and $remesasPagos.Remesas.Count -gt 0) {
+    # Por trozos de hasta 3000 efectos, sin partir ninguna remesa.
+    $porRemesa = @{}
+    foreach ($linea in $remesasPagos.Efectos) {
+      $clave = "$($linea.companyCode)-$($linea.remittanceNumber)"
+      if (-not $porRemesa.ContainsKey($clave)) { $porRemesa[$clave] = New-Object System.Collections.Generic.List[object] }
+      $porRemesa[$clave].Add($linea)
+    }
+    $cabeceras = New-Object System.Collections.Generic.List[object]
+    $lineas = New-Object System.Collections.Generic.List[object]
+    $trozo = 0
+    foreach ($remesa in $remesasPagos.Remesas) {
+      $clave = "$($remesa.companyCode)-$($remesa.number)"
+      $suyas = if ($porRemesa.ContainsKey($clave)) { $porRemesa[$clave] } else { @() }
+      if ($cabeceras.Count -gt 0 -and ($lineas.Count + $suyas.Count) -gt 3000) {
+        $envio.paymentRemittances = $cabeceras
+        $envio.paymentItems = $lineas
+        $trozo++
+        Enviar $envio "remesas de pagos ($trozo)"
+        $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+        $cabeceras = New-Object System.Collections.Generic.List[object]
+        $lineas = New-Object System.Collections.Generic.List[object]
+      }
+      $cabeceras.Add($remesa)
+      foreach ($l in $suyas) { $lineas.Add($l) }
+    }
+    $envio.paymentRemittances = $cabeceras
+    $envio.paymentItems = $lineas
+    $trozo++
+    Enviar $envio "remesas de pagos ($trozo)"
+  } else {
+    Enviar $envio "proveedores y sociedades"
+  }
+
+  # La cartera pendiente, solo en las lecturas largas (la de la noche): es una
+  # foto del día y para la previsión de tesorería basta con una al día.
+  if ($lecturaLarga -or $Reconocer) {
+    $cartera = $null
+    try { $cartera = Leer-CarteraPendiente $cfgPagos } catch { Apuntar "  aviso: cartera pendiente: $($_.Exception.Message)" }
+    if ($cartera) {
+      $primero = $true
+      for ($inicio = 0; $inicio -lt [Math]::Max($cartera.Count, 1); $inicio += 4000) {
+        $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+        $fin = [Math]::Min($inicio + 4000, $cartera.Count)
+        $trozoCartera = New-Object System.Collections.Generic.List[object]
+        for ($k = $inicio; $k -lt $fin; $k++) { $trozoCartera.Add($cartera[$k]) }
+        $envio.openItems = $trozoCartera
+        # El primer trozo borra la foto anterior; los demás se suman.
+        $envio.openItemsReplace = $primero
+        $primero = $false
+        Enviar $envio "cartera pendiente ($fin de $($cartera.Count))"
+      }
+    }
+  }
 }
 
 Apuntar "enviado correctamente: $totalEnviado filas de venta en $envios envio(s)"

@@ -233,7 +233,118 @@ export const sageIngestSchema = z.object({
   })).max(20000).optional(),
   /** Lo que el agente quiere que conste: qué no pudo leer y por qué. */
   notes: z.array(z.string().trim().max(300)).max(30).optional(),
+
+  // ---- Pagos a proveedores (van a sage_ingest_payments) ----
+  /** NIF y domicilio de cada sociedad: el ordenante del fichero de confirming. */
+  companyDetails: z.array(z.object({
+    companyCode: z.number().int(),
+    nif: optionalText(30),
+    address: optionalText(200),
+    postalCode: optionalText(20),
+    city: optionalText(100),
+    province: optionalText(100),
+  })).max(100).optional(),
+  suppliers: z.array(z.object({
+    companyCode: z.number().int(),
+    code,
+    name: z.string().trim().min(1).max(200),
+    tradeName: optionalText(200),
+    nif: optionalText(30),
+    address: optionalText(200),
+    postalCode: optionalText(20),
+    city: optionalText(100),
+    province: optionalText(100),
+    country: optionalText(60),
+    phone: optionalText(40),
+    email: optionalText(160),
+  })).max(20000).optional(),
+  /** Las remesas de pagos de Sage: cada una llega entera (cabecera y efectos). */
+  paymentRemittances: z.array(z.object({
+    companyCode: z.number().int(),
+    number: z.number().int(),
+    remittanceDate: optionalDay,
+    valueDate: optionalDay,
+    bankCode: z.string().trim().max(40).default(""),
+    remittanceType: optionalText(20),
+    csbNorm: optionalText(20),
+    total: amount.default(0),
+    effects: count.default(0),
+    provisional: z.boolean().default(false),
+  })).max(5000).optional(),
+  paymentItems: z.array(z.object({
+    companyCode: z.number().int(),
+    remittanceNumber: z.number().int(),
+    movementId: z.string().trim().min(1).max(60),
+    effectNumber: z.number().int().nullable().default(null),
+    supplierCode: code,
+    invoiceNumber: optionalText(40),
+    invoiceDate: optionalDay,
+    dueDate: optionalDay,
+    amount: amount.default(0),
+    pending: amount.default(0),
+    iban: optionalText(40),
+  })).max(20000).optional(),
+  /** La cartera pendiente de cobros y pagos. Llega por trozos: el primero borra la foto anterior. */
+  openItems: z.array(z.object({
+    companyCode: z.number().int(),
+    kind: z.enum(["cobro", "pago"]),
+    movementId: optionalText(60),
+    counterpartCode: code,
+    invoiceNumber: optionalText(40),
+    invoiceDate: optionalDay,
+    dueDate: optionalDay,
+    amount: amount.default(0),
+    pending: amount.default(0),
+    remittanceNumber: z.number().int().nullable().default(null),
+    bankCode: optionalText(40),
+    effectType: optionalText(20),
+  })).max(20000).optional(),
+  openItemsReplace: z.boolean().optional(),
 });
+
+/** Si el envío trae algo de pagos, que va a una función aparte. */
+export function hasPaymentParts(body: SageIngestBody): boolean {
+  return Boolean(body.companyDetails || body.suppliers || body.paymentRemittances || body.paymentItems || body.openItems);
+}
+
+/** Lo que recibe `sage_ingest_payments`. */
+export function toPaymentsPayload(body: SageIngestBody): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (body.companyDetails) {
+    payload.company_details = body.companyDetails.map((row) => ({
+      company_code: row.companyCode, nif: row.nif, address: row.address, postal_code: row.postalCode, city: row.city, province: row.province,
+    }));
+  }
+  if (body.suppliers) {
+    payload.suppliers = body.suppliers.map((row) => ({
+      company_code: row.companyCode, code: row.code, name: row.name, trade_name: row.tradeName, nif: row.nif, address: row.address,
+      postal_code: row.postalCode, city: row.city, province: row.province, country: row.country, phone: row.phone, email: row.email,
+    }));
+  }
+  if (body.paymentRemittances) {
+    payload.payment_remittances = body.paymentRemittances.map((row) => ({
+      company_code: row.companyCode, number: row.number, remittance_date: row.remittanceDate, value_date: row.valueDate,
+      bank_code: row.bankCode, remittance_type: row.remittanceType, csb_norm: row.csbNorm, total: row.total, effects: row.effects,
+      provisional: row.provisional,
+    }));
+  }
+  if (body.paymentItems) {
+    payload.payment_items = body.paymentItems.map((row) => ({
+      company_code: row.companyCode, remittance_number: row.remittanceNumber, movement_id: row.movementId, effect_number: row.effectNumber,
+      supplier_code: row.supplierCode, invoice_number: row.invoiceNumber, invoice_date: row.invoiceDate, due_date: row.dueDate,
+      amount: row.amount, pending: row.pending, iban: row.iban,
+    }));
+  }
+  if (body.openItems) {
+    payload.open_items = body.openItems.map((row) => ({
+      company_code: row.companyCode, kind: row.kind, movement_id: row.movementId, counterpart_code: row.counterpartCode,
+      invoice_number: row.invoiceNumber, invoice_date: row.invoiceDate, due_date: row.dueDate, amount: row.amount, pending: row.pending,
+      remittance_number: row.remittanceNumber, bank_code: row.bankCode, effect_type: row.effectType, taken_on: body.takenOn ?? null,
+    }));
+    payload.open_items_replace = body.openItemsReplace === true;
+  }
+  return payload;
+}
 
 export type SageIngestBody = z.infer<typeof sageIngestSchema>;
 
@@ -454,6 +565,11 @@ export function describeIngest(body: SageIngestBody, counts: Record<string, numb
     ["order_documents", "pedidos uno a uno"],
     ["incidents", "de abonos e incidencias"],
     ["lookups", "códigos de Sage"],
+    ["company_details", "sociedades con NIF"],
+    ["suppliers", "proveedores"],
+    ["payment_remittances", "remesas de pagos"],
+    ["payment_items", "efectos en remesas"],
+    ["open_items", "de cartera pendiente"],
   ];
   for (const [key, label] of extra) {
     if (counts[key] !== undefined) parts.push(`${counts[key]} ${label}`);
