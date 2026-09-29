@@ -472,7 +472,7 @@ export function CampaignsManager() {
                 <p className="muted campaign-direct-sales-note">Incluye {campaign.directSalesCount} venta{campaign.directSalesCount === 1 ? "" : "s"} directa{campaign.directSalesCount === 1 ? "" : "s"} ({currencyFormatter.format(campaign.directSaleValue)}) sin pasar por leads.</p>
               ) : null}
               {adsStats.count > 0 ? (
-                <p className="muted campaign-direct-sales-note">Meta Ads: gasto {currencyFormatter.format(adsStats.spend)} · {numberFormatter.format(adsStats.leads)} lead{adsStats.leads === 1 ? "" : "s"} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2)}x</p>
+                <p className="muted campaign-direct-sales-note">Meta Ads: gasto {currencyFormatter.format(adsStats.spend)} · {numberFormatter.format(adsStats.leads)} lead{adsStats.leads === 1 ? "" : "s"} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2).replace(".", ",")}x</p>
               ) : null}
               {canEdit ? (
                 <div className="modal-actions campaign-card-actions">

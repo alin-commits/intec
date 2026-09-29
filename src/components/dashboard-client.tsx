@@ -855,7 +855,7 @@ export function DashboardClient() {
                     <td>{stats.total}</td><td>{stats.won}</td><td>{formatPercent(stats.total ? (stats.won / stats.total) * 100 : 0)}</td>
                     <td>{stats.directSales || "—"}</td>
                     <td>{currencyFormatter.format(stats.value)}</td>
-                    <td>{ads.count > 0 ? `${currencyFormatter.format(ads.spend)} · ${ads.roas.toFixed(2)}x` : "—"}</td>
+                    <td>{ads.count > 0 ? `${currencyFormatter.format(ads.spend)} · ${ads.roas.toFixed(2).replace(".", ",")}x` : "—"}</td>
                   </tr>
                 );
               })}

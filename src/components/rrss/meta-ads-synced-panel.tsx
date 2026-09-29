@@ -330,28 +330,28 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
 
   function exportarCsv() {
     const resumen: CsvSummaryItem[] = [
-      { label: `Gasto total (${periodoTexto})`, value: totales.gasto.toFixed(2) },
-      { label: "Ingresos", value: totales.ingresos.toFixed(2) },
+      { label: `Gasto total (${periodoTexto})`, value: totales.gasto.toFixed(2).replace(".", ",") },
+      { label: "Ingresos", value: totales.ingresos.toFixed(2).replace(".", ",") },
       { label: "Leads", value: totales.leads },
       { label: "Leads cualificados", value: totales.cualificados },
       { label: "Seguidores ganados", value: totales.seguidores },
       { label: "Impresiones", value: totales.impresiones },
       { label: "Clics", value: totales.clics },
-      { label: "CPL medio (€)", value: cpl.toFixed(2) },
-      { label: "ROAS medio", value: roas.toFixed(2) },
+      { label: "CPL medio (€)", value: cpl.toFixed(2).replace(".", ",") },
+      { label: "ROAS medio", value: roas.toFixed(2).replace(".", ",") },
     ];
     downloadCsvReport(`meta_ads_${desde}_${hasta}.csv`, resumen, filas, [
       { header: "Marca", value: (f) => f.marca },
       { header: "Campaña", value: (f) => f.nombre },
       { header: "Estado", value: (f) => f.estado },
-      { header: "Gasto (€)", value: (f) => f.gasto.toFixed(2) },
+      { header: "Gasto (€)", value: (f) => f.gasto.toFixed(2).replace(".", ",") },
       { header: "Impresiones", value: (f) => f.impresiones },
       { header: "Clics", value: (f) => f.clics },
       { header: "Leads", value: (f) => f.leads },
       { header: "Cualificados", value: (f) => f.cualificados },
       { header: "Seguidores ganados", value: (f) => f.seguidores },
-      { header: "Ingresos (€)", value: (f) => f.ingresos.toFixed(2) },
-      { header: "Coste por lead (€)", value: (f) => (f.leads > 0 ? (f.gasto / f.leads).toFixed(2) : "") },
+      { header: "Ingresos (€)", value: (f) => f.ingresos.toFixed(2).replace(".", ",") },
+      { header: "Coste por lead (€)", value: (f) => (f.leads > 0 ? (f.gasto / f.leads).toFixed(2).replace(".", ",") : "") },
     ]);
   }
 
@@ -366,7 +366,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
           { label: "Ingresos", value: currencyFormatter.format(totales.ingresos) },
           { label: "Leads", value: numberFormatter.format(totales.leads) },
           { label: "CPL medio", value: currencyFormatter.format(cpl) },
-          { label: "ROAS medio", value: `${roas.toFixed(2)}x` },
+          { label: "ROAS medio", value: `${roas.toFixed(2).replace(".", ",")}x` },
         ],
         sectionTitle: "Campañas",
         columns: [
@@ -404,7 +404,10 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     );
   }
 
-  const marcasConCuenta = units.filter((u) => cuentas.some((c) => c.business_unit_id === u.id && c.is_active));
+  // Las marcas que de verdad tienen algo que enseñar, no las que tienen cuenta:
+  // una campaña puede ser de una marca cuya cuenta está apagada, como la de
+  // Jender lanzada desde la cuenta de Intec.
+  const marcasConDatos = units.filter((u) => dias.some((d) => marcaDe.get(d.meta_campaign_id) === u.id));
 
   return (
     <section className="meta-synced">
@@ -433,7 +436,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
           <span>Marca</span>
           <select value={marca} onChange={(event) => { setMarca(event.target.value); setCampana("all"); }}>
             <option value="all">Todas las marcas</option>
-            {marcasConCuenta.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            {marcasConDatos.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
           </select>
         </label>
         <label>
@@ -465,7 +468,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         <KpiCard label="Leads" value={numberFormatter.format(totales.leads)} helper={totales.cualificados > 0 ? `${numberFormatter.format(totales.cualificados)} cualificados` : "sin cualificar todavía"} icon={<LeadsIcon />} tone="sky" delta="" />
         <KpiCard label="Seguidores ganados" value={numberFormatter.format(totales.seguidores)} helper="escritos a mano" icon={<HeartIcon />} tone="rose" delta="" />
         <KpiCard label="CPL medio" value={totales.leads > 0 ? currencyFormatter.format(cpl) : "—"} helper="coste por lead" icon={<ConversionIcon />} tone="amber" delta="" />
-        <KpiCard label="ROAS medio" value={totales.gasto > 0 ? `${roas.toFixed(2)}x` : "—"} helper="ingreso por euro gastado" icon={<UsuariosIcon />} tone="emerald" delta="" />
+        <KpiCard label="ROAS medio" value={totales.gasto > 0 ? `${roas.toFixed(2).replace(".", ",")}x` : "—"} helper="ingreso por euro gastado" icon={<UsuariosIcon />} tone="emerald" delta="" />
       </div>
 
       <div className="dashboard-grid">
