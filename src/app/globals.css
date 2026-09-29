@@ -1505,3 +1505,19 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .meta-manual-note { padding: 14px 18px; border-color: #e8d9b0; background: linear-gradient(90deg, #fdf7e7, #fff 70%); }
 .meta-manual-note strong { display: block; font-size: 14px; color: #78350f; }
 .meta-manual-note span { display: block; margin-top: 4px; color: #92400e; font-size: 13.5px; line-height: 1.5; }
+
+/* ---- La flecha de los desplegables ----
+   Cada navegador pinta la suya, y al lado del selector de fechas propio
+   desentonaban. Se dibuja una igual para todos, con el mismo gris que el icono
+   del calendario. `appearance: none` quita la nativa; el hueco a la derecha
+   evita que el texto se meta debajo. Los de selección múltiple se quedan como
+   están, que ahí la flecha no pinta nada. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5l5-5' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+select:not([multiple]):not([size]):disabled { opacity: .6; }

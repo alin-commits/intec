@@ -12,7 +12,7 @@ import { CampanasIcon, ConversionIcon, EuroIcon, LeadsIcon } from "@/components/
 import { CAMPAIGNS_ROLES, hasAnyRole, campaignStatusLabels } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
-import { currencyFormatter, formatDate, formatPercent } from "@/lib/format";
+import { currencyFormatter, numberFormatter, formatDate, formatPercent } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-report-pdf";
 import { dateKeyInMadrid } from "@/lib/dates";
@@ -24,7 +24,7 @@ const STORAGE_KEY = "intec-demo-campaigns";
 
 type CampaignDraft = Omit<Campaign, "id" | "createdAt">;
 type LeadStub = { campaignId: string | null; status: LeadStatus; saleValue: number | null };
-type AdsStub = { campaignId: string | null; amountSpent: number; revenue: number };
+type AdsStub = { campaignId: string | null; amountSpent: number; revenue: number; leads: number };
 
 function blankDraft(units: BusinessUnit[]): CampaignDraft {
   return {
@@ -91,7 +91,8 @@ function adsStatsFor(campaign: Campaign, ads: AdsStub[]) {
   const rows = ads.filter((ad) => ad.campaignId === campaign.id);
   const spend = rows.reduce((sum, ad) => sum + ad.amountSpent, 0);
   const revenue = rows.reduce((sum, ad) => sum + ad.revenue, 0);
-  return { count: rows.length, spend, revenue, roas: spend > 0 ? revenue / spend : 0 };
+  const leads = rows.reduce((sum, ad) => sum + ad.leads, 0);
+  return { count: rows.length, spend, revenue, leads, roas: spend > 0 ? revenue / spend : 0 };
 }
 
 const NOTIFIED_STATUSES: CampaignStatus[] = ["active", "finished", "archived"];
@@ -143,8 +144,17 @@ export function CampaignsManager() {
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, created_at, updated_at").order("created_at", { ascending: false }),
       fetchAllPages((from, to) => supabase.from("leads").select("campaign_id, status, sale_value").order("id").range(from, to)),
-      supabase.from("meta_ads_entries").select("campaign_id, amount_spent, revenue").not("campaign_id", "is", null),
+      // El gasto sale de lo que manda Meta, no de lo que alguien escribió a
+      // mano: se cruza por la campaña de Meta que esté atada a esta.
+      supabase.from("meta_campaigns").select("meta_id, campaign_id").not("campaign_id", "is", null),
       supabase.auth.getUser(),
+    ]);
+
+    // El gasto por día se pagina: en un año son miles de filas y PostgREST
+    // devuelve mil por petición.
+    const [dias, extras] = await Promise.all([
+      fetchAllPages((from, to) => supabase.from("meta_insights_daily").select("meta_campaign_id, spend, leads").order("id").range(from, to)).then((r) => r.data),
+      supabase.from("meta_campaign_extras").select("meta_campaign_id, revenue"),
     ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar las campañas."));
@@ -154,7 +164,20 @@ export function CampaignsManager() {
     setCampaigns((campaignData ?? []).map((row) => mapCampaignRow(row as Record<string, unknown>)));
     setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>)));
     if (adsError) setMessage(PARTIAL_LOAD_MESSAGE);
-    setAds((adsData ?? []).map((row) => ({ campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), revenue: Number(row.revenue ?? 0) })));
+    // Una fila por campaña de la aplicación, sumando todas sus campañas de Meta.
+    const atadaA = new Map((adsData ?? []).map((row) => [row.meta_id as string, row.campaign_id as string]));
+    const ingresoDe = new Map((extras.data ?? []).map((row) => [row.meta_campaign_id as string, Number(row.revenue ?? 0)]));
+    const porCampana = new Map<string, AdsStub>();
+    const apunta = (metaId: string, gasto: number, leads: number, ingresos: number) => {
+      const destino = atadaA.get(metaId);
+      if (!destino) return;
+      const fila = porCampana.get(destino) ?? { campaignId: destino, amountSpent: 0, revenue: 0, leads: 0 };
+      fila.amountSpent += gasto; fila.leads += leads; fila.revenue += ingresos;
+      porCampana.set(destino, fila);
+    };
+    for (const row of dias) apunta(String(row.meta_campaign_id), Number(row.spend ?? 0), Number(row.leads ?? 0), 0);
+    for (const [metaId, ingresos] of ingresoDe) apunta(metaId, 0, 0, ingresos);
+    setAds([...porCampana.values()]);
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
@@ -449,7 +472,7 @@ export function CampaignsManager() {
                 <p className="muted campaign-direct-sales-note">Incluye {campaign.directSalesCount} venta{campaign.directSalesCount === 1 ? "" : "s"} directa{campaign.directSalesCount === 1 ? "" : "s"} ({currencyFormatter.format(campaign.directSaleValue)}) sin pasar por leads.</p>
               ) : null}
               {adsStats.count > 0 ? (
-                <p className="muted campaign-direct-sales-note">Meta Ads: {adsStats.count} entrada{adsStats.count === 1 ? "" : "s"} vinculada{adsStats.count === 1 ? "" : "s"} · gasto {currencyFormatter.format(adsStats.spend)} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2)}x</p>
+                <p className="muted campaign-direct-sales-note">Meta Ads: gasto {currencyFormatter.format(adsStats.spend)} · {numberFormatter.format(adsStats.leads)} lead{adsStats.leads === 1 ? "" : "s"} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2)}x</p>
               ) : null}
               {canEdit ? (
                 <div className="modal-actions campaign-card-actions">

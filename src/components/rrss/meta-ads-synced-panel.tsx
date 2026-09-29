@@ -26,10 +26,11 @@ import type { BusinessUnit } from "@/lib/types";
  */
 
 type Cuenta = { account_id: string; name: string; business_unit_id: string | null; is_active: boolean };
-type Campana = { meta_id: string; account_id: string; name: string; status: string | null; objective: string | null };
+type Campana = { meta_id: string; account_id: string; name: string; status: string | null; objective: string | null; campaign_id: string | null };
 type Dia = { meta_campaign_id: string; day: string; spend: number; impressions: number; clicks: number; leads: number };
 type Extra = { meta_campaign_id: string; revenue: number; qualified_leads: number; followers_gained: number; notes: string | null };
 type Suelta = { id: string; campaign_name: string; revenue: number; qualified_leads: number; followers_gained: number; notes: string | null };
+type CampanaApp = { id: string; name: string; business_unit_id: string };
 
 type Fila = {
   id: string;
@@ -43,10 +44,26 @@ type Fila = {
   cualificados: number;
   seguidores: number;
   ingresos: number;
+  campanaApp: string | null;
 };
 
 const hoy = () => new Date().toISOString().slice(0, 10);
 const haceDias = (dias: number) => new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
+const primeroDeEnero = () => `${new Date().getFullYear()}-01-01`;
+
+/**
+ * Los periodos de siempre, para no tener que escribir dos fechas cada vez.
+ * "Todo" arranca en el primer día que haya guardado, no en una fecha inventada:
+ * así el campo enseña una fecha real y el gráfico no dibuja años vacíos.
+ */
+const PERIODOS = [
+  { clave: "30", texto: "Últimos 30 días" },
+  { clave: "90", texto: "Últimos 90 días" },
+  { clave: "anio", texto: "Este año" },
+  { clave: "todo", texto: "Todo el histórico" },
+  { clave: "libre", texto: "Fechas concretas" },
+] as const;
+type Periodo = (typeof PERIODOS)[number]["clave"];
 const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const etiquetaMes = (mes: string) => `${meses[Number(mes.slice(5, 7)) - 1]} ${mes.slice(2, 4)}`;
 const estadoLegible: Record<string, string> = { ACTIVE: "Activa", PAUSED: "Pausada", ARCHIVED: "Archivada", DELETED: "Borrada", IN_PROCESS: "En proceso", WITH_ISSUES: "Con avisos" };
@@ -54,8 +71,11 @@ const estadoLegible: Record<string, string> = { ACTIVE: "Activa", PAUSED: "Pausa
 const vacio = { revenue: 0, qualified_leads: 0, followers_gained: 0, notes: null as string | null };
 
 export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; canEdit: boolean }) {
+  const [periodo, setPeriodo] = useState<Periodo>("90");
   const [desde, setDesde] = useState(() => haceDias(90));
   const [hasta, setHasta] = useState(hoy);
+  /** El día más antiguo que hay guardado, para que "Todo" no invente fechas. */
+  const [primerDia, setPrimerDia] = useState<string | null>(null);
   const [marca, setMarca] = useState("all");
   const [campana, setCampana] = useState("all");
   const [cuentas, setCuentas] = useState<Cuenta[]>([]);
@@ -63,10 +83,13 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
   const [dias, setDias] = useState<Dia[]>([]);
   const [extras, setExtras] = useState<Extra[]>([]);
   const [sueltas, setSueltas] = useState<Suelta[]>([]);
+  const [campanasApp, setCampanasApp] = useState<CampanaApp[]>([]);
   const [ultima, setUltima] = useState<{ started_at: string } | null>(null);
   const [estado, setEstado] = useState<"cargando" | "listo" | "vacio" | "error">("cargando");
   const [editando, setEditando] = useState<Fila | null>(null);
   const [borrador, setBorrador] = useState(vacio);
+  /** A qué campaña de la aplicación se ata la de Meta, "" si a ninguna. */
+  const [enlace, setEnlace] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [asignando, setAsignando] = useState<Record<string, string>>({});
@@ -76,15 +99,17 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
 
   async function cargar() {
     const supabase = createClient();
-    const [cuentasRes, campanasRes, diasRes, extrasRes, sueltasRes, runRes] = await Promise.all([
+    const [cuentasRes, campanasRes, diasRes, extrasRes, sueltasRes, runRes, primeroRes, appRes] = await Promise.all([
       supabase.from("meta_ad_accounts").select("account_id, name, business_unit_id, is_active"),
-      supabase.from("meta_campaigns").select("meta_id, account_id, name, status, objective"),
+      supabase.from("meta_campaigns").select("meta_id, account_id, name, status, objective, campaign_id"),
       supabase.from("meta_insights_daily").select("meta_campaign_id, day, spend, impressions, clicks, leads")
         .gte("day", desde).lte("day", hasta).order("day"),
       supabase.from("meta_campaign_extras").select("meta_campaign_id, revenue, qualified_leads, followers_gained, notes"),
       // Lo que quedó escrito a mano y todavía no está colgado de ninguna campaña.
       supabase.from("meta_ads_entries").select("id, campaign_name, revenue, qualified_leads, followers_gained, notes"),
       supabase.from("meta_sync_runs").select("started_at").order("started_at", { ascending: false }).limit(1),
+      supabase.from("meta_insights_daily").select("day").order("day", { ascending: true }).limit(1),
+      supabase.from("campaigns").select("id, name, business_unit_id").order("name"),
     ]);
     // Lo que Meta da es lo que sostiene la pestaña; si falla, no hay nada que
     // enseñar. Lo escrito a mano, en cambio, puede no estar todavía —entre que
@@ -101,6 +126,8 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     setSueltas((sueltasRes.data ?? []) as Suelta[]);
     setManualDisponible(!extrasRes.error);
     setUltima(((runRes.data ?? [])[0] as { started_at: string }) ?? null);
+    setPrimerDia(((primeroRes.data ?? [])[0] as { day: string } | undefined)?.day ?? null);
+    setCampanasApp((appRes.data ?? []) as CampanaApp[]);
     setEstado((cuentasRes.data ?? []).length === 0 ? "vacio" : "listo");
   }
 
@@ -158,9 +185,10 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         cualificados: Number(extra?.qualified_leads ?? 0),
         seguidores: Number(extra?.followers_gained ?? 0),
         ingresos: Number(extra?.revenue ?? 0),
+        campanaApp: campanasApp.find((c) => c.id === ficha?.campaign_id)?.name ?? null,
       };
     }).sort((a, b) => b.gasto - a.gasto);
-  }, [visibles, campanas, extraDe, marcaDe, units]);
+  }, [visibles, campanas, extraDe, marcaDe, units, campanasApp]);
 
   const totales = useMemo(() => filas.reduce((a, f) => ({
     gasto: a.gasto + f.gasto, impresiones: a.impresiones + f.impresiones, clics: a.clics + f.clics,
@@ -197,6 +225,17 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       && !nombresPuestos.has((s.campaign_name ?? "").trim().toLowerCase()));
   }, [sueltas, extras, campanas]);
 
+  function elegirPeriodo(nuevo: Periodo) {
+    setPeriodo(nuevo);
+    if (nuevo === "libre") return;
+    setHasta(hoy());
+    if (nuevo === "30") setDesde(haceDias(30));
+    if (nuevo === "90") setDesde(haceDias(90));
+    if (nuevo === "anio") setDesde(primeroDeEnero());
+    // Sin nada guardado todavía, "Todo" se queda en un año hacia atrás.
+    if (nuevo === "todo") setDesde(primerDia ?? haceDias(365));
+  }
+
   function abrirEdicion(fila: Fila) {
     const extra = extraDe.get(fila.id);
     setBorrador({
@@ -205,6 +244,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       followers_gained: Number(extra?.followers_gained ?? 0),
       notes: extra?.notes ?? null,
     });
+    setEnlace(campanas.find((c) => c.meta_id === fila.id)?.campaign_id ?? "");
     setEditando(fila);
     setAviso(null);
   }
@@ -223,6 +263,15 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         updated_at: new Date().toISOString(),
       }, { onConflict: "meta_campaign_id" });
       if (error) throw error;
+      // El enlace vive en la ficha de la campaña, no en los extras: es lo que
+      // hace que la pestaña de Campañas vea este gasto.
+      const actual = campanas.find((c) => c.meta_id === editando.id)?.campaign_id ?? "";
+      if (enlace !== actual) {
+        const { error: errorEnlace } = await supabase.from("meta_campaigns")
+          .update({ campaign_id: enlace || null, updated_at: new Date().toISOString() })
+          .eq("meta_id", editando.id);
+        if (errorEnlace) throw errorEnlace;
+      }
       await cargar();
       setEditando(null);
     } catch (causa) {
@@ -264,11 +313,11 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
   const cpl = totales.leads > 0 ? totales.gasto / totales.leads : 0;
   const roas = totales.gasto > 0 ? totales.ingresos / totales.gasto : 0;
   const ctr = totales.impresiones > 0 ? (totales.clics / totales.impresiones) * 100 : 0;
-  const periodo = `${desde} a ${hasta}`;
+  const periodoTexto = `${desde} a ${hasta}`;
 
   function exportarCsv() {
     const resumen: CsvSummaryItem[] = [
-      { label: `Gasto total (${periodo})`, value: totales.gasto.toFixed(2) },
+      { label: `Gasto total (${periodoTexto})`, value: totales.gasto.toFixed(2) },
       { label: "Ingresos", value: totales.ingresos.toFixed(2) },
       { label: "Leads", value: totales.leads },
       { label: "Leads cualificados", value: totales.cualificados },
@@ -298,7 +347,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     try {
       await generatePdfReport<Fila>({
         title: "Meta Ads",
-        subtitle: `Periodo: ${periodo}  ·  ${filas.length} campaña${filas.length === 1 ? "" : "s"}  ·  datos de la API de Meta`,
+        subtitle: `Periodo: ${periodoTexto}  ·  ${filas.length} campaña${filas.length === 1 ? "" : "s"}  ·  datos de la API de Meta`,
         stats: [
           { label: "Gasto", value: currencyFormatter.format(totales.gasto) },
           { label: "Ingresos", value: currencyFormatter.format(totales.ingresos) },
@@ -381,8 +430,20 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
             {campanasElegibles.map((c) => <option key={c.meta_id} value={c.meta_id}>{c.name}</option>)}
           </select>
         </label>
-        <label><span>Desde</span><DateField value={desde} max={hasta} onChange={(value) => setDesde(value || haceDias(90))} /></label>
-        <label><span>Hasta</span><DateField value={hasta} min={desde} onChange={(value) => setHasta(value || hoy())} /></label>
+        <label>
+          <span>Periodo</span>
+          <select value={periodo} onChange={(event) => elegirPeriodo(event.target.value as Periodo)}>
+            {PERIODOS.map((opcion) => <option key={opcion.clave} value={opcion.clave}>{opcion.texto}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Desde</span>
+          <DateField value={desde} max={hasta} onChange={(value) => { setDesde(value || haceDias(90)); setPeriodo("libre"); }} />
+        </label>
+        <label>
+          <span>Hasta</span>
+          <DateField value={hasta} min={desde} onChange={(value) => { setHasta(value || hoy()); setPeriodo("libre"); }} />
+        </label>
       </div>
 
       <div className="kpi-grid kpi-grid-main">
@@ -425,7 +486,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
             <thead>
               <tr>
                 <th>Campaña</th><th>Marca</th><th>Estado</th><th>Gasto</th><th>Impresiones</th><th>Clics</th>
-                <th>Leads</th><th>Cualif.</th><th>Seguidores</th><th>Ingresos</th><th>CPL</th>
+                <th>Leads</th><th>Cualif.</th><th>Seguidores</th><th>Ingresos</th><th>CPL</th><th>Atada a</th>
                 {canEdit ? <th aria-label="Acciones" /> : null}
               </tr>
             </thead>
@@ -443,6 +504,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
                   <td>{f.seguidores > 0 ? numberFormatter.format(f.seguidores) : <span className="muted">—</span>}</td>
                   <td>{f.ingresos > 0 ? currencyFormatter.format(f.ingresos) : <span className="muted">—</span>}</td>
                   <td>{f.leads > 0 ? currencyFormatter.format(f.gasto / f.leads) : <span className="muted">—</span>}</td>
+                  <td>{f.campanaApp ?? <span className="muted">sin atar</span>}</td>
                   {canEdit ? (
                     <td>
                       {manualDisponible ? (
@@ -453,7 +515,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
                 </tr>
               ))}
               {filas.length === 0 ? (
-                <tr><td colSpan={canEdit ? 12 : 11} className="muted">No hay gasto en este periodo con los filtros puestos.</td></tr>
+                <tr><td colSpan={canEdit ? 13 : 12} className="muted">No hay gasto en este periodo con los filtros puestos.</td></tr>
               ) : null}
             </tbody>
           </table>
@@ -523,6 +585,25 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
             <span>Seguidores ganados</span>
             <input type="number" min={0} step="1" value={borrador.followers_gained}
               onChange={(event) => setBorrador((b) => ({ ...b, followers_gained: Number(event.target.value) || 0 }))} />
+          </label>
+        </div>
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 14 }}>
+          <label>
+            <span>Campaña de la aplicación</span>
+            <select value={enlace} onChange={(event) => setEnlace(event.target.value)}>
+              <option value="">Sin atar a ninguna</option>
+              {campanasApp
+                .filter((c) => {
+                  // Solo las de la misma marca: atar la campaña de una marca a
+                  // la de otra es meter su gasto donde no es.
+                  const suya = cuentas.find((cu) => cu.account_id === campanas.find((mc) => mc.meta_id === editando?.id)?.account_id);
+                  return !suya?.business_unit_id || c.business_unit_id === suya.business_unit_id;
+                })
+                .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <small className="muted">
+              Atarla hace que su gasto y sus leads salgan en la pestaña de Campañas.
+            </small>
           </label>
         </div>
         <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 14 }}>
