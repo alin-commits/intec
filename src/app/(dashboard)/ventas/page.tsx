@@ -1,5 +1,5 @@
-import { SalesDashboardView } from "@/components/sales-dashboard-view";
+import { SalesDashboard } from "@/components/sales/sales-dashboard";
 
 export default function SalesPage() {
-  return <SalesDashboardView />;
+  return <SalesDashboard />;
 }

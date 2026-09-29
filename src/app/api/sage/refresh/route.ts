@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { hasAnyRole, SALES_ROLES } from "@/lib/constants";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/types";
 
@@ -30,10 +31,27 @@ async function allowedClient() {
   return { supabase, userId: user.id };
 }
 
+/**
+ * Da por caducadas las peticiones que nadie recoge. Lo hacía solo el agente al
+ * preguntar, y con el servidor de Sage apagado nadie preguntaba: la petición se
+ * quedaba "esperando" para siempre y bloqueaba el botón.
+ */
+async function expireForgottenRequests() {
+  const admin = createAdminClient();
+  if (!admin) return;
+  const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  await admin
+    .from("sage_refresh_requests")
+    .update({ status: "caducada", finished_at: new Date().toISOString(), message: "El servidor de Sage no recogió la petición a tiempo." })
+    .eq("status", "pendiente")
+    .lt("requested_at", cutoff);
+}
+
 export async function GET() {
   const access = await allowedClient();
   if ("error" in access) return access.error;
   const { supabase } = access;
+  await expireForgottenRequests();
   const [latest, agent] = await Promise.all([
     supabase.from("sage_refresh_requests").select(COLUMNS).order("requested_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("sage_agent_status").select("last_poll_at").eq("id", 1).maybeSingle(),
@@ -49,6 +67,7 @@ export async function POST(request: Request) {
   const access = await allowedClient();
   if ("error" in access) return access.error;
   const { supabase, userId } = access;
+  await expireForgottenRequests();
 
   let days = 2;
   try {

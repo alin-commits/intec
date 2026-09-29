@@ -1,0 +1,217 @@
+"use client";
+
+import { KpiCard } from "@/components/kpi-card";
+import { TrendChart } from "@/components/charts/trend-chart";
+import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, RefreshIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
+import { numberFormatter } from "@/lib/format";
+import { addMonths, trustedNewCustomersFrom } from "@/lib/sage-panel";
+import { euros, monthName, monthNames, ticketFormatter, variation, delta } from "@/lib/sales-model";
+import { createClient } from "@/lib/supabase/client";
+import type { CustomerKind, SalesContext } from "./sales-context";
+import { snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
+import { DataTable, LoadFailed, Panel, share, shortDate, useSageQuery, type Column } from "./sales-ui";
+import type { CustomerRow } from "./sales-list-modal";
+
+/*
+  Clientes: cuántos compran, cuántos son nuevos, cuántos repiten y cuántos se
+  han ido. Cada cifra abre la lista con nombre y teléfono, y el gráfico filtra
+  por mes al pulsarlo ("¿quién compró en agosto?": pulsa agosto y luego la
+  tarjeta).
+*/
+
+type MonthlyRow = { month: string; activos: number; nuevos: number; neto: number };
+
+export function CustomersPage({ ctx }: { ctx: SalesContext }) {
+  const { filters, shownYear, period } = ctx;
+  const counts = useCustomerCounts(ctx);
+  const before = useCustomerCounts(ctx, true);
+  const totals = useCustomerTotals(ctx);
+  const reload = ctx.reloadKey;
+  const monthlyArgs = { p_from: `${shownYear - 1}-01-01`, p_to: `${shownYear}-12-31`, p_company: ctx.rpc.p_company, p_reps: ctx.rpc.p_reps, p_series: ctx.rpc.p_series };
+  const monthly = useSageQuery<{ rows: MonthlyRow[]; firstDay: string | null }>(ctx.detail.customers ? JSON.stringify(["clientes-mes", monthlyArgs, reload]) : null, async () => {
+    const supabase = createClient();
+    const [rows, first] = await Promise.all([
+      supabase.rpc("sage_customer_monthly", monthlyArgs),
+      supabase.from("sage_customer_days").select("day").order("day").limit(1),
+    ]);
+    const error = rows.error ?? first.error;
+    return { data: error ? null : { rows: (rows.data ?? []) as MonthlyRow[], firstDay: ((first.data ?? [])[0] as { day: string } | undefined)?.day ?? null }, error };
+  });
+  const listArgs = { p_kind: "activos", p_from: period.from, p_to: period.to, ...ctx.rpc };
+  const top = useSageQuery<CustomerRow[]>(ctx.detail.customers ? JSON.stringify(["clientes-top", listArgs, reload]) : null, async () =>
+    await createClient().rpc("sage_customer_list", listArgs));
+
+  const lastMonthIndex = shownYear === ctx.today.getFullYear() ? ctx.today.getMonth() : 11;
+  const monthKeys = Array.from({ length: lastMonthIndex + 1 }, (_, index) => `${shownYear}-${String(index + 1).padStart(2, "0")}`);
+  const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;
+  const periodName = filters.month ? monthName(filters.month) : String(shownYear);
+
+  // En los primeros meses del histórico todos parecen nuevos: no hay nada antes.
+  const firstMonth = ctx.detail.customers ? monthly.data?.firstDay?.slice(0, 7) ?? null : totals.data?.firstMonth?.slice(0, 7) ?? null;
+  const trustedFrom = trustedNewCustomersFrom(firstMonth);
+  const newTrusted = (month: string) => trustedFrom !== null && month >= trustedFrom;
+
+  // ---- Gráfico por mes ----
+  const points = (() => {
+    if (ctx.detail.customers) {
+      const byMonth = new Map((monthly.data?.rows ?? []).map((row) => [row.month, row]));
+      return monthKeys.map((key, index) => ({
+        label: monthNames[index],
+        activos: Number(byMonth.get(key)?.activos ?? 0),
+        nuevos: newTrusted(key) ? Number(byMonth.get(key)?.nuevos ?? 0) : 0,
+        anterior: Number(byMonth.get(addMonths(key, -12))?.activos ?? 0),
+      }));
+    }
+    const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
+    const byMonth = new Map<string, { active: number; fresh: number }>();
+    for (const row of (totals.data?.monthly ?? []).filter(inCompany)) {
+      const key = row.month.slice(0, 7);
+      const entry = byMonth.get(key) ?? { active: 0, fresh: 0 };
+      entry.active += Number(row.active_customers);
+      entry.fresh += Number(row.new_customers);
+      byMonth.set(key, entry);
+    }
+    return monthKeys.map((key, index) => ({
+      label: monthNames[index],
+      activos: byMonth.get(key)?.active ?? 0,
+      nuevos: newTrusted(key) ? byMonth.get(key)?.fresh ?? 0 : 0,
+      anterior: byMonth.get(addMonths(key, -12))?.active ?? 0,
+    }));
+  })();
+  const showNew = monthKeys.some(newTrusted);
+  const hasBefore = points.some((point) => point.anterior > 0);
+
+  const open = (kind: CustomerKind, title: string, description: string, days?: number) =>
+    ctx.openList({ type: "clientes", kind, days, title, description });
+  const card = (data: CustomerCounts | null, field: keyof CustomerCounts) => (data ? numberFormatter.format(data[field]) : "…");
+  const compare = (field: keyof CustomerCounts) =>
+    counts.data && before.data && ctx.comparisonAvailable ? delta(variation(counts.data[field], before.data[field])) : { delta: "Sin comparación", positive: true };
+
+  type TopRow = CustomerRow;
+  const topColumns: Column<TopRow>[] = [
+    { key: "cliente", header: "Cliente", text: true, render: (row) => (
+      <span className="sales-article">
+        <strong>{row.trade_name || row.name}</strong>
+        <small>{[row.trade_name ? row.name : null, row.municipality, row.province].filter(Boolean).join(" · ")}</small>
+      </span>
+    ), sort: (row) => row.trade_name || row.name },
+    { key: "compra", header: "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+    { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents) },
+    { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => (row.rep_code === null ? <span className="muted">—</span> : ctx.repOf(row.company_code, row.rep_code).label), sort: (row) => (row.rep_code === null ? "" : ctx.repOf(row.company_code, row.rep_code).label) },
+    { key: "ultima", header: "Última compra", render: (row) => shortDate(row.last_purchase), sort: (row) => row.last_purchase ?? "" },
+  ];
+
+  const dormant = totals.data ? snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.company) : null;
+
+  return (
+    <div className="page-stack">
+      {ctx.detail.customers ? (
+        <>
+          <section className="sales-section">
+            <div className="sales-section-heading">
+              <h2>Clientes de {periodName}</h2>
+              <p>
+                Pulsa una cifra para ver quiénes son. {filters.family ? `Solo los que compran ${ctx.familyName(filters.family)}. ` : ""}
+                {ctx.comparisonAvailable ? `Las flechas comparan con el mismo periodo de ${shownYear - 1}.` : ""}
+              </p>
+            </div>
+            {counts.failed ? <LoadFailed what="las cifras de clientes" /> : null}
+            <div className="kpi-grid kpi-grid-sales">
+              <KpiCard label="Con compra" value={card(counts.data, "activos")} helper="clientes distintos" icon={<UsuariosIcon />} tone="sky" {...compare("activos")}
+                onClick={() => open("activos", `Clientes con compra en ${periodName}`, "Todos los que han comprado en el periodo, de más a menos venta.")} actionLabel="Ver lista" />
+              <KpiCard label="Nuevos" value={card(counts.data, "nuevos")} helper="primera compra de su vida" icon={<CalendarIcon />} tone="emerald" {...compare("nuevos")}
+                onClick={() => open("nuevos", `Clientes nuevos en ${periodName}`, "Su primera compra de siempre cae en el periodo.")} actionLabel="Ver lista" />
+              <KpiCard label="Recurrentes" value={counts.data ? share(counts.data.recurrentes, counts.data.activos) : "…"} helper={counts.data ? `${numberFormatter.format(counts.data.recurrentes)} ya compraban el año anterior` : "cargando"} delta="Sin comparación" icon={<HeartIcon />} tone="indigo"
+                onClick={() => open("recurrentes", `Clientes recurrentes en ${periodName}`, "Compran en el periodo y también compraron en los 12 meses anteriores.")} actionLabel="Ver lista" />
+              <KpiCard label="Recuperados" value={card(counts.data, "recuperados")} helper="vuelven tras 6 meses o más sin comprar" delta="Sin comparación" icon={<RefreshIcon />} tone="emerald"
+                onClick={() => open("recuperados", `Clientes recuperados en ${periodName}`, "Vuelven a comprar después de 180 días o más sin hacerlo.")} actionLabel="Ver lista" />
+              <KpiCard label="Venta por cliente" value={counts.data && counts.data.activos ? ticketFormatter.format(counts.data.neto_activos / counts.data.activos) : "…"} helper="de media en el periodo" icon={<EuroIcon />} tone="amber"
+                {...(counts.data && before.data && counts.data.activos && before.data.activos && ctx.comparisonAvailable
+                  ? delta(variation(counts.data.neto_activos / counts.data.activos, before.data.neto_activos / before.data.activos))
+                  : { delta: "Sin comparación", positive: true })} />
+            </div>
+          </section>
+
+          <section className="sales-section">
+            <div className="sales-section-heading">
+              <h2>A quién llamar</h2>
+              <p>Contado hasta el {shortDate(period.to)}. Clientes del último año que han dejado de comprar o llevan tiempo sin hacerlo.</p>
+            </div>
+            <div className="kpi-grid kpi-grid-sales">
+              <KpiCard label="Han dejado de comprar" value={card(counts.data, "perdidos")} helper={counts.data ? `compraban ${euros(counts.data.neto_perdidos)}` : "cargando"} delta="Sin comparación" icon={<XCircleIcon />} tone="rose"
+                onClick={() => open("perdidos", "Clientes que han dejado de comprar", "Compraban en el año anterior a los últimos 90 días y desde entonces nada.")} actionLabel="Ver a quién llamar" />
+              <KpiCard label="Más de 30 días sin comprar" value={card(counts.data, "sin_compra_30")} helper="clientes del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="amber"
+                onClick={() => open("sin_compra", "Clientes con más de 30 días sin comprar", "Compraron en el último año, pero no en los últimos 30 días.", 30)} actionLabel="Ver lista" />
+              <KpiCard label="Más de 60 días" value={card(counts.data, "sin_compra_60")} helper="clientes del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="amber"
+                onClick={() => open("sin_compra", "Clientes con más de 60 días sin comprar", "Compraron en el último año, pero no en los últimos 60 días.", 60)} actionLabel="Ver lista" />
+              <KpiCard label="Más de 90 días" value={card(counts.data, "sin_compra_90")} helper="clientes del último año" delta="Sin comparación" icon={<CalendarIcon />} tone="rose"
+                onClick={() => open("sin_compra", "Clientes con más de 90 días sin comprar", "Compraron en el último año, pero no en los últimos 90 días.", 90)} actionLabel="Ver lista" />
+            </div>
+          </section>
+        </>
+      ) : (
+        <section className="panel sales-warning">
+          <div>
+            <strong>Las listas de clientes con nombre llegarán con la próxima lectura completa de Sage</strong>
+            <span>
+              Mientras, se ven los totales que ya había: cuántos compran y cuántos son nuevos cada mes
+              {dormant ? `, y ${numberFormatter.format(dormant.count)} clientes que han dejado de comprar (compraban ${euros(dormant.amount)} al año)` : ""}.
+              En cuanto el servidor de Sage mande el detalle, cada cifra se podrá pulsar para ver quiénes son.
+            </span>
+          </div>
+        </section>
+      )}
+
+      <section className="sales-board">
+        <Panel
+          title={`Clientes por mes en ${shownYear}`}
+          subtitle={`Cuántos compran cada mes${showNew ? " y cuántos por primera vez" : ""}${hasBefore ? `, con ${shownYear - 1} en gris` : ""}${!ctx.detail.customers && filters.company === null ? " (suma de sociedades)" : ""}. Pulsa un mes para ver sus clientes`}
+          className="panel chart-panel sales-board-full"
+        >
+          {monthly.failed ? <LoadFailed what="los clientes por mes" /> : (
+            <TrendChart
+              data={points}
+              series={[
+                ...(hasBefore ? [{ key: "anterior", label: String(shownYear - 1), color: "#cbd5e1" }] : []),
+                { key: "activos", label: "Con compra", color: "#0ea5e9" },
+                ...(showNew ? [{ key: "nuevos", label: "Nuevos", color: "#10b981" }] : []),
+              ]}
+              ariaLabel={`Clientes por mes en ${shownYear}`}
+              onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
+              selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
+            />
+          )}
+          {!ctx.detail.customers && (filters.channel || filters.repKey || filters.family) ? (
+            <p className="sales-section-note">Estos totales no se pueden partir por canal, comercial ni familia: son de la sociedad entera.</p>
+          ) : null}
+        </Panel>
+
+        {ctx.detail.customers ? (
+          <Panel
+            title={`Mejores clientes de ${periodName}`}
+            subtitle="Por venta en el periodo, con los filtros puestos"
+            trailing={<button type="button" className="sales-chip sales-chip-pick" onClick={() => open("activos", `Clientes con compra en ${periodName}`, "Todos los que han comprado en el periodo, de más a menos venta.")}>Ver todos con teléfono</button>}
+            className="panel table-panel sales-board-full"
+          >
+            {top.failed ? <LoadFailed what="los mejores clientes" /> : (
+              <DataTable
+                rows={(top.data ?? []).slice(0, 200)}
+                columns={topColumns}
+                rowKey={(row) => `${row.company_code}-${row.customer_code}`}
+                initialSort={{ key: "compra", desc: true }}
+                limit={15}
+                empty={top.loading ? "Cargando…" : "Ningún cliente con compra con estos filtros."}
+              />
+            )}
+          </Panel>
+        ) : null}
+      </section>
+
+      {ctx.detail.customers && counts.data ? (
+        <p className="sales-section-note">
+          <ConversionIcon /> Concentración: los 10 mejores clientes suman {share((top.data ?? []).slice(0, 10).reduce((sum, row) => sum + Number(row.net_amount), 0), counts.data.neto_activos)} de la venta a clientes del periodo.
+        </p>
+      ) : null}
+    </div>
+  );
+}

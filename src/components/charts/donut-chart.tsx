@@ -12,6 +12,10 @@ type DonutChartProps = {
    * para filtrar—, y repetirlos sería la misma lista dos veces.
    */
   showLegend?: boolean;
+  /** Para filtrar pulsando una porción, como en Power BI. */
+  onSelect?: (label: string) => void;
+  /** La porción elegida: las demás se apagan un poco. */
+  selectedLabel?: string | null;
 };
 
 const SIZE = 160;
@@ -19,7 +23,7 @@ const STROKE = 26;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin datos en este periodo.", valueFormatter, showLegend = true }: DonutChartProps) {
+export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin datos en este periodo.", valueFormatter, showLegend = true, onSelect, selectedLabel = null }: DonutChartProps) {
   const visible = items.filter((item) => item.value > 0);
   const total = visible.reduce((sum, item) => sum + item.value, 0);
   const format = valueFormatter ?? ((value: number) => value.toLocaleString("es-ES"));
@@ -29,6 +33,7 @@ export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin 
     const start = lengths.slice(0, index).reduce((sum, length) => sum + length, 0);
     return { ...item, dash: `${lengths[index]} ${CIRCUMFERENCE - lengths[index]}`, offset: -start };
   });
+  const dimmed = (label: string) => selectedLabel !== null && selectedLabel !== label;
 
   return (
     <div className="donut-chart">
@@ -47,8 +52,11 @@ export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin 
               strokeDasharray={segment.dash}
               strokeDashoffset={segment.offset}
               transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
+              className={onSelect ? "donut-segment is-clickable" : "donut-segment"}
+              opacity={dimmed(segment.label) ? 0.3 : 1}
+              onClick={onSelect ? () => onSelect(segment.label) : undefined}
             >
-              <title>{`${segment.label}: ${format(segment.value)}`}</title>
+              <title>{`${segment.label}: ${format(segment.value)}${onSelect ? " · pulsa para filtrar" : ""}`}</title>
             </circle>
           ))}
         </svg>
@@ -61,14 +69,25 @@ export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin 
         <p className="muted donut-empty">{emptyMessage}</p>
       ) : !showLegend ? null : (
         <ul className="donut-legend">
-          {visible.map((item) => (
-            <li key={item.label}>
-              <i style={{ background: item.color }} />
-              <span>{item.label}</span>
-              <strong>{format(item.value)}</strong>
-              <small>{Math.round((item.value / total) * 100)}%</small>
-            </li>
-          ))}
+          {visible.map((item) => {
+            const content = (
+              <>
+                <i style={{ background: item.color }} />
+                <span>{item.label}</span>
+                <strong>{format(item.value)}</strong>
+                <small>{Math.round((item.value / total) * 100)}%</small>
+              </>
+            );
+            return (
+              <li key={item.label} className={dimmed(item.label) ? "is-dimmed" : undefined}>
+                {onSelect ? (
+                  <button type="button" className="donut-legend-button" aria-pressed={selectedLabel === item.label} onClick={() => onSelect(item.label)}>
+                    {content}
+                  </button>
+                ) : content}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

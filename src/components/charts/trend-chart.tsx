@@ -8,6 +8,13 @@ type TrendChartProps = {
   data: Record<string, number | string>[];
   series: TrendSeries[];
   ariaLabel: string;
+  /**
+   * Para filtrar pulsando, como en Power BI: al pulsar un punto se llama con su
+   * posición. Sin esto el gráfico solo enseña el detalle al pasar por encima.
+   */
+  onSelect?: (index: number) => void;
+  /** El punto elegido, que se resalta. */
+  selectedIndex?: number | null;
 };
 
 /**
@@ -53,7 +60,7 @@ function pointsFor(geometry: Geometry, data: TrendChartProps["data"], key: strin
     .join(" ");
 }
 
-export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
+export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = null }: TrendChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -83,22 +90,36 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
   // En estrecho caben menos fechas sin que se solapen unas con otras.
   const labelStep = Math.max(1, Math.ceil(data.length / (narrow ? 4 : 8)));
 
-  function handleMove(event: MouseEvent<SVGRectElement>) {
+  function indexAt(event: MouseEvent<SVGRectElement>): number | null {
     const svg = svgRef.current;
-    if (!svg || data.length === 0) return;
+    if (!svg || data.length === 0) return null;
     const rect = svg.getBoundingClientRect();
-    if (rect.width === 0) return;
+    if (rect.width === 0) return null;
     const fraction = (event.clientX - rect.left) / rect.width;
     const dataX = fraction * width;
     const relative = (dataX - padding.left) / chartWidth;
     const index = Math.round(relative * (data.length - 1));
-    setHoverIndex(Math.min(data.length - 1, Math.max(0, index)));
+    return Math.min(data.length - 1, Math.max(0, index));
+  }
+
+  function handleMove(event: MouseEvent<SVGRectElement>) {
+    const index = indexAt(event);
+    if (index !== null) setHoverIndex(index);
+  }
+
+  // En un móvil no hay "pasar por encima": el toque es a la vez el clic.
+  function handleClick(event: MouseEvent<SVGRectElement>) {
+    const index = indexAt(event);
+    if (index !== null && onSelect) onSelect(index);
   }
 
   const hovered = hoverIndex !== null ? data[hoverIndex] : null;
   const tooltipX = hoverIndex !== null ? xForIndex(geometry, hoverIndex, data.length) : 0;
   const tooltipWidth = narrow ? 150 : 172;
-  const tooltipHeight = 40 + series.length * 24;
+  const tooltipHeight = 40 + series.length * 24 + (onSelect ? 20 : 0);
+  // La franja del punto elegido: medio paso a cada lado.
+  const step = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
+  const selectedX = selectedIndex !== null && selectedIndex < data.length ? xForIndex(geometry, selectedIndex, data.length) : null;
   const tooltipOnLeft = tooltipX > width - padding.right - tooltipWidth - 8;
   const tooltipLeft = tooltipOnLeft ? tooltipX - tooltipWidth - 10 : tooltipX + 10;
 
@@ -113,6 +134,15 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
           const y = padding.top + geometry.chartHeight * ratio;
           return <line key={ratio} x1={padding.left} y1={y} x2={width - padding.right} y2={y} className="chart-grid" />;
         })}
+        {selectedX !== null ? (
+          <rect
+            x={Math.max(padding.left, selectedX - step / 2)}
+            y={padding.top}
+            width={Math.min(step, width - padding.right - Math.max(padding.left, selectedX - step / 2))}
+            height={geometry.chartHeight}
+            className="chart-selected-band"
+          />
+        ) : null}
         {min < 0 ? (
           <line
             x1={padding.left}
@@ -130,7 +160,7 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
             key={`${item.key}-${index}`}
             cx={xForIndex(geometry, index, data.length)}
             cy={yForValue(geometry, Number(row[item.key]) || 0, min, max)}
-            r={hoverIndex === index ? (narrow ? 4 : 5) : (narrow ? 3 : 4)}
+            r={hoverIndex === index || selectedIndex === index ? (narrow ? 4 : 5) : (narrow ? 3 : 4)}
             fill={item.color}
             stroke="white"
             strokeWidth={2}
@@ -142,7 +172,7 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
           const isFirst = index === 0;
           const isLast = index === data.length - 1;
           const anchor = isLast && !isFirst ? "end" : isFirst && !isLast ? "start" : "middle";
-          return <text key={`label-${index}`} x={xForIndex(geometry, index, data.length)} y={height - 12} textAnchor={anchor} className="chart-label" style={{ pointerEvents: "none" }}>{String(row.label)}</text>;
+          return <text key={`label-${index}`} x={xForIndex(geometry, index, data.length)} y={height - 12} textAnchor={anchor} className={selectedIndex === index ? "chart-label is-selected" : "chart-label"} style={{ pointerEvents: "none" }}>{String(row.label)}</text>;
         })}
         {hoverIndex !== null ? (
           <line x1={tooltipX} y1={padding.top} x2={tooltipX} y2={height - padding.bottom} className="chart-crosshair" />
@@ -154,9 +184,10 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
           height={geometry.chartHeight}
           fill="#000"
           fillOpacity={0}
-          style={{ pointerEvents: "all" }}
+          style={{ pointerEvents: "all", cursor: onSelect ? "pointer" : undefined }}
           onMouseMove={handleMove}
           onMouseLeave={() => setHoverIndex(null)}
+          onClick={onSelect ? handleClick : undefined}
         />
         {hovered ? (
           <foreignObject x={tooltipLeft} y={padding.top} width={tooltipWidth} height={tooltipHeight} style={{ pointerEvents: "none", overflow: "visible" }}>
@@ -169,10 +200,21 @@ export function TrendChart({ data, series, ariaLabel }: TrendChartProps) {
                   <strong>{numberFormatter.format(Number(hovered[item.key]) || 0)}</strong>
                 </div>
               ))}
+              {onSelect ? <em className="chart-tooltip-hint">{selectedIndex === hoverIndex ? "Pulsa para quitar el filtro" : "Pulsa para filtrar"}</em> : null}
             </div>
           </foreignObject>
         ) : null}
       </svg>
+      {onSelect ? (
+        // Para teclado y lectores de pantalla: el mismo filtro con botones.
+        <div className="sr-only">
+          {data.map((row, index) => (
+            <button key={`select-${index}`} type="button" aria-pressed={selectedIndex === index} onClick={() => onSelect(index)}>
+              {`Filtrar por ${String(row.label)}`}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {series.length > 1 ? (
         <div className="chart-legend">
           {series.map((item) => (
