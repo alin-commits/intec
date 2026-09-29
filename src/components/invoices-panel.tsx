@@ -12,6 +12,7 @@ import { formatEuroForPdf, generatePdfReport } from "@/lib/pdf-report";
 import { reportSafeError } from "@/lib/errors";
 import { todayKey } from "@/lib/dates";
 import { billingPeriodLabels, expenseCategoryColors, expenseCategoryLabels, type BillingPeriod, type ExpenseCategory, type MarketingExpense } from "@/lib/expenses";
+import { DEFAULT_MAILBOX_KEY, mailboxForUnit, type InvoiceMailboxKey } from "@/lib/invoice-mailboxes";
 import { INVOICE_BUCKET, INVOICE_MAX_BYTES, matchSubscription, type InvoiceExtraction, type MarketingInvoice } from "@/lib/invoices";
 import { createClient } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
@@ -20,9 +21,11 @@ import type { BusinessUnit } from "@/lib/types";
 type InvoiceDraft = Omit<MarketingInvoice, "id" | "createdAt">;
 type UploadStep = "idle" | "uploading" | "reading";
 /** Una factura esperando a que se decida si se manda a contabilidad. */
-type PendingSend = { id: string; supplier: string };
+type PendingSend = { id: string; supplier: string; unitSlug: string | null };
 /** Envíos anteriores de esa factura, de más reciente a más antiguo. */
 type InvoiceSend = { at: string; by: string | null; to: string };
+/** Los buzones que admite el servidor, con la dirección que usa cada uno. */
+type MailboxOption = { key: InvoiceMailboxKey; label: string; email: string };
 
 type SortKey = "date" | "supplier" | "concept" | "category" | "unit" | "base" | "vat" | "total" | "kind" | "added";
 type SortState = { key: SortKey; direction: "asc" | "desc" };
@@ -127,13 +130,16 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   const [sort, setSort] = useState<SortState | null>(null);
   const [page, setPage] = useState(0);
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
-  /** A qué dirección se mandan las facturas; la decide el servidor. */
-  const [mailbox, setMailbox] = useState("");
+  /** Los buzones posibles; las direcciones las decide el servidor. */
+  const [mailboxes, setMailboxes] = useState<MailboxOption[]>([]);
+  /** A qué empresa se manda esta factura. */
+  const [sendTo, setSendTo] = useState<InvoiceMailboxKey>(DEFAULT_MAILBOX_KEY);
   /** Guarda de qué factura son los envíos, para no enseñar los de la anterior. */
   const [sendLog, setSendLog] = useState<{ id: string; sends: InvoiceSend[] } | null>(null);
 
   const subscriptions = expenses.filter((expense) => expense.kind === "subscription");
   const unitName = (id: string | null) => (id ? units.find((unit) => unit.id === id)?.name ?? "—" : "General");
+  const unitSlug = (id: string | null) => (id ? units.find((unit) => unit.id === id)?.slug ?? null : null);
   const expenseName = (id: string | null) => (id ? expenses.find((expense) => expense.id === id)?.name ?? "Suscripción" : null);
   const duplicate = draft.invoiceNumber
     ? allInvoices.find((invoice) => invoice.id !== editingId && sameNumber(invoice.invoiceNumber, draft.invoiceNumber) && invoice.supplier.trim().toLowerCase() === draft.supplier.trim().toLowerCase())
@@ -340,13 +346,15 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
 
   useEffect(() => {
     if (!pendingSend) return;
+    // La empresa de la factura viene ya marcada; siempre se puede cambiar.
+    setSendTo(mailboxForUnit(pendingSend.unitSlug));
     let active = true;
     void (async () => {
       try {
         const response = await fetch(`/api/invoices/send?id=${pendingSend.id}`, { cache: "no-store" });
         if (!active) return;
-        const result = (await response.json().catch(() => ({}))) as { to?: string; sends?: InvoiceSend[] };
-        if (result.to) setMailbox(result.to);
+        const result = (await response.json().catch(() => ({}))) as { to?: string; mailboxes?: MailboxOption[]; sends?: InvoiceSend[] };
+        if (result.mailboxes?.length) setMailboxes(result.mailboxes);
         // Aunque falle hay que salir de "cargando": si no, el botón de enviar se
         // quedaba desactivado para siempre y la factura no se podía mandar.
         setSendLog({ id: pendingSend.id, sends: response.ok ? result.sends ?? [] : [] });
@@ -357,13 +365,13 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
     return () => { active = false; };
   }, [pendingSend]);
 
-  async function sendInvoice(id: string) {
+  async function sendInvoice(id: string, mailbox: InvoiceMailboxKey) {
     setBusy(true);
     try {
       const response = await fetch("/api/invoices/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, mailbox }),
       });
       const result = (await response.json().catch(() => ({}))) as { to?: string; error?: string };
       onMessage(response.ok ? `Factura enviada a ${result.to ?? "contabilidad"}.` : result.error ?? "No se pudo enviar la factura.");
@@ -548,12 +556,12 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <td>{currencyFormatter.format(invoice.baseAmount)}</td>
                   <td>{currencyFormatter.format(invoice.vatAmount)}</td>
                   <td><strong>{currencyFormatter.format(invoice.totalAmount)}</strong></td>
-                  <td>{invoice.expenseId ? <span className="badge" title={`Cuenta como el cargo real de esta suscripción en su periodo: ${expenseName(invoice.expenseId)}`}>Suscripción</span> : <span className="badge badge-active">Gasto suelto</span>}</td>
+                  <td>{invoice.expenseId ? <span className="badge" title={`Cuenta como el cargo real de esta suscripción en su periodo: ${expenseName(invoice.expenseId)}`}>Suscripción</span> : <span className="badge badge-active" title="Gasto suelto: no va asociado a ninguna suscripción">G.Suelto</span>}</td>
                   <td className="muted">{formatDate(invoice.createdAt)}</td>
                   <td>
                     <div className="table-actions">
                       {invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => void viewPdf(invoice.filePath as string)}>PDF</button> : null}
-                      {canEdit && invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingSend({ id: invoice.id, supplier: invoice.supplier })} title="Enviar esta factura por correo a contabilidad">Enviar</button> : null}
+                      {canEdit && invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingSend({ id: invoice.id, supplier: invoice.supplier, unitSlug: unitSlug(invoice.businessUnitId) })} title="Enviar esta factura por correo a la administración de la empresa">Enviar</button> : null}
                       <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(invoice)}>{canEdit ? "Editar" : "Ver"}</button>
                     </div>
                   </td>
@@ -577,9 +585,9 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
         confirmLabel={lastSend ? "Enviar otra vez" : "Sí, enviar"}
         cancelLabel="Ahora no"
         busyLabel="Enviando…"
-        busy={busy || previousSends === null}
+        busy={busy || previousSends === null || mailboxes.length === 0}
         onCancel={() => setPendingSend(null)}
-        onConfirm={() => pendingSend && void sendInvoice(pendingSend.id)}
+        onConfirm={() => pendingSend && void sendInvoice(pendingSend.id, sendTo)}
       >
         {pendingSend ? (
           <>
@@ -589,14 +597,19 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <strong>Ya ha salido {sendCountLabel}.</strong>
                   <span>
                     La última vez el {formatDate(lastSend.at)}
-                    {lastSend.by ? `, enviada por ${lastSend.by}` : ""}. Si la envías de nuevo, contabilidad recibirá la misma factura otra vez.
+                    {lastSend.by ? `, enviada por ${lastSend.by}` : ""}, a {lastSend.to}. Si la envías de nuevo, recibirán la misma factura otra vez.
                   </span>
                 </div>
               </div>
             ) : null}
             <div className="confirmation-summary">
               <span>Factura</span><strong>{pendingSend.supplier}</strong>
-              <span>Se envía a</span><strong>{mailbox || "la dirección configurada para facturas"}</strong>
+              <span>Se envía a</span>
+              {mailboxes.length ? (
+                <select value={sendTo} disabled={busy} aria-label="Empresa a la que se envía la factura" onChange={(event) => setSendTo(event.target.value as InvoiceMailboxKey)}>
+                  {mailboxes.map((option) => <option key={option.key} value={option.key}>{option.label} · {option.email}</option>)}
+                </select>
+              ) : <strong className="muted">{previousSends === null ? "Cargando las direcciones…" : "No se han podido cargar las direcciones. Cierra y vuelve a intentarlo."}</strong>}
               <span>Qué lleva</span><strong>El PDF adjunto y un resumen con proveedor, número, fecha, base, IVA y total.</strong>
             </div>
           </>

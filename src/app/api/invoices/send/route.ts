@@ -5,17 +5,20 @@ import { buildInvoiceEmail } from "@/lib/email-templates";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { expenseCategoryLabels, type ExpenseCategory } from "@/lib/expenses";
 import { currencyFormatter, formatDate } from "@/lib/format";
+import { DEFAULT_MAILBOX, DEFAULT_MAILBOX_KEY, INVOICE_MAILBOXES, INVOICE_MAILBOX_KEYS, type InvoiceMailboxKey } from "@/lib/invoice-mailboxes";
 import { INVOICE_BUCKET, INVOICE_MAX_BYTES, INVOICE_PATH_PATTERN } from "@/lib/invoices";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/types";
 
-// Manda una factura ya guardada a contabilidad, con el PDF adjunto. Siempre a
-// la dirección configurada: nunca a una que venga en la petición, para que
-// esto no pueda usarse para enviar documentos a donde sea.
-const DEFAULT_RECIPIENT = "alin@suministrointec.com";
-
-const requestSchema = z.object({ id: z.string().uuid() });
+// Manda una factura ya guardada a contabilidad, con el PDF adjunto. Cada
+// empresa tiene su buzón, pero la petición solo trae la clave del buzón: la
+// dirección la pone siempre el servidor, para que esto no pueda usarse para
+// enviar documentos a donde sea.
+const requestSchema = z.object({
+  id: z.string().uuid(),
+  mailbox: z.enum(INVOICE_MAILBOX_KEYS).optional(),
+});
 
 /** El nombre unido llega como objeto o como lista de uno, según la consulta. */
 function authorName(value: unknown): string | null {
@@ -24,8 +27,14 @@ function authorName(value: unknown): string | null {
   return typeof name === "string" && name.trim() ? name : null;
 }
 
-function recipient(): string {
-  return process.env.INVOICE_EMAIL_TO?.trim() || DEFAULT_RECIPIENT;
+/**
+ * La dirección de cada empresa. La de Intec se sigue pudiendo cambiar sin
+ * tocar el código con INVOICE_EMAIL_TO, igual que antes.
+ */
+function recipient(key: InvoiceMailboxKey = DEFAULT_MAILBOX_KEY): string {
+  const mailbox: { key: InvoiceMailboxKey; email: string } = INVOICE_MAILBOXES.find((box) => box.key === key) ?? DEFAULT_MAILBOX;
+  if (mailbox.key === DEFAULT_MAILBOX_KEY) return process.env.INVOICE_EMAIL_TO?.trim() || mailbox.email;
+  return mailbox.email;
 }
 
 /**
@@ -64,7 +73,11 @@ export async function GET(request: Request) {
       to: String(row.sent_to),
     }));
   }
-  return NextResponse.json({ to: recipient(), configured: isEmailConfigured(), sends }, { headers: { "Cache-Control": "no-store" } });
+  const mailboxes = INVOICE_MAILBOXES.map((box) => ({ key: box.key, label: box.label, email: recipient(box.key) }));
+  return NextResponse.json(
+    { to: recipient(), mailboxes, defaultMailbox: DEFAULT_MAILBOX_KEY, configured: isEmailConfigured(), sends },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(request: Request) {
@@ -81,10 +94,12 @@ export async function POST(request: Request) {
   }
 
   let id: string;
+  let mailbox: InvoiceMailboxKey = DEFAULT_MAILBOX_KEY;
   try {
     const parsed = requestSchema.safeParse(await request.json());
     if (!parsed.success) return NextResponse.json({ error: "Factura no válida." }, { status: 400 });
     id = parsed.data.id;
+    mailbox = parsed.data.mailbox ?? DEFAULT_MAILBOX_KEY;
   } catch {
     return NextResponse.json({ error: "No se pudo leer la solicitud." }, { status: 400 });
   }
@@ -126,7 +141,7 @@ export async function POST(request: Request) {
     fileName,
   });
 
-  const to = recipient();
+  const to = recipient(mailbox);
   const sent = await sendEmail({
     to,
     from: sender(),
