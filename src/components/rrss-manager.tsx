@@ -10,12 +10,11 @@ import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
-import { EuroIcon, EyeIcon, HeartIcon, InboxIcon, LeadsIcon, MailIcon, MegaphoneIcon, UsuariosIcon, ConversionIcon, PlusCircleIcon } from "@/components/icons";
+import { EuroIcon, EyeIcon, HeartIcon, InboxIcon, MailIcon, UsuariosIcon, PlusCircleIcon } from "@/components/icons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { MetaAdsSyncedPanel } from "@/components/rrss/meta-ads-synced-panel";
 import {
   RRSS_ROLES,
-  adStatusLabels,
   hasAnyRole,
   mailingTypeLabels,
   mailingTypeOrder,
@@ -30,10 +29,10 @@ import {
   demoSocialMediaStats,
 } from "@/lib/demo-data";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
+import { exportMailingReportPdf, exportSocialReportPdf } from "@/lib/rrss-report-pdf";
 import { inDateKeyRange, monthKey, monthLabel, monthShortLabel, previousDateRange, previousMonthKey, todayKey, yearOfMonth } from "@/lib/dates";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
-import { exportAdsReportPdf, exportMailingReportPdf, exportSocialReportPdf } from "@/lib/rrss-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
   AdCampaignStatus,
@@ -53,7 +52,6 @@ type Tab = "social" | "ads" | "mailing";
 type ViewMode = "month" | "year";
 
 type SocialDraft = Omit<SocialMediaStat, "id" | "createdAt" | "createdBy">;
-type AdsDraft = Omit<MetaAdsEntry, "id" | "createdAt" | "createdBy">;
 type MailingDraft = Omit<MailingCampaign, "id" | "createdAt" | "createdBy">;
 
 type PendingDelete = { table: "social_media_stats" | "meta_ads_entries" | "mailing_campaigns"; id: string; label: string };
@@ -79,10 +77,6 @@ function latestFollowersSnapshot(rows: SocialMediaStat[]): SocialMediaStat[] {
   return Array.from(latestByKey.values());
 }
 
-function safeDiv(numerator: number, denominator: number): number {
-  return denominator > 0 ? numerator / denominator : 0;
-}
-
 /**
  * KpiCard props comparing against the previous period. Without a previous
  * value (no period to compare, or it was 0) the card just shows `fallback`.
@@ -101,15 +95,6 @@ function socialTotals(rows: SocialMediaStat[]) {
     interactions: acc.interactions + row.interactions,
     reach: acc.reach + row.reach,
   }), { followers, newFollowers: 0, interactions: 0, reach: 0 });
-}
-
-function adsTotals(rows: MetaAdsEntry[]) {
-  return rows.reduce((acc, entry) => ({
-    spend: acc.spend + entry.amountSpent,
-    leads: acc.leads + entry.leads,
-    revenue: acc.revenue + entry.revenue,
-    followersGained: acc.followersGained + entry.followersGained,
-  }), { spend: 0, leads: 0, revenue: 0, followersGained: 0 });
 }
 
 function mailingTotals(rows: MailingCampaign[]) {
@@ -134,29 +119,6 @@ function blankSocialDraft(units: BusinessUnit[]): SocialDraft {
     activeCampaigns: 0,
     linkClicks: 0,
     leads: 0,
-    notes: "",
-  };
-}
-
-function blankAdsDraft(units: BusinessUnit[]): AdsDraft {
-  return {
-    businessUnitId: units[0]?.id ?? "",
-    campaignId: null,
-    campaignName: "",
-    adSet: "",
-    adName: "",
-    objective: "",
-    status: "active",
-    startDate: null,
-    endDate: null,
-    amountSpent: 0,
-    impressions: 0,
-    linkClicks: 0,
-    leads: 0,
-    qualifiedLeads: 0,
-    purchases: 0,
-    followersGained: 0,
-    revenue: 0,
     notes: "",
   };
 }
@@ -788,334 +750,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
 }
 
 function AdsTab(props: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
-  return (
-    <>
-      <MetaAdsSyncedPanel units={props.units} />
-      <section className="panel meta-manual-note">
-        <strong>Lo de abajo son las entradas que se metían a mano</strong>
-        <span>
-          Se conservan porque hay cosas que no están en Meta, pero el gasto y los leads de arriba vienen de la propia
-          API y son los buenos. No sumes los dos: son los mismos anuncios contados dos veces.
-        </span>
-      </section>
-      <AdsManualTab {...props} />
-    </>
-  );
-}
-
-function AdsManualTab({ units, entries, campaignOptions, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
-  const [query, setQuery] = useState("");
-  const [unitFilter, setUnitFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [sortAsc, setSortAsc] = useState(false);
-  const [draft, setDraft] = useState<AdsDraft>(() => blankAdsDraft(units));
-  const [pdfBusy, setPdfBusy] = useState(false);
-
-  const visibleEntries = useMemo(() => entries
-    .filter((entry) => {
-      const matchesQuery = entry.campaignName.toLowerCase().includes(query.toLowerCase());
-      const entryDate = entry.startDate ?? entry.createdAt;
-      const matchesDates = inDateKeyRange(entryDate, dateFrom, dateTo);
-      return matchesQuery && (unitFilter === "all" || entry.businessUnitId === unitFilter) && (statusFilter === "all" || entry.status === statusFilter) && matchesDates;
-    })
-    .sort((a, b) => {
-      const aDate = a.startDate ?? a.createdAt;
-      const bDate = b.startDate ?? b.createdAt;
-      return sortAsc ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate);
-    }), [entries, query, unitFilter, statusFilter, sortAsc, dateFrom, dateTo]);
-
-  const totals = useMemo(() => adsTotals(visibleEntries), [visibleEntries]);
-  const previousTotals = useMemo(() => {
-    const window = previousDateRange(dateFrom, dateTo);
-    if (!window) return null;
-    const rows = entries.filter((entry) =>
-      entry.campaignName.toLowerCase().includes(query.toLowerCase())
-      && (unitFilter === "all" || entry.businessUnitId === unitFilter)
-      && (statusFilter === "all" || entry.status === statusFilter)
-      && inDateKeyRange(entry.startDate ?? entry.createdAt, window.from, window.to));
-    return rows.length ? adsTotals(rows) : null;
-  }, [entries, query, unitFilter, statusFilter, dateFrom, dateTo]);
-  const hasAdsRange = Boolean(previousDateRange(dateFrom, dateTo));
-  const adsFallback = hasAdsRange ? "sin datos del periodo anterior" : "elige fechas para comparar";
-  const adsCompareLabel = "frente al periodo anterior";
-
-  const spendByUnit = useMemo(() => units
-    .map((unit) => ({ unit, spend: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.amountSpent, 0) }))
-    .filter((row) => row.spend > 0)
-    .map((row) => ({ label: row.unit.name, value: row.spend, color: row.unit.accent })), [units, visibleEntries]);
-
-  const revenueByUnit = useMemo(() => units
-    .map((unit) => ({ unit, revenue: visibleEntries.filter((entry) => entry.businessUnitId === unit.id).reduce((sum, entry) => sum + entry.revenue, 0) }))
-    .filter((row) => row.revenue > 0)
-    .map((row) => ({ label: row.unit.name, value: row.revenue, color: row.unit.accent })), [units, visibleEntries]);
-
-  function openNew() {
-    setEditingId(null);
-    setDraft(blankAdsDraft(units));
-    setEditorOpen(true);
-    setMessage(null);
-  }
-
-  function openEdit(entry: MetaAdsEntry) {
-    setEditingId(entry.id);
-    setDraft({
-      businessUnitId: entry.businessUnitId,
-      campaignId: entry.campaignId,
-      campaignName: entry.campaignName,
-      adSet: entry.adSet,
-      adName: entry.adName,
-      objective: entry.objective,
-      status: entry.status,
-      startDate: entry.startDate,
-      endDate: entry.endDate,
-      amountSpent: entry.amountSpent,
-      impressions: entry.impressions,
-      linkClicks: entry.linkClicks,
-      leads: entry.leads,
-      qualifiedLeads: entry.qualifiedLeads,
-      purchases: entry.purchases,
-      followersGained: entry.followersGained,
-      revenue: entry.revenue,
-      notes: entry.notes,
-    });
-    setEditorOpen(true);
-    setMessage(null);
-  }
-
-  function updateDraft<K extends keyof AdsDraft>(key: K, value: AdsDraft[K]) {
-    setDraft((current) => ({ ...current, [key]: value }));
-  }
-
-  async function saveEntry(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!draft.businessUnitId || !draft.campaignName.trim()) {
-      setMessage("Selecciona una marca y añade un nombre de campaña.");
-      return;
-    }
-    setBusy(true);
-    setMessage(null);
-    try {
-      if (!configured) {
-        const previous = editingId ? entries.find((entry) => entry.id === editingId) : null;
-        const nextEntry: MetaAdsEntry = { ...draft, id: editingId ?? `ADS-${Date.now()}`, createdBy: previous?.createdBy ?? "demo-admin", createdAt: previous?.createdAt ?? new Date().toISOString() };
-        const next = editingId ? entries.map((entry) => entry.id === editingId ? nextEntry : entry) : [nextEntry, ...entries];
-        persist(next);
-        setMessage(editingId ? "Campaña actualizada en el modo demostración." : "Campaña creada en el modo demostración.");
-      } else {
-        const payload = {
-          business_unit_id: draft.businessUnitId,
-          campaign_id: draft.campaignId || null,
-          campaign_name: draft.campaignName.trim(),
-          ad_set: draft.adSet?.trim() || null,
-          ad_name: draft.adName?.trim() || null,
-          objective: draft.objective?.trim() || null,
-          status: draft.status,
-          start_date: draft.startDate || null,
-          end_date: draft.endDate || null,
-          amount_spent: draft.amountSpent,
-          impressions: draft.impressions,
-          link_clicks: draft.linkClicks,
-          leads: draft.leads,
-          qualified_leads: draft.qualifiedLeads,
-          purchases: draft.purchases,
-          followers_gained: draft.followersGained,
-          revenue: draft.revenue,
-          notes: draft.notes?.trim() || null,
-        };
-        const supabase = createClient();
-        const result = editingId ? await supabase.from("meta_ads_entries").update(payload).eq("id", editingId) : await supabase.from("meta_ads_entries").insert(payload);
-        if (result.error) throw result.error;
-        await refresh();
-        setMessage(editingId ? "Campaña actualizada correctamente." : "Campaña creada correctamente.");
-      }
-      setEditorOpen(false);
-    } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo guardar la campaña de Meta Ads."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function exportReportCsv() {
-    const summary: CsvSummaryItem[] = [
-      { label: "Campañas", value: visibleEntries.length },
-      { label: "Gasto total (€)", value: totals.spend },
-      { label: "Ingresos (€)", value: totals.revenue },
-      { label: "Leads", value: totals.leads },
-      { label: "Seguidores ganados", value: totals.followersGained },
-      { label: "CPL medio (€)", value: safeDiv(totals.spend, totals.leads).toFixed(2).replace(".", ",") },
-      { label: "ROAS medio", value: `${safeDiv(totals.revenue, totals.spend).toFixed(2)}x` },
-    ];
-    downloadCsvReport(`informe_meta_ads_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleEntries, [
-      { header: "Marca", value: (entry) => units.find((unit) => unit.id === entry.businessUnitId)?.name ?? "" },
-      { header: "Campaña", value: (entry) => entry.campaignName },
-      { header: "Estado", value: (entry) => adStatusLabels[entry.status] },
-      { header: "Gasto (€)", value: (entry) => entry.amountSpent },
-      { header: "Impresiones", value: (entry) => entry.impressions },
-      { header: "Clics", value: (entry) => entry.linkClicks },
-      { header: "Leads", value: (entry) => entry.leads },
-      { header: "Cualificados", value: (entry) => entry.qualifiedLeads },
-      { header: "Compras", value: (entry) => entry.purchases },
-      { header: "Seguidores ganados", value: (entry) => entry.followersGained },
-      { header: "Ingresos (€)", value: (entry) => entry.revenue },
-    ]);
-  }
-
-  async function exportReportPdf() {
-    setPdfBusy(true);
-    try {
-      await exportAdsReportPdf({
-        totals,
-        cplLabel: `${safeDiv(totals.spend, totals.leads).toFixed(2).replace(".", ",")} €`,
-        roasLabel: `${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`,
-        rows: visibleEntries,
-        units,
-      });
-    } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
-    } finally {
-      setPdfBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <section className="section-heading">
-        <div><span className="eyebrow">Publicidad</span><h2>Meta Ads</h2></div>
-        <div className="panel-heading-trailing">
-          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
-          {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nueva entrada</button> : null}
-        </div>
-      </section>
-
-      <section className="kpi-grid kpi-grid-3">
-        <KpiCard label="Gasto total" value={currencyFormatter.format(totals.spend)} {...compareProps(totals.spend, previousTotals?.spend ?? null, adsCompareLabel, adsFallback)} icon={<MegaphoneIcon />} tone="indigo" />
-        <KpiCard label="Ingresos" value={currencyFormatter.format(totals.revenue)} {...compareProps(totals.revenue, previousTotals?.revenue ?? null, adsCompareLabel, adsFallback)} icon={<EuroIcon />} tone="emerald" />
-        <KpiCard label="Leads" value={numberFormatter.format(totals.leads)} {...compareProps(totals.leads, previousTotals?.leads ?? null, adsCompareLabel, adsFallback)} icon={<LeadsIcon />} tone="sky" />
-        <KpiCard label="Seguidores ganados" value={numberFormatter.format(totals.followersGained)} {...compareProps(totals.followersGained, previousTotals?.followersGained ?? null, adsCompareLabel, adsFallback)} icon={<UsuariosIcon />} tone="indigo" />
-        <KpiCard label="CPL medio" value={currencyFormatter.format(safeDiv(totals.spend, totals.leads))} delta="Sin comparación" helper="coste por lead" icon={<EuroIcon />} tone="amber" />
-        <KpiCard label="ROAS medio" value={`${safeDiv(totals.revenue, totals.spend).toFixed(2)}x`} delta="Sin comparación" helper="ingresos por euro invertido" icon={<ConversionIcon />} tone="emerald" />
-      </section>
-
-      <section className="dashboard-grid">
-        <article className="panel chart-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Gasto en Meta Ads</h2></div></div>
-          <BarChart items={spendByUnit} ariaLabel="Gasto en Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
-        </article>
-        <article className="panel chart-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Ingresos de Meta Ads</h2></div></div>
-          <BarChart items={revenueByUnit} ariaLabel="Ingresos de Meta Ads por marca" valueFormatter={(value) => currencyFormatter.format(value)} />
-        </article>
-      </section>
-
-      <CollapsibleFilters
-        hasActiveFilters={query !== "" || unitFilter !== "all" || statusFilter !== "all" || dateFrom !== "" || dateTo !== ""}
-        onClear={() => { setQuery(""); setUnitFilter("all"); setStatusFilter("all"); setDateFrom(""); setDateTo(""); }}
-        resultCount={visibleEntries.length}
-        resultLabel="Campañas"
-      >
-        <div className="filter-bar lead-filters">
-          <label><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nombre de campaña" /></label>
-          <label><span>Marca</span><select value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
-            <option value="all">Todas</option>
-            {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-          </select></label>
-          <label><span>Estado</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="all">Todos</option>
-            {Object.entries(adStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select></label>
-          <label><span>Desde</span><DateField value={dateFrom} onChange={(value) => setDateFrom(value)} /></label>
-          <label><span>Hasta</span><DateField value={dateTo} onChange={(value) => setDateTo(value)} /></label>
-        </div>
-      </CollapsibleFilters>
-
-      <section className="panel table-panel">
-        <div className="panel-heading">
-          <div><span className="eyebrow">Detalle</span><h2>Campañas registradas</h2></div>
-          <button type="button" className="button button-compact button-secondary" onClick={() => setSortAsc((current) => !current)}>
-            {sortAsc ? "↑ Más antiguo primero" : "↓ Más reciente primero"}
-          </button>
-        </div>
-        <div className="table-scroll">
-          <table>
-            <thead><tr><th>Marca</th><th>Campaña</th><th>Estado</th><th>Gasto</th><th>Impresiones</th><th>Clics</th><th>CTR</th><th>CPC</th><th>Leads</th><th>Cualificados</th><th>Compras</th><th>Seguidores ganados</th><th>Ingresos</th><th>CPL</th><th>ROAS</th><th>ROI</th>{canEdit ? <th /> : null}</tr></thead>
-            <tbody>
-              {visibleEntries.map((entry) => {
-                const unit = units.find((item) => item.id === entry.businessUnitId);
-                const ctr = ratio(entry.linkClicks, entry.impressions);
-                const cpc = safeDiv(entry.amountSpent, entry.linkClicks);
-                const cpl = safeDiv(entry.amountSpent, entry.leads);
-                const roas = safeDiv(entry.revenue, entry.amountSpent);
-                const roi = ratio(entry.revenue - entry.amountSpent, entry.amountSpent);
-                return (
-                  <tr key={entry.id}>
-                    <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
-                    <td><strong>{entry.campaignName}</strong>{entry.adSet ? <div className="muted">{entry.adSet}</div> : null}</td>
-                    <td><span className={entry.status === "active" ? "badge badge-active" : entry.status === "finished" ? "badge" : "badge badge-lost"}>{adStatusLabels[entry.status]}</span></td>
-                    <td>{currencyFormatter.format(entry.amountSpent)}</td>
-                    <td>{numberFormatter.format(entry.impressions)}</td>
-                    <td>{numberFormatter.format(entry.linkClicks)}</td>
-                    <td>{formatPercent(ctr)}</td>
-                    <td>{currencyFormatter.format(cpc)}</td>
-                    <td>{numberFormatter.format(entry.leads)}</td>
-                    <td>{numberFormatter.format(entry.qualifiedLeads)}</td>
-                    <td>{numberFormatter.format(entry.purchases)}</td>
-                    <td>{numberFormatter.format(entry.followersGained)}</td>
-                    <td>{currencyFormatter.format(entry.revenue)}</td>
-                    <td>{currencyFormatter.format(cpl)}</td>
-                    <td>{roas.toFixed(2)}x</td>
-                    <td>{formatPercent(roi)}</td>
-                    {canEdit ? (
-                      <td>
-                        <div className="modal-actions campaign-card-actions">
-                          <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(entry)}>Editar</button>
-                          <button type="button" className="button button-compact button-secondary" onClick={() => onDeleteRequest({ table: "meta_ads_entries", id: entry.id, label: entry.campaignName })}>Eliminar</button>
-                        </div>
-                      </td>
-                    ) : null}
-                  </tr>
-                );
-              })}
-              {visibleEntries.length === 0 ? <tr><td colSpan={canEdit ? 17 : 16} className="muted">Sin campañas que coincidan con los filtros.</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <Modal open={editorOpen} title={editingId ? "Editar campaña" : "Nueva campaña de Meta Ads"} eyebrow="Publicidad" onClose={() => setEditorOpen(false)}>
-        <form className="lead-editor-form" onSubmit={saveEntry}>
-          <div className="form-grid">
-            <label><span>Marca *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => updateDraft("businessUnitId", event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
-            <label><span>Nombre de campaña *</span><input value={draft.campaignName} readOnly={!canEdit} onChange={(event) => updateDraft("campaignName", event.target.value)} /></label>
-            <label><span>Campaña general (opcional)</span><select value={draft.campaignId ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("campaignId", event.target.value || null)}>
-              <option value="">— Sin vincular —</option>
-              {campaignOptions.filter((option) => option.businessUnitId === draft.businessUnitId).map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-            </select></label>
-            <label><span>Conjunto de anuncios</span><input value={draft.adSet ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("adSet", event.target.value)} /></label>
-            <label><span>Anuncio</span><input value={draft.adName ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("adName", event.target.value)} /></label>
-            <label><span>Objetivo</span><input value={draft.objective ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("objective", event.target.value)} placeholder="Leads, Conversiones, Tráfico…" /></label>
-            <label><span>Estado</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as AdCampaignStatus)}>{Object.entries(adStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label><span>Fecha inicio</span><DateField value={draft.startDate ?? ""} readOnly={!canEdit} onChange={(value) => updateDraft("startDate", value || null)} /></label>
-            <label><span>Fecha fin</span><DateField value={draft.endDate ?? ""} readOnly={!canEdit} onChange={(value) => updateDraft("endDate", value || null)} /></label>
-            <label><span>Importe gastado (€)</span><input type="number" min="0" step="0.01" value={draft.amountSpent} readOnly={!canEdit} onChange={(event) => updateDraft("amountSpent", Number(event.target.value) || 0)} /></label>
-            <label><span>Impresiones</span><input type="number" min="0" step="1" value={draft.impressions} readOnly={!canEdit} onChange={(event) => updateDraft("impressions", Number(event.target.value) || 0)} /></label>
-            <label><span>Clics en el enlace</span><input type="number" min="0" step="1" value={draft.linkClicks} readOnly={!canEdit} onChange={(event) => updateDraft("linkClicks", Number(event.target.value) || 0)} /></label>
-            <label><span>Leads</span><input type="number" min="0" step="1" value={draft.leads} readOnly={!canEdit} onChange={(event) => updateDraft("leads", Number(event.target.value) || 0)} /></label>
-            <label><span>Leads cualificados</span><input type="number" min="0" step="1" value={draft.qualifiedLeads} readOnly={!canEdit} onChange={(event) => updateDraft("qualifiedLeads", Number(event.target.value) || 0)} /></label>
-            <label><span>Compras</span><input type="number" min="0" step="1" value={draft.purchases} readOnly={!canEdit} onChange={(event) => updateDraft("purchases", Number(event.target.value) || 0)} /></label>
-            <label><span>Seguidores ganados</span><input type="number" min="0" step="1" value={draft.followersGained} readOnly={!canEdit} onChange={(event) => updateDraft("followersGained", Number(event.target.value) || 0)} /></label>
-            <label><span>Ingresos (€)</span><input type="number" min="0" step="0.01" value={draft.revenue} readOnly={!canEdit} onChange={(event) => updateDraft("revenue", Number(event.target.value) || 0)} /></label>
-            <label className="form-field-wide"><span>Notas</span><textarea rows={3} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
-          </div>
-          <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setEditorOpen(false)}>Cerrar</button>{canEdit ? <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Guardando…" : "Guardar campaña"}</button> : null}</div>
-        </form>
-      </Modal>
-    </>
-  );
+  return <MetaAdsSyncedPanel units={props.units} canEdit={props.canEdit} />;
 }
 
 function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MailingCampaign> & { campaigns: MailingCampaign[] }) {
