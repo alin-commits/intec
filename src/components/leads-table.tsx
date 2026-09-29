@@ -124,7 +124,7 @@ export function LeadsTable() {
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>(demoCampaigns.map((campaign) => ({ id: campaign.id, name: campaign.name, businessUnitId: campaign.businessUnitId })));
   const [query, setQuery] = useState("");
-  const [unitId, setUnitId] = useState<string>(() => demoBusinessUnits.filter((unit) => unit.active)[0]?.id ?? "all");
+  const [unitId, setUnitId] = useState<string>("all");
   const [status, setStatus] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -256,7 +256,7 @@ export function LeadsTable() {
     // Sin responsable de partida: lo pone administración, que además recibe un
     // aviso por correo en cuanto el lead entra sin nadie detrás.
     const draftForNew = blankDraft(registrableUnits);
-    setDraft(unitId !== "all" ? { ...draftForNew, businessUnitId: unitId } : draftForNew);
+    setDraft(unitId !== "all" ? { ...draftForNew, businessUnitId: unitId } : { ...draftForNew, businessUnitId: "" });
     setEditorOpen(true);
     setMessage(null);
   }
@@ -476,7 +476,7 @@ export function LeadsTable() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><span className="eyebrow">Base comercial</span><h2>Leads · {activeUnitLabel}</h2><p>Cada marca tiene sus propios leads: elige una arriba antes de crear o editar registros para no mezclarlos.</p></div>
+        <div><span className="eyebrow">Base comercial</span><h2>Leads · {activeUnitLabel}</h2><p>Al entrar salen los de todas las marcas. Elige una arriba para ver solo los suyos; la marca de cada lead se elige en su ficha.</p></div>
         <div className="panel-heading-trailing">
           <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button className="button button-primary" onClick={openNew}>+ Nuevo lead</button> : null}
@@ -562,7 +562,7 @@ export function LeadsTable() {
       <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" scrollInside onClose={() => setEditorOpen(false)}>
         <form className="lead-editor-form" onSubmit={saveLead}>
           <div className="form-grid">
-            <label><span>Unidad de negocio *</span><select value={draft.businessUnitId} disabled={!canEdit || (!editingId && unitId !== "all")} onChange={(event) => { updateDraft("businessUnitId", event.target.value); updateDraft("campaignId", null); }}>{unitOptions.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
+            <label><span>Unidad de negocio *</span><select value={draft.businessUnitId} disabled={!canEdit || (!editingId && unitId !== "all")} onChange={(event) => { updateDraft("businessUnitId", event.target.value); updateDraft("campaignId", null); }}>{draft.businessUnitId ? null : <option value="">Elige una marca…</option>}{unitOptions.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
             <label><span>Campaña</span><select value={draft.campaignId ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("campaignId", event.target.value || null)}><option value="">General / sin campaña</option>{filteredCampaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label>
             <label><span>Contacto</span><input value={draft.contactName} readOnly={!canEdit} onChange={(event) => updateDraft("contactName", event.target.value)} /></label>
             <label><span>Empresa cliente</span><input value={draft.clientCompanyName} readOnly={!canEdit} onChange={(event) => updateDraft("clientCompanyName", event.target.value)} /></label>
