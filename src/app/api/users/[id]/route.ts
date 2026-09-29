@@ -23,6 +23,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const admin = createAdminClient();
     if (!admin) return NextResponse.json({ error: "Falta SUPABASE_SERVICE_ROLE_KEY en Vercel." }, { status: 503 });
 
+    // El freno del propietario tiene que estar aquí, y no solo en la base: el
+    // borrado va con la clave de servicio, y a esa el disparador la deja pasar
+    // a propósito (es la única forma de deshacer nada si hiciera falta).
+    const { data: objetivo } = await admin.from("profiles").select("roles").eq("id", id).maybeSingle();
+    if ((objetivo?.roles as string[] | undefined)?.includes("owner")) {
+      return NextResponse.json({ error: "La cuenta del propietario no se puede borrar." }, { status: 403 });
+    }
+
     // Consultas, leads, campañas y ventas son datos compartidos por todo el
     // equipo comercial, no propiedad exclusiva de quien los creó — created_by
     // se limpia a NULL (ON DELETE SET NULL) en vez de bloquear el borrado.

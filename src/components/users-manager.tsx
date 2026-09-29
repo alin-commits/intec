@@ -173,6 +173,10 @@ export function UsersManager() {
 
   async function updateProfile(id: string, patch: Partial<Pick<Profile, "roles" | "isActive">>) {
     setMessage(null);
+    if (profiles.find((profile) => profile.id === id)?.roles.includes("owner")) {
+      setMessage("La cuenta del propietario no la puede modificar nadie más.");
+      return;
+    }
     if (id === currentUserId) {
       setMessage("No puedes cambiar tu propio rol o estado de activación.");
       return;
@@ -304,11 +308,13 @@ export function UsersManager() {
         <div className="table-scroll">
           <table>
             <thead><tr><th>Usuario</th><th>Email</th><th>Roles</th><th>Marcas asignadas</th><th>Estado</th><th></th></tr></thead>
-            <tbody>{profiles.map((profile) => (
+            <tbody>{profiles.map((profile) => {
+              const esPropietario = profile.roles.includes("owner");
+              return (
               <tr key={profile.id}>
-                <td><strong>{profile.fullName}</strong></td>
+                <td><strong>{profile.fullName}</strong>{esPropietario ? <small className="muted">Propietario · no se puede modificar</small> : null}</td>
                 <td>{profile.email || "—"}</td>
-                <td><RoleChips value={profile.roles} onChange={(next) => void updateProfile(profile.id, { roles: next })} /></td>
+                <td><RoleChips value={profile.roles} disabled={esPropietario} onChange={(next) => void updateProfile(profile.id, { roles: next })} /></td>
                 <td>
                   <UnitChips
                     options={businessUnits}
@@ -316,10 +322,11 @@ export function UsersManager() {
                     onChange={(next) => void updateUnitAssignment(profile.id, next)}
                   />
                 </td>
-                <td><button type="button" className={profile.isActive ? "status-toggle active" : "status-toggle"} onClick={() => void updateProfile(profile.id, { isActive: !profile.isActive })}>{profile.isActive ? "Activo" : "Desactivado"}</button></td>
-                <td>{profile.id !== currentUserId ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}</td>
+                <td><button type="button" className={profile.isActive ? "status-toggle active" : "status-toggle"} disabled={esPropietario} onClick={() => void updateProfile(profile.id, { isActive: !profile.isActive })}>{profile.isActive ? "Activo" : "Desactivado"}</button></td>
+                <td>{profile.id !== currentUserId && !esPropietario ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}</td>
               </tr>
-            ))}</tbody>
+              );
+            })}</tbody>
           </table>
         </div>
       </section>

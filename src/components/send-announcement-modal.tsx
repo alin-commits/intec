@@ -9,6 +9,7 @@ import type { AppRole } from "@/lib/types";
 type Member = { id: string; fullName: string; roles: AppRole[] };
 
 const GROUP_LABELS: Record<AppRole, string> = {
+  owner: "Propietario",
   admin: "Administración",
   commercial: "Comerciales",
   viewer: "Solo lectura",

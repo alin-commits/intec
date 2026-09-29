@@ -20,6 +20,7 @@ export const leadStatusLabels: Record<LeadStatus, string> = {
 };
 
 export const roleLabels: Record<AppRole, string> = {
+  owner: "Propietario",
   admin: "Administrador",
   commercial: "Comercial",
   viewer: "Solo lectura",
@@ -56,7 +57,7 @@ export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];
 /** Everyone except the employee role, whose only page is Contraseñas. */
 export const DASHBOARD_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "vault_admin"];
 
-export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "employee", "vault_admin"];
+export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "employee", "vault_admin"];
 
 /**
  * Los roles del gestor de contraseñas no se reparten desde la pantalla de
@@ -65,7 +66,15 @@ export const ALL_APP_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", 
  * cuenta suya y llegar al llavero, que es justo lo que se quiere evitar.
  */
 export const VAULT_ONLY_ROLES: AppRole[] = ["vault_admin", "employee"];
-export const USER_MANAGER_ROLES: AppRole[] = ALL_APP_ROLES.filter((role) => !VAULT_ONLY_ROLES.includes(role));
+/**
+ * El propietario no se reparte desde la pantalla de Usuarios: no es un permiso
+ * que se conceda, es quién manda en la casa. Se pone desde la base y solo otro
+ * propietario puede moverlo, así que ni se ofrece como opción.
+ */
+export const UNASSIGNABLE_ROLES: AppRole[] = ["owner"];
+export const USER_MANAGER_ROLES: AppRole[] = ALL_APP_ROLES.filter(
+  (role) => !VAULT_ONLY_ROLES.includes(role) && !UNASSIGNABLE_ROLES.includes(role),
+);
 
 /** True if the user holds at least one of the given roles. */
 export function hasAnyRole(userRoles: AppRole[], allowed: AppRole[]): boolean {
