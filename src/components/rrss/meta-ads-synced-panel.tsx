@@ -6,6 +6,7 @@ import { BarChart } from "@/components/charts/bar-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DateField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { EuroIcon, LeadsIcon, ConversionIcon, HeartIcon, UsuariosIcon } from "@/components/icons";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
@@ -64,6 +65,9 @@ const PERIODOS = [
   { clave: "libre", texto: "Fechas concretas" },
 ] as const;
 type Periodo = (typeof PERIODOS)[number]["clave"];
+
+/** Cuántas campañas se enseñan de golpe en la tabla. */
+const POR_PAGINA = 10;
 const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const etiquetaMes = (mes: string) => `${meses[Number(mes.slice(5, 7)) - 1]} ${mes.slice(2, 4)}`;
 const estadoLegible: Record<string, string> = { ACTIVE: "Activa", PAUSED: "Pausada", ARCHIVED: "Archivada", DELETED: "Borrada", IN_PROCESS: "En proceso", WITH_ISSUES: "Con avisos" };
@@ -86,6 +90,8 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
   const [campanasApp, setCampanasApp] = useState<CampanaApp[]>([]);
   /** false mientras no se haya aplicado la migración de "entrada colocada". */
   const [colocarDisponible, setColocarDisponible] = useState(true);
+  /** La tabla de campañas se pagina: con todo el histórico son más de treinta. */
+  const [pagina, setPagina] = useState(0);
   const [ultima, setUltima] = useState<{ started_at: string } | null>(null);
   const [estado, setEstado] = useState<"cargando" | "listo" | "vacio" | "error">("cargando");
   const [editando, setEditando] = useState<Fila | null>(null);
@@ -343,6 +349,12 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     }
   }
 
+  // Si al filtrar quedan menos páginas, se enseña la última en vez de una
+  // vacía; así no hace falta rebobinar la página a mano al cambiar un filtro.
+  const totalPaginas = Math.max(1, Math.ceil(filas.length / POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas - 1);
+  const filasVisibles = filas.slice(paginaActual * POR_PAGINA, paginaActual * POR_PAGINA + POR_PAGINA);
+
   const cpl = totales.leads > 0 ? totales.gasto / totales.leads : 0;
   const roas = totales.gasto > 0 ? totales.ingresos / totales.gasto : 0;
   const ctr = totales.impresiones > 0 ? (totales.clics / totales.impresiones) * 100 : 0;
@@ -534,7 +546,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
               </tr>
             </thead>
             <tbody>
-              {filas.map((f) => (
+              {filasVisibles.map((f) => (
                 <tr key={f.id}>
                   <td><strong>{f.nombre}</strong></td>
                   <td>{f.marca}</td>
@@ -563,6 +575,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
             </tbody>
           </table>
         </div>
+        <TablePagination page={paginaActual} pageCount={totalPaginas} total={filas.length} label="campañas" onChange={setPagina} />
       </article>
 
       {canEdit && manualDisponible && pendientes.length > 0 ? (
