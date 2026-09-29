@@ -25,6 +25,13 @@ type RefreshRequest = {
 const POLL_MS = 4000;
 /** Sin señales del agente en este tiempo, algo le pasa a la tarea del servidor. */
 const AGENT_SILENT_MS = 3 * 60 * 1000;
+/**
+ * Pasado este rato, un fallo deja de ser noticia. El botón enseña el estado de
+ * la última petición, sea de cuando sea, así que una que caducó por la mañana
+ * seguía pintando la alarma en rojo el resto del día aunque el servidor llevara
+ * horas respondiendo con normalidad.
+ */
+const FALLO_RECIENTE_MS = 30 * 60 * 1000;
 
 const time = (value: string) => new Date(value).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 const isActive = (request: RefreshRequest | null) => request?.status === "pendiente" || request?.status === "leyendo";
@@ -103,6 +110,14 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
 
   const agentSilent = checkedAt > 0 && (!agentLastPoll || checkedAt - new Date(agentLastPoll).getTime() > AGENT_SILENT_MS);
   const waitingLong = checkedAt > 0 && request?.status === "pendiente" && checkedAt - new Date(request.requested_at).getTime() > 90 * 1000;
+  /** Cuándo se dio por perdida la última petición. */
+  const failedAt = request?.finished_at ?? request?.requested_at ?? null;
+  // Se avisa del fallo si acaba de pasar, o si el agente sigue sin dar señales
+  // (entonces no es historia: el problema sigue ahí ahora mismo).
+  const warnAboutFailure = Boolean(
+    checkedAt > 0 && failedAt
+    && (checkedAt - new Date(failedAt).getTime() < FALLO_RECIENTE_MS || agentSilent),
+  );
 
   let label = "Actualizar desde Sage";
   let status: { text: string; tone: "info" | "ok" | "bad" } | null = null;
@@ -116,10 +131,12 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
     status = { text: "Suele tardar menos de un minuto.", tone: "info" };
   } else if (request?.status === "hecho" && request.finished_at) {
     status = { text: `Actualizado a las ${time(request.finished_at)}.`, tone: "ok" };
-  } else if (request?.status === "error") {
-    status = { text: request.message ?? "La lectura falló.", tone: "bad" };
-  } else if (request?.status === "caducada") {
-    status = { text: "El servidor de Sage no respondió. Revisa que el servidor y la tarea «Intec - Sage a peticion» estén en marcha.", tone: "bad" };
+  } else if (request?.status === "error" && warnAboutFailure) {
+    status = { text: `${request.message ?? "La lectura falló"} (${time(failedAt!)}).`, tone: "bad" };
+  } else if (request?.status === "caducada" && warnAboutFailure) {
+    status = agentSilent
+      ? { text: `El servidor de Sage no responde desde las ${time(failedAt!)}. Revisa que el servidor y la tarea «Intec - Sage a peticion» estén en marcha.`, tone: "bad" }
+      : { text: `El servidor de Sage no respondió a las ${time(failedAt!)}. Vuelve a intentarlo.`, tone: "bad" };
   }
   if (failure) status = { text: failure, tone: "bad" };
 
