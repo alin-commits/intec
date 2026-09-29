@@ -473,25 +473,25 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
 
       <div className="dashboard-grid">
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><h3>Gasto por marca</h3><p className="panel-subtitle">En el periodo elegido</p></div></div>
-          <BarChart items={porMarca("gasto")} ariaLabel="Gasto de Meta Ads por marca" valueFormatter={(v) => currencyFormatter.format(v)} />
+          <div className="panel-heading"><div><h3>Evolución</h3><p className="panel-subtitle">Gasto y leads</p></div></div>
+          {evolucion.length > 1 ? (
+            <TrendChart
+              data={evolucion}
+              series={[{ key: "gasto", label: "Gasto (€)", color: "#4f46e5" }, { key: "leads", label: "Leads", color: "#10b981" }]}
+              ariaLabel="Evolución del gasto y los leads de Meta Ads"
+            />
+          ) : (
+            <p className="muted">Hace falta más de un mes con datos para dibujar la evolución.</p>
+          )}
         </article>
-        <article className="panel chart-panel">
-          <div className="panel-heading"><div><h3>Ingresos por marca</h3><p className="panel-subtitle">De lo escrito a mano</p></div></div>
+        <article className="panel chart-panel meta-por-marca">
+          <div className="panel-heading"><div><h3>Por marca</h3><p className="panel-subtitle">Gasto e ingresos</p></div></div>
+          <h4>Gasto</h4>
+          <BarChart items={porMarca("gasto")} ariaLabel="Gasto de Meta Ads por marca" valueFormatter={(v) => currencyFormatter.format(v)} />
+          <h4>Ingresos</h4>
           <BarChart items={porMarca("ingresos")} ariaLabel="Ingresos de Meta Ads por marca" valueFormatter={(v) => currencyFormatter.format(v)} />
         </article>
       </div>
-
-      {evolucion.length > 1 ? (
-        <article className="panel chart-panel">
-          <div className="panel-heading"><div><h3>Evolución</h3><p className="panel-subtitle">Gasto y leads</p></div></div>
-          <TrendChart
-            data={evolucion}
-            series={[{ key: "gasto", label: "Gasto (€)", color: "#4f46e5" }, { key: "leads", label: "Leads", color: "#10b981" }]}
-            ariaLabel="Evolución del gasto y los leads de Meta Ads"
-          />
-        </article>
-      ) : null}
 
       <article className="panel table-panel">
         <div className="panel-heading">

@@ -1521,3 +1521,21 @@ select:not([multiple]):not([size]) {
   padding-right: 32px;
 }
 select:not([multiple]):not([size]):disabled { opacity: .6; }
+
+/* Los dos cuadros por marca comparten panel, para que la evolución se quede
+   con la columna ancha y no se estire hasta ser ilegible. */
+.meta-por-marca h4 { margin: 14px 0 8px; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.meta-por-marca h4:first-of-type { margin-top: 4px; }
+
+/* Las entradas antiguas que quedan por colocar. */
+.meta-pendientes-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
+.meta-pendientes-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 260px) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); }
+.meta-pendientes-list li > div { display: grid; gap: 3px; min-width: 0; }
+.meta-pendientes-list strong { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.meta-pendientes-list span { font-size: 12.5px; }
+.meta-pendientes-list select { min-height: 40px; }
+
+@media (max-width: 820px) {
+  .meta-pendientes-list li { grid-template-columns: 1fr; }
+  .meta-pendientes-list select { min-height: 44px; }
+}

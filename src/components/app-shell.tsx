@@ -10,7 +10,7 @@ import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROL
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
-import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
+import { DEPARTMENTS, getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
 
 const departmentLabels: Record<DirectionDepartment, string> = {
@@ -106,6 +106,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const initials = profile.fullName.split(" ").filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("");
   const isDirection = profile.roles.includes("direction");
   const navRoles: AppRole[] = isDirection ? (directionView ? [directionView] : []) : profile.roles;
+
+  /**
+   * Hay pantallas que solo ven dirección y administración, y que por tanto no
+   * pertenecen a ningún departamento: Ventas es la más clara. Filtrando el menú
+   * solo por el departamento elegido, dirección no podía llegar nunca al panel
+   * que se hizo para ella, mirara donde mirara. Esas se enseñan siempre.
+   */
+  const soloDireccion = (roles: AppRole[] | undefined) =>
+    Boolean(roles) && roles!.includes("direction") && !roles!.some((role) => DEPARTMENTS.includes(role as DirectionDepartment));
   const showConsultaActions = hasAnyRole(profile.roles, ["commercial"]) || (hasAnyRole(profile.roles, ["admin"]) && pathname.startsWith("/consultas"));
 
   async function signOut() {
@@ -122,6 +131,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   function changeDepartment() {
     setDirectionViewAs(null);
     setDirectionView(null);
+    // El panel de inicio guarda el departamento en su propio estado: sin este
+    // aviso se quedaba con el anterior y el botón no hacía nada visible, porque
+    // ya se estaba en /dashboard y no se vuelve a montar.
+    window.dispatchEvent(new Event("intec-direction-view-change"));
     router.push("/dashboard");
   }
 
@@ -141,6 +154,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <nav>
           {navigation.filter((item) => {
             if (item.href === "/tarjetas" && hasAssignedCard) return true;
+            if (isDirection && directionView && soloDireccion(item.roles)) return true;
             return !item.roles || hasAnyRole(navRoles, item.roles);
           }).map((item) => {
             const active = pathname.startsWith(item.href);

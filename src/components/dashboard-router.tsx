@@ -39,6 +39,15 @@ export function DashboardRouter() {
     return () => { active = false; };
   }, [configured]);
 
+  // Cambiar de departamento se pulsa en el menú, que es otro componente. Sin
+  // escuchar el aviso, aquí se seguía con el departamento anterior en memoria y
+  // el botón parecía roto.
+  useEffect(() => {
+    const alCambiar = () => setDirectionViewState(getDirectionViewAs());
+    window.addEventListener("intec-direction-view-change", alCambiar);
+    return () => window.removeEventListener("intec-direction-view-change", alCambiar);
+  }, []);
+
   // El rol de empleado solo llega a Contraseñas. La redirección va en un efecto:
   // navegar desde el cuerpo del render se repite en cada pasada.
   const onlyEmployee = roles !== null && roles.length > 0 && roles.every((role) => role === "employee");
