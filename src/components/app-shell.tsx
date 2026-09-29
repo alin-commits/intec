@@ -10,14 +10,7 @@ import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROL
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
-import { DEPARTMENTS, getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
-
-const departmentLabels: Record<DirectionDepartment, string> = {
-  commercial: "Comercial",
-  it: "Informática",
-  marketing: "Marketing",
-};
 
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
@@ -69,20 +62,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[] }>(() => ({ fullName: "", roles: [] }));
   const [hasAssignedCard, setHasAssignedCard] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [directionView, setDirectionView] = useState<DirectionDepartment | null>(() => getDirectionViewAs());
   const [lastPathname, setLastPathname] = useState(pathname);
   if (pathname !== lastPathname) {
     setLastPathname(pathname);
     setMobileNavOpen(false);
   }
-
-  useEffect(() => {
-    function refreshDirectionView() {
-      setDirectionView(getDirectionViewAs());
-    }
-    window.addEventListener("intec-direction-view-change", refreshDirectionView);
-    return () => window.removeEventListener("intec-direction-view-change", refreshDirectionView);
-  }, []);
 
   useEffect(() => {
     if (!configured) return;
@@ -104,17 +88,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isDashboard = pathname.startsWith("/dashboard");
   const firstName = profile.fullName.split(" ")[0];
   const initials = profile.fullName.split(" ").filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("");
-  const isDirection = profile.roles.includes("direction");
-  const navRoles: AppRole[] = isDirection ? (directionView ? [directionView] : []) : profile.roles;
-
-  /**
-   * Hay pantallas que solo ven dirección y administración, y que por tanto no
-   * pertenecen a ningún departamento: Ventas es la más clara. Filtrando el menú
-   * solo por el departamento elegido, dirección no podía llegar nunca al panel
-   * que se hizo para ella, mirara donde mirara. Esas se enseñan siempre.
+  /*
+   * Dirección ve el menú entero, como todo el mundo: las pantallas que la
+   * nombran en su lista de roles. Antes se filtraba por el departamento elegido
+   * y había que cambiar de modo para llegar a Tickets, a Consultas o a RRSS —
+   * tres viajes para dar una vuelta por la empresa, cuando de todas formas solo
+   * mira. Además el menú de Informática y el de Marketing le enseñaban Tarjetas,
+   * que es una página que le deniega la entrada. Qué panel ve en Inicio se
+   * elige ahora ahí mismo, en sus pestañas.
    */
-  const soloDireccion = (roles: AppRole[] | undefined) =>
-    Boolean(roles) && roles!.includes("direction") && !roles!.some((role) => DEPARTMENTS.includes(role as DirectionDepartment));
+  const navRoles: AppRole[] = profile.roles;
   const showConsultaActions = hasAnyRole(profile.roles, ["commercial"]) || (hasAnyRole(profile.roles, ["admin"]) && pathname.startsWith("/consultas"));
 
   async function signOut() {
@@ -126,16 +109,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     } else {
       router.push("/login");
     }
-  }
-
-  function changeDepartment() {
-    setDirectionViewAs(null);
-    setDirectionView(null);
-    // El panel de inicio guarda el departamento en su propio estado: sin este
-    // aviso se quedaba con el anterior y el botón no hacía nada visible, porque
-    // ya se estaba en /dashboard y no se vuelve a montar.
-    window.dispatchEvent(new Event("intec-direction-view-change"));
-    router.push("/dashboard");
   }
 
   return (
@@ -154,7 +127,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <nav>
           {navigation.filter((item) => {
             if (item.href === "/tarjetas" && hasAssignedCard) return true;
-            if (isDirection && directionView && soloDireccion(item.roles)) return true;
             return !item.roles || hasAnyRole(navRoles, item.roles);
           }).map((item) => {
             const active = pathname.startsWith(item.href);
@@ -175,11 +147,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               <small>{profile.roles.map((role) => roleLabels[role]).join(" + ")}</small>
             </div>
           </div>
-          {isDirection ? (
-            <button type="button" className="sidebar-department-switch" onClick={changeDepartment}>
-              {directionView ? `Viendo: ${departmentLabels[directionView]} · Cambiar` : "Elegir departamento"}
-            </button>
-          ) : null}
           <button type="button" className="nav-link sidebar-logout" onClick={signOut}>
             <span className="nav-icon"><LogoutIcon /></span>Cerrar sesión
           </button>

@@ -5,12 +5,11 @@ import { useRouter } from "next/navigation";
 import { hasAnyRole } from "@/lib/constants";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
-import { getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
+import { DEPARTMENTS, departmentLabels, getDirectionViewAs, setDirectionViewAs, type DirectionDepartment } from "@/lib/direction-view";
 import type { AppRole } from "@/lib/types";
 import { DashboardClient } from "./dashboard-client";
 import { TicketsDashboardView } from "./tickets-dashboard-view";
 import { MarketingDashboardView } from "./marketing-dashboard-view";
-import { DirectionDepartmentPicker } from "./direction-department-picker";
 
 export function DashboardRouter() {
   const configured = isSupabaseConfigured();
@@ -39,15 +38,6 @@ export function DashboardRouter() {
     return () => { active = false; };
   }, [configured]);
 
-  // Cambiar de departamento se pulsa en el menú, que es otro componente. Sin
-  // escuchar el aviso, aquí se seguía con el departamento anterior en memoria y
-  // el botón parecía roto.
-  useEffect(() => {
-    const alCambiar = () => setDirectionViewState(getDirectionViewAs());
-    window.addEventListener("intec-direction-view-change", alCambiar);
-    return () => window.removeEventListener("intec-direction-view-change", alCambiar);
-  }, []);
-
   // El rol de empleado solo llega a Contraseñas. La redirección va en un efecto:
   // navegar desde el cuerpo del render se repite en cada pasada.
   const onlyEmployee = roles !== null && roles.length > 0 && roles.every((role) => role === "employee");
@@ -57,21 +47,37 @@ export function DashboardRouter() {
 
   if (roles === null || onlyEmployee) return <div className="page-stack" />;
 
+  /*
+   * Dirección tiene tres paneles de inicio, uno por departamento, y se cambia de
+   * uno a otro aquí mismo. Antes había que elegir departamento antes de ver
+   * nada, y esa elección además escondía media aplicación del menú. Se recuerda
+   * el último elegido; la primera vez se entra por el comercial, que es el que
+   * trae las ventas.
+   */
   if (roles.includes("direction")) {
-    if (!directionView) {
-      return (
-        <DirectionDepartmentPicker
-          onChoose={(department) => {
-            setDirectionViewAs(department);
-            setDirectionViewState(department);
-            window.dispatchEvent(new Event("intec-direction-view-change"));
-          }}
-        />
-      );
-    }
-    if (directionView === "it") return <TicketsDashboardView />;
-    if (directionView === "marketing") return <MarketingDashboardView />;
-    return <DashboardClient />;
+    const vista = directionView ?? "commercial";
+    return (
+      <div className="page-stack">
+        <div className="view-tabs" role="tablist" aria-label="Panel de inicio">
+          {DEPARTMENTS.map((department) => (
+            <button
+              key={department}
+              type="button"
+              role="tab"
+              aria-selected={vista === department}
+              className={vista === department ? "view-tab active" : "view-tab"}
+              onClick={() => {
+                setDirectionViewAs(department);
+                setDirectionViewState(department);
+              }}
+            >
+              {departmentLabels[department]}
+            </button>
+          ))}
+        </div>
+        {vista === "it" ? <TicketsDashboardView /> : vista === "marketing" ? <MarketingDashboardView /> : <DashboardClient />}
+      </div>
+    );
   }
 
   // Admin/commercial/viewer own the general dashboard — anyone holding one

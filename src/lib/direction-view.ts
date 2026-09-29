@@ -4,6 +4,12 @@ const STORAGE_KEY = "intec-direction-view-as";
 /** Los departamentos que puede mirar dirección. */
 export const DEPARTMENTS: DirectionDepartment[] = ["commercial", "it", "marketing"];
 
+export const departmentLabels: Record<DirectionDepartment, string> = {
+  commercial: "Comercial",
+  it: "Informática",
+  marketing: "Marketing",
+};
+
 export function getDirectionViewAs(): DirectionDepartment | null {
   if (typeof window === "undefined") return null;
   const value = window.localStorage.getItem(STORAGE_KEY);
