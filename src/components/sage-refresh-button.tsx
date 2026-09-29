@@ -10,6 +10,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
   y el agente de allí, que pregunta cada minuto, la recoge. Por eso el botón
   pasa por "esperando al servidor" antes de "leyendo", y si el servidor no
   pregunta (tarea parada, servidor apagado) lo dice en vez de esperar sin fin.
+
+  Solo se puede pedir una lectura por hora, porque el agente recorre la base de
+  Sage entera y pulsando sin parar se tumba el servidor de la oficina. El límite
+  lo pone el servidor; aquí solo se enseña, para avisar antes de pulsar en vez
+  de después.
 */
 
 type RefreshStatus = "pendiente" | "leyendo" | "hecho" | "error" | "caducada";
@@ -39,6 +44,8 @@ const isActive = (request: RefreshRequest | null) => request?.status === "pendie
 export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
   const [request, setRequest] = useState<RefreshRequest | null>(null);
   const [agentLastPoll, setAgentLastPoll] = useState<string | null>(null);
+  /** Hasta cuándo hay que esperar para volver a pedir, si es que hay que esperar. */
+  const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   /** La hora de la última consulta: con ella se decide si el servidor tarda demasiado. */
@@ -54,9 +61,10 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
     try {
       const response = await fetch("/api/sage/refresh", { cache: "no-store" });
       if (!response.ok) return;
-      const payload = (await response.json()) as { request: RefreshRequest | null; agentLastPoll: string | null };
+      const payload = (await response.json()) as { request: RefreshRequest | null; agentLastPoll: string | null; nextAllowedAt?: string | null };
       setCheckedAt(Date.now());
       setAgentLastPoll(payload.agentLastPoll);
+      setNextAllowedAt(payload.nextAllowedAt ?? null);
       setRequest(payload.request);
       if (payload.request && isActive(payload.request)) watchedId.current = payload.request.id;
       if (payload.request && payload.request.id === watchedId.current && payload.request.status === "hecho") {
@@ -85,6 +93,14 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
     return () => window.clearInterval(timer);
   }, [active, check]);
 
+  useEffect(() => {
+    if (!nextAllowedAt) return;
+    const falta = new Date(nextAllowedAt).getTime() - Date.now();
+    if (falta <= 0) return;
+    const timer = window.setTimeout(() => void check(), falta + 1000);
+    return () => window.clearTimeout(timer);
+  }, [nextAllowedAt, check]);
+
   async function ask() {
     setAsking(true);
     setFailure(null);
@@ -94,11 +110,17 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ days: 2 }),
       });
-      const payload = (await response.json().catch(() => ({}))) as { request?: RefreshRequest | null; error?: string };
+      const payload = (await response.json().catch(() => ({}))) as { request?: RefreshRequest | null; error?: string; nextAllowedAt?: string | null };
+      if (response.status === 429) {
+        // Otra persona pudo pedirla desde otra pantalla mientras tanto.
+        setNextAllowedAt(payload.nextAllowedAt ?? null);
+        return;
+      }
       if (!response.ok || !payload.request) {
         setFailure(payload.error ?? "No se pudo pedir la lectura.");
         return;
       }
+      setNextAllowedAt(null);
       watchedId.current = payload.request.id;
       setRequest(payload.request);
     } catch {
@@ -119,6 +141,8 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
     && (checkedAt - new Date(failedAt).getTime() < FALLO_RECIENTE_MS || agentSilent),
   );
 
+  const esperando = Boolean(nextAllowedAt && checkedAt > 0 && new Date(nextAllowedAt).getTime() > checkedAt);
+
   let label = "Actualizar desde Sage";
   let status: { text: string; tone: "info" | "ok" | "bad" } | null = null;
   if (request?.status === "pendiente") {
@@ -138,6 +162,12 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
       ? { text: `El servidor de Sage no responde desde las ${time(failedAt!)}. Revisa que el servidor y la tarea «Intec - Sage a peticion» estén en marcha.`, tone: "bad" }
       : { text: `El servidor de Sage no respondió a las ${time(failedAt!)}. Vuelve a intentarlo.`, tone: "bad" };
   }
+  // La espera manda sobre el "actualizado a las…", que si no tapaba el aviso
+  // justo después de una lectura buena, que es cuando hace falta leerlo.
+  if (esperando && !active) {
+    const hecho = request?.status === "hecho" && request.finished_at ? `Leído a las ${time(request.finished_at)}. ` : "";
+    status = { text: `${hecho}Sage se lee como mucho una vez por hora: vuelve a las ${time(nextAllowedAt!)}.`, tone: "info" };
+  }
   if (failure) status = { text: failure, tone: "bad" };
 
   return (
@@ -146,7 +176,7 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
         type="button"
         className="button button-secondary sage-refresh-button"
         onClick={() => void ask()}
-        disabled={asking || active}
+        disabled={asking || active || esperando}
         aria-live="polite"
       >
         {active ? <span className="sage-refresh-spinner" aria-hidden="true" /> : null}

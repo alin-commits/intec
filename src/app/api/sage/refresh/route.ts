@@ -17,6 +17,14 @@ import type { AppRole } from "@/lib/types";
 */
 
 const COLUMNS = "id, status, days, requested_at, started_at, finished_at, message";
+
+/**
+ * Una lectura a petición por hora, para toda la casa. Leer Sage no es gratis:
+ * el agente entra en la base de la oficina y la recorre entera, así que un
+ * botón que se puede pulsar sin parar es una forma de tumbar el servidor sin
+ * querer. Las lecturas programadas siguen igual; esto solo limita el botón.
+ */
+const ESPERA_MS = 60 * 60 * 1000;
 const bodySchema = z.object({ days: z.number().int().min(1).max(90).default(2) });
 
 async function allowedClient() {
@@ -47,18 +55,40 @@ async function expireForgottenRequests() {
     .lt("requested_at", cutoff);
 }
 
+/**
+ * Hasta cuándo hay que esperar para volver a pedir, o null si se puede ya.
+ *
+ * Cuenta cualquier petición de la última hora, saliera bien o no. Se pensó en
+ * perdonar las que caducaron (el servidor apagado no lee nada y no le cuesta
+ * nada a nadie), pero eso deja una rendija: una regla con excepciones invita a
+ * pulsar a ver si cuela. Una por hora, sin más.
+ */
+async function siguienteLecturaPermitida(supabase: NonNullable<Awaited<ReturnType<typeof createClient>>>): Promise<string | null> {
+  const desde = new Date(Date.now() - ESPERA_MS).toISOString();
+  const { data } = await supabase
+    .from("sage_refresh_requests")
+    .select("requested_at")
+    .gte("requested_at", desde)
+    .order("requested_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return new Date(new Date(data.requested_at as string).getTime() + ESPERA_MS).toISOString();
+}
+
 export async function GET() {
   const access = await allowedClient();
   if ("error" in access) return access.error;
   const { supabase } = access;
   await expireForgottenRequests();
-  const [latest, agent] = await Promise.all([
+  const [latest, agent, nextAllowedAt] = await Promise.all([
     supabase.from("sage_refresh_requests").select(COLUMNS).order("requested_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("sage_agent_status").select("last_poll_at").eq("id", 1).maybeSingle(),
+    siguienteLecturaPermitida(supabase),
   ]);
   if (latest.error || agent.error) return NextResponse.json({ error: "No se pudo consultar la lectura de Sage." }, { status: 500 });
   return NextResponse.json(
-    { request: latest.data ?? null, agentLastPoll: agent.data?.last_poll_at ?? null },
+    { request: latest.data ?? null, agentLastPoll: agent.data?.last_poll_at ?? null, nextAllowedAt },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -77,6 +107,16 @@ export async function POST(request: Request) {
     days = parsed.data.days;
   } catch {
     return NextResponse.json({ error: "Petición no válida." }, { status: 400 });
+  }
+
+  // El límite se comprueba aquí y no solo en el botón: recargar la página no
+  // puede servir para saltárselo.
+  const nextAllowedAt = await siguienteLecturaPermitida(supabase);
+  if (nextAllowedAt) {
+    return NextResponse.json(
+      { error: "Sage ya se ha leído hace menos de una hora. Inténtalo más tarde.", nextAllowedAt },
+      { status: 429 },
+    );
   }
 
   const { data, error } = await supabase
