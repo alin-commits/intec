@@ -84,6 +84,8 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
   const [extras, setExtras] = useState<Extra[]>([]);
   const [sueltas, setSueltas] = useState<Suelta[]>([]);
   const [campanasApp, setCampanasApp] = useState<CampanaApp[]>([]);
+  /** false mientras no se haya aplicado la migración de "entrada colocada". */
+  const [colocarDisponible, setColocarDisponible] = useState(true);
   const [ultima, setUltima] = useState<{ started_at: string } | null>(null);
   const [estado, setEstado] = useState<"cargando" | "listo" | "vacio" | "error">("cargando");
   const [editando, setEditando] = useState<Fila | null>(null);
@@ -106,7 +108,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         .gte("day", desde).lte("day", hasta).order("day"),
       supabase.from("meta_campaign_extras").select("meta_campaign_id, revenue, qualified_leads, followers_gained, notes"),
       // Lo que quedó escrito a mano y todavía no está colgado de ninguna campaña.
-      supabase.from("meta_ads_entries").select("id, campaign_name, revenue, qualified_leads, followers_gained, notes"),
+      supabase.from("meta_ads_entries").select("id, campaign_name, revenue, qualified_leads, followers_gained, notes").is("placed_into", null),
       supabase.from("meta_sync_runs").select("started_at").order("started_at", { ascending: false }).limit(1),
       supabase.from("meta_insights_daily").select("day").order("day", { ascending: true }).limit(1),
       supabase.from("campaigns").select("id, name, business_unit_id").order("name"),
@@ -119,6 +121,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     if (fallo) throw fallo;
     if (extrasRes.error) console.warn("Todavía no se puede leer lo escrito a mano:", extrasRes.error.message);
     if (sueltasRes.error) console.warn("No se pudieron leer las entradas antiguas:", sueltasRes.error.message);
+    setColocarDisponible(!sueltasRes.error);
     setCuentas((cuentasRes.data ?? []) as Cuenta[]);
     setCampanas((campanasRes.data ?? []) as Campana[]);
     setDias((diasRes.data ?? []) as Dia[]);
@@ -229,14 +232,17 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     .map((unit) => ({ label: unit.name, value: filas.filter((f) => f.marca === unit.name).reduce((s, f) => s + f[campo], 0), color: unit.accent }))
     .filter((r) => r.value > 0);
 
-  /** Lo de la tabla vieja que aún no está colgado de ninguna campaña. */
-  const pendientes = useMemo(() => {
-    const yaPuestas = new Set(extras.map((e) => e.meta_campaign_id));
-    const nombresPuestos = new Set(campanas.filter((c) => yaPuestas.has(c.meta_id)).map((c) => c.name.trim().toLowerCase()));
-    return sueltas.filter((s) =>
-      (Number(s.revenue) > 0 || Number(s.qualified_leads) > 0 || Number(s.followers_gained) > 0)
-      && !nombresPuestos.has((s.campaign_name ?? "").trim().toLowerCase()));
-  }, [sueltas, extras, campanas]);
+  /**
+   * Lo de la tabla vieja que aún no está colgado de ninguna campaña. Quién está
+   * colocada lo dice la propia fila (placed_into), que es lo que filtra la
+   * consulta: antes se deducía comparando el nombre de la entrada con el de las
+   * campañas de Meta, y como estas entradas están aquí justamente porque su
+   * nombre no coincide con ninguna, no se iban de la lista ni colocándolas.
+   */
+  const pendientes = useMemo(
+    () => sueltas.filter((s) => Number(s.revenue) > 0 || Number(s.qualified_leads) > 0 || Number(s.followers_gained) > 0),
+    [sueltas],
+  );
 
   function elegirPeriodo(nuevo: Periodo) {
     setPeriodo(nuevo);
@@ -302,6 +308,14 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     setGuardando(true);
     try {
       const supabase = createClient();
+      // Se marca primero y se suma después: si fallara al revés, la entrada
+      // seguiría saliendo en la lista con su dinero ya sumado y el siguiente
+      // clic lo sumaría otra vez.
+      const { error: errorMarca } = await supabase.from("meta_ads_entries")
+        .update({ placed_into: destino, placed_at: new Date().toISOString() })
+        .eq("id", suelta.id)
+        .is("placed_into", null);
+      if (errorMarca) throw errorMarca;
       const previo = extraDe.get(destino);
       const { error } = await supabase.from("meta_campaign_extras").upsert({
         meta_campaign_id: destino,
@@ -312,9 +326,15 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         notes: [previo?.notes, suelta.notes].filter(Boolean).join("\n") || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: "meta_campaign_id" });
-      if (error) throw error;
+      if (error) {
+        // La marca ya está puesta pero el dinero no se ha sumado: se deshace
+        // para que la entrada vuelva a la lista y se pueda reintentar.
+        await supabase.from("meta_ads_entries").update({ placed_into: null, placed_at: null }).eq("id", suelta.id);
+        throw error;
+      }
       await cargar();
       setAsignando((actual) => ({ ...actual, [suelta.id]: "" }));
+      setAviso(`"${suelta.campaign_name}" colocada. Sus ingresos y cualificados ya suman en esa campaña.`);
     } catch (causa) {
       console.error("No se pudo asignar:", causa);
       setAviso("No se pudo asignar esa entrada.");
@@ -424,6 +444,13 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       </div>
 
       {aviso ? <p className="export-range-summary is-warning">{aviso}</p> : null}
+      {manualDisponible && !colocarDisponible ? (
+        <p className="export-range-summary is-warning">
+          Falta ejecutar la migración que apunta qué entradas antiguas ya se han colocado. Hasta entonces la lista de
+          pendientes no se puede enseñar, porque colocar una no la quitaría de la lista y sus ingresos se sumarían dos
+          veces.
+        </p>
+      ) : null}
       {!manualDisponible ? (
         <p className="export-range-summary is-warning">
           Falta ejecutar la migración de los datos escritos a mano. Mientras tanto se ve todo lo que viene de Meta,
