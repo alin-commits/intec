@@ -384,6 +384,11 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .role-chip:hover { border-color: #d8dde6; }
 .role-chip.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
 .role-chip:disabled { opacity: .55; cursor: not-allowed; }
+/* Responsables de un lead: se marcan varios, como los roles de un usuario. */
+.owner-picker { display: grid; gap: 6px; align-content: start; }
+.owner-picker > span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.owner-picker .role-chip { min-height: 34px; font-size: 12.5px; }
+.owner-picker p, .owner-picker small { margin: 0; font-size: 12px; }
 .inquiries-dashboard-heading { margin-top: 12px; }
 .inquiry-filters { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
 .channel-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 225px; align-items: center; }

@@ -41,6 +41,12 @@ export const CRM_ROLES: AppRole[] = ["admin", "marketing", "commercial", "direct
 /** Who can send internal notices (avisos) to other users. */
 export const ANNOUNCEMENT_SENDER_ROLES: AppRole[] = ["admin", "direction", "marketing", "it"];
 export const CRM_EDIT_ROLES: AppRole[] = ["admin", "marketing", "commercial"];
+/**
+ * Quién decide qué comercial lleva cada lead. Los comerciales no: ven el
+ * responsable, pero no lo tocan. Tiene que cuadrar con la política
+ * lead_assignees_write de la base de datos.
+ */
+export const LEAD_ASSIGN_ROLES: AppRole[] = ["admin", "marketing"];
 /** Marketing department expenses (apps, subscriptions, one-off spending). */
 export const EXPENSES_ROLES: AppRole[] = ["admin", "marketing", "direction"];
 /** Las ventas que llegan de Sage: cifras de negocio, solo dirección y administración. */

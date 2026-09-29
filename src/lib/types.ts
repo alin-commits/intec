@@ -83,7 +83,8 @@ export type Lead = {
   source: string;
   notes?: string;
   saleValue: number | null;
-  assignedTo?: string | null;
+  /** Comerciales que llevan el lead. Vive en lead_assignees, lo pone administración. */
+  assignees?: string[];
   statusHistory?: LeadStatusEvent[];
 };
 

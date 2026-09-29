@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { DateField } from "@/components/ui/date-field";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { LEADS_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
+import { LEADS_ROLES, LEAD_ASSIGN_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
@@ -46,7 +46,7 @@ function blankDraft(units: BusinessUnit[]): LeadDraft {
     source: "",
     notes: "",
     saleValue: null,
-    assignedTo: null,
+    assignees: [],
     statusHistory: [],
   };
 }
@@ -61,7 +61,7 @@ function isLeadTypeValue(value: unknown): value is LeadTypeValue {
   return typeof value === "string" && value in leadTypeLabels;
 }
 
-function mapLeadRow(row: Record<string, unknown>): Lead {
+function mapLeadRow(row: Record<string, unknown>, asignados: Map<string, string[]>): Lead {
   const historyValue = Array.isArray(row.lead_status_history) ? row.lead_status_history : [];
   return {
     id: String(row.id),
@@ -81,7 +81,7 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
     source: String(row.source ?? ""),
     notes: String(row.notes ?? ""),
     saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
-    assignedTo: row.assigned_to ? String(row.assigned_to) : null,
+    assignees: asignados.get(String(row.id)) ?? [],
     statusHistory: historyValue.map((item) => {
       const history = item as Record<string, unknown>;
       return {
@@ -97,6 +97,19 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
 function typeValueFromLabel(label: string): LeadTypeValue {
   const entry = Object.entries(leadTypeLabels).find(([, value]) => value === label);
   return (entry?.[0] as LeadTypeValue | undefined) ?? "other";
+}
+
+/**
+ * Avisa por correo del lead nuevo. Sin `avisarA` va a sus responsables, y si no
+ * tiene ninguno a administración. Que falle el correo no puede tumbar el
+ * guardado, así que no se espera la respuesta.
+ */
+function avisarLeadNuevo(leadId: string, avisarA?: string[]) {
+  void fetch("/api/leads/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(avisarA ? { leadId, avisarA } : { leadId }),
+  }).catch((cause) => console.error("No se pudo enviar el aviso del lead:", cause));
 }
 
 function initialDemoLeads(configured: boolean): Lead[] {
@@ -126,7 +139,10 @@ export function LeadsTable() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [isCommercial, setIsCommercial] = useState(false);
+  /** Repartir leads es cosa de administración; un comercial ve el responsable pero no lo cambia. */
+  const [canAssign, setCanAssign] = useState(true);
+  /** false mientras no se haya aplicado la migración de lead_assignees. */
+  const [asignacionesOk, setAsignacionesOk] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
@@ -156,16 +172,25 @@ export function LeadsTable() {
   const visibleRows = useMemo(() => rows.filter((lead) => {
     const matchesQuery = `${lead.contactName} ${lead.clientCompanyName} ${lead.productInterest} ${lead.phone} ${lead.email}`.toLowerCase().includes(query.toLowerCase());
     const matchesDates = inDateKeyRange(lead.createdAt, dateFrom, dateTo);
-    const owner = lead.assignedTo ?? null;
+    const owners = lead.assignees ?? [];
     const matchesOwner = ownerFilter === "all"
-      || (ownerFilter === "mine" ? owner === currentUserId : ownerFilter === "unassigned" ? owner === null : owner === ownerFilter);
+      || (ownerFilter === "mine"
+        ? Boolean(currentUserId) && owners.includes(currentUserId as string)
+        : ownerFilter === "unassigned" ? owners.length === 0 : owners.includes(ownerFilter));
     return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status) && matchesDates && matchesOwner;
   }), [query, rows, status, unitId, dateFrom, dateTo, ownerFilter, currentUserId]);
 
   const teamById = useMemo(() => new Map(team.map((member) => [member.id, member.fullName])), [team]);
-  const ownerName = (id: string | null | undefined) => (id ? teamById.get(id) ?? "Usuario inactivo" : "Sin asignar");
-  // Only commercials can own leads; keep the current owner listed even if their role changed.
-  const ownerOptions = useMemo(() => team.filter((member) => member.roles.includes("commercial") || member.id === draft.assignedTo), [team, draft.assignedTo]);
+  const ownerName = (id: string) => teamById.get(id) ?? "Usuario inactivo";
+  const ownerNames = (lead: Lead) => {
+    const owners = lead.assignees ?? [];
+    return owners.length ? owners.map(ownerName).join(" · ") : "Sin asignar";
+  };
+  // Only commercials can own leads; keep the current owners listed even if their role changed.
+  const ownerOptions = useMemo(
+    () => team.filter((member) => member.roles.includes("commercial") || (draft.assignees ?? []).includes(member.id)),
+    [team, draft.assignees],
+  );
 
   const leadSummary = useMemo(() => {
     const won = visibleRows.filter((lead) => lead.status === "won");
@@ -180,11 +205,14 @@ export function LeadsTable() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }, { data: asignadosData, error: asignadosError }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("campaigns").select("id, name, business_unit_id").neq("status", "archived").order("name"),
-      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, assigned_to, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at)").order("created_at", { ascending: false }).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at)").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
+      // En consulta aparte y no anidada en la de leads: si la migración de
+      // responsables no está aplicada todavía, la página sigue funcionando.
+      fetchAllPages<{ lead_id: string; profile_id: string }>((from, to) => supabase.from("lead_assignees").select("lead_id, profile_id").order("lead_id").order("profile_id").range(from, to)),
     ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar los datos."));
@@ -194,7 +222,14 @@ export function LeadsTable() {
     setUnits(mappedUnits);
     setUnitId((current) => (current === "all" || mappedUnits.some((unit) => unit.id === current)) ? current : (mappedUnits[0]?.id ?? "all"));
     setCampaignOptions((campaignData ?? []).map((row) => ({ id: row.id, name: row.name, businessUnitId: row.business_unit_id })));
-    setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>)));
+    const asignados = new Map<string, string[]>();
+    for (const fila of asignadosData ?? []) {
+      const lista = asignados.get(fila.lead_id) ?? [];
+      lista.push(fila.profile_id);
+      asignados.set(fila.lead_id, lista);
+    }
+    setAsignacionesOk(!asignadosError);
+    setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>, asignados)));
     const user = authData.user;
     if (user) {
       const [{ data: profile }, { data: teamData }] = await Promise.all([
@@ -202,9 +237,9 @@ export function LeadsTable() {
         supabase.rpc("list_team_members"),
       ]);
       setCurrentUserId(user.id);
-      setIsCommercial(Boolean(profile?.roles.includes("commercial")));
       setTeam(((teamData ?? []) as { id: string; full_name: string | null; roles: AppRole[] }[]).map((row) => ({ id: row.id, fullName: row.full_name || "Usuario", roles: row.roles })));
       setCanEdit(Boolean(profile && hasAnyRole(profile.roles, ["admin", "commercial", "marketing"])));
+      setCanAssign(Boolean(profile && hasAnyRole(profile.roles, LEAD_ASSIGN_ROLES)));
       setAccess(profile && hasAnyRole(profile.roles, LEADS_ROLES) ? "allowed" : "denied");
     } else {
       setAccess("denied");
@@ -218,7 +253,9 @@ export function LeadsTable() {
 
   function openNew() {
     setEditingId(null);
-    const draftForNew = { ...blankDraft(registrableUnits), assignedTo: isCommercial ? currentUserId : null };
+    // Sin responsable de partida: lo pone administración, que además recibe un
+    // aviso por correo en cuanto el lead entra sin nadie detrás.
+    const draftForNew = blankDraft(registrableUnits);
     setDraft(unitId !== "all" ? { ...draftForNew, businessUnitId: unitId } : draftForNew);
     setEditorOpen(true);
     setMessage(null);
@@ -242,7 +279,7 @@ export function LeadsTable() {
       source: lead.source,
       notes: lead.notes,
       saleValue: lead.saleValue,
-      assignedTo: lead.assignedTo ?? null,
+      assignees: lead.assignees ?? [],
       statusHistory: lead.statusHistory,
     });
     setEditorOpen(true);
@@ -251,6 +288,13 @@ export function LeadsTable() {
 
   function updateDraft<K extends keyof LeadDraft>(key: K, value: LeadDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function toggleAssignee(id: string) {
+    setDraft((current) => {
+      const actuales = current.assignees ?? [];
+      return { ...current, assignees: actuales.includes(id) ? actuales.filter((otro) => otro !== id) : [...actuales, id] };
+    });
   }
 
   async function saveLead(event: FormEvent<HTMLFormElement>) {
@@ -294,11 +338,39 @@ export function LeadsTable() {
           source: draft.source.trim() || null,
           notes: draft.notes?.trim() || null,
           sale_value: draft.saleValue,
-          assigned_to: draft.assignedTo || null,
         };
         const supabase = createClient();
-        const result = editingId ? await supabase.from("leads").update(payload).eq("id", editingId) : await supabase.from("leads").insert(payload);
-        if (result.error) throw result.error;
+        let leadId = editingId;
+        if (editingId) {
+          const { error } = await supabase.from("leads").update(payload).eq("id", editingId);
+          if (error) throw error;
+        } else {
+          const { data, error } = await supabase.from("leads").insert(payload).select("id").single();
+          if (error) throw error;
+          leadId = String(data.id);
+        }
+        // Los responsables viven en su propia tabla, y solo los toca quien puede
+        // repartir: para un comercial esto no se ejecuta nunca.
+        const anteriores = editingId ? rows.find((lead) => lead.id === editingId)?.assignees ?? [] : [];
+        const deseados = draft.assignees ?? [];
+        const anadidos = deseados.filter((id) => !anteriores.includes(id));
+        if (leadId && canAssign && asignacionesOk) {
+          const quitados = anteriores.filter((id) => !deseados.includes(id));
+          if (quitados.length) {
+            const { error } = await supabase.from("lead_assignees").delete().eq("lead_id", leadId).in("profile_id", quitados);
+            if (error) throw error;
+          }
+          if (anadidos.length) {
+            const { error } = await supabase.from("lead_assignees").insert(anadidos.map((profileId) => ({ lead_id: leadId, profile_id: profileId })));
+            if (error) throw error;
+          }
+        }
+        if (leadId) {
+          // Lead nuevo: se avisa a quien lo lleve, o a administración si no lo
+          // lleva nadie. Lead que ya existía: solo a los que se acaban de sumar.
+          if (!editingId) avisarLeadNuevo(leadId);
+          else if (anadidos.length) avisarLeadNuevo(leadId, anadidos);
+        }
         await loadRealData();
         setMessage(editingId ? "Lead actualizado correctamente." : "Lead creado correctamente.");
       }
@@ -360,7 +432,7 @@ export function LeadsTable() {
       { header: "Tipo", value: (lead) => lead.type },
       { header: "Interés", value: (lead) => lead.productInterest },
       { header: "Fuente", value: (lead) => lead.source },
-      { header: "Responsable", value: (lead) => ownerName(lead.assignedTo) },
+      { header: "Responsables", value: (lead) => ownerNames(lead) },
       { header: "Valor (€)", value: (lead) => lead.saleValue ?? "" },
       { header: "Notas", value: (lead) => lead.notes ?? "" },
     ]);
@@ -452,7 +524,7 @@ export function LeadsTable() {
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Responsable</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Responsables</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>
             <tbody>{visibleRows.map((lead) => {
               const unit = units.find((item) => item.id === lead.businessUnitId);
               return (
@@ -462,7 +534,7 @@ export function LeadsTable() {
                   <td><strong>{lead.contactName || "Sin contacto"}</strong><small>{lead.clientCompanyName || "—"}</small></td>
                   <td>{lead.campaign || "General"}</td>
                   <td>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => setPendingStatus({ lead, status: event.target.value as LeadStatus })}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
-                  <td className={lead.assignedTo ? undefined : "muted"}>{ownerName(lead.assignedTo)}</td>
+                  <td className={(lead.assignees ?? []).length ? undefined : "muted"}>{ownerNames(lead)}</td>
                   <td>{lead.productInterest || "—"}</td>
                   <td>{lead.saleValue ? currencyFormatter.format(lead.saleValue) : "—"}</td>
                   <td><button type="button" className="button button-compact button-secondary" onClick={() => openEdit(lead)}>{canEdit ? "Editar" : "Ver"}</button></td>
@@ -498,13 +570,36 @@ export function LeadsTable() {
             <label><span>Población</span><input value={draft.location} readOnly={!canEdit} onChange={(event) => updateDraft("location", event.target.value)} /></label>
             <label><span>Producto o interés</span><input value={draft.productInterest} readOnly={!canEdit} onChange={(event) => updateDraft("productInterest", event.target.value)} /></label>
             <label><span>Estado *</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label><span>Responsable</span><select value={draft.assignedTo ?? ""} disabled={!canEdit} onChange={(event) => updateDraft("assignedTo", event.target.value || null)}>
-              <option value="">Sin asignar</option>
-              {ownerOptions.map((member) => <option key={member.id} value={member.id}>{member.fullName}</option>)}
-            </select></label>
+
             <label><span>Tipo</span><select value={draft.type} disabled={!canEdit} onChange={(event) => updateDraft("type", event.target.value)}>{Object.values(leadTypeLabels).map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
             <label><span>Fuente</span><input value={draft.source} readOnly={!canEdit} onChange={(event) => updateDraft("source", event.target.value)} /></label>
             <label><span>Valor de venta</span><input type="number" min="0" step="0.01" value={draft.saleValue ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("saleValue", event.target.value ? Number(event.target.value) : null)} /></label>
+            <div className="form-field-wide owner-picker">
+              <span>Responsables</span>
+              {ownerOptions.length === 0 ? <p className="muted">No hay comerciales activos a quien asignarlo.</p> : (
+                <div className="role-chip-group">
+                  {ownerOptions.map((member) => (
+                    <button
+                      key={member.id}
+                      type="button"
+                      className={(draft.assignees ?? []).includes(member.id) ? "role-chip active" : "role-chip"}
+                      disabled={!canEdit || !canAssign || !asignacionesOk}
+                      aria-pressed={(draft.assignees ?? []).includes(member.id)}
+                      onClick={() => toggleAssignee(member.id)}
+                    >
+                      {member.fullName}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <small className="muted">
+                {!asignacionesOk
+                  ? "Falta aplicar la migración de responsables en la base de datos."
+                  : canAssign
+                    ? "Puedes marcar varios. Los que añadas recibirán un aviso por correo."
+                    : "Quién lleva el lead lo decide administración."}
+              </small>
+            </div>
             <label className="form-field-wide"><span>Observaciones</span><textarea rows={4} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           {editingId && draft.statusHistory?.length ? <div className="history-panel"><h3>Historial de estados</h3><div className="history-list">{draft.statusHistory.map((event) => <div key={event.id}><span>{formatDate(event.changedAt)}</span><strong>{event.previousStatus ? `${leadStatusLabels[event.previousStatus]} → ` : ""}{leadStatusLabels[event.newStatus]}</strong></div>)}</div></div> : null}

@@ -59,6 +59,39 @@ export function buildStaleLeadsEmail(input: { recipientName: string | null; lead
   return { subject, html: emailShell("Leads pendientes de contactar", body, "Intec Commercial Hub", 620) };
 }
 
+// ---------- New lead ----------
+
+export type NewLeadRow = { label: string; value: string };
+
+/**
+ * Aviso de lead nuevo. Va a sus responsables; si no tiene ninguno, a
+ * administración, que es quien los reparte — de ahí los dos textos.
+ */
+export function buildNewLeadEmail(input: { recipientName: string | null; contact: string; company: string; unit: string; fields: NewLeadRow[]; unassigned: boolean; createdByName: string | null; url: string }): EmailContent {
+  const who = input.contact || input.company || "Sin nombre";
+  const rows = input.fields
+    .filter((field) => field.value.trim() !== "")
+    .map((field) => `<tr><td style="${CELL}color:#64748b;width:120px;">${escapeHtml(field.label)}</td><td style="${CELL}">${escapeHtml(field.value)}</td></tr>`)
+    .join("");
+  const intro = input.unassigned
+    ? `Ha entrado un lead nuevo de <strong>${escapeHtml(input.unit)}</strong> y todavía <strong>no tiene responsable</strong>. Conviene asignarlo para que alguien lo llame.`
+    : `Te han asignado un lead nuevo de <strong>${escapeHtml(input.unit)}</strong>.`;
+  const body = `
+    <p>Hola${input.recipientName ? ` ${escapeHtml(input.recipientName)}` : ""},</p>
+    <p>${intro}</p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr><td style="${CELL}color:#64748b;width:120px;">Contacto</td><td style="${CELL}"><strong>${escapeHtml(who)}</strong></td></tr>
+      ${rows}
+      ${input.createdByName ? `<tr><td style="${CELL}color:#64748b;">Lo ha dado de alta</td><td style="${CELL}">${escapeHtml(input.createdByName)}</td></tr>` : ""}
+    </table>
+    ${emailButton(input.url, input.unassigned ? "Asignar el lead" : "Ver el lead")}
+  `;
+  return {
+    subject: input.unassigned ? `Lead nuevo sin responsable: ${who}` : `Lead nuevo asignado: ${who}`,
+    html: emailShell("Lead nuevo", body, "Intec Commercial Hub", 620),
+  };
+}
+
 // ---------- Monthly report ----------
 
 export function buildMonthlyReportEmail(input: { monthLabel: string; stats: { label: string; value: string }[]; url: string }): EmailContent {

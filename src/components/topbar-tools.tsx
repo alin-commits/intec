@@ -118,8 +118,11 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
       // A pure commercial is alerted about the leads they own; everyone else sees all of them.
       const onlyOwnLeads = alertRoles.includes("commercial") && !hasAnyRole(alertRoles, ["admin", "viewer", "marketing"]);
       const { data: { user } } = await supabase.auth.getUser();
-      let staleLeadsQuery = supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "new").lt("created_at", leadsBefore);
-      if (onlyOwnLeads && user) staleLeadsQuery = staleLeadsQuery.eq("assigned_to", user.id);
+      // Los leads de un comercial se cuentan desde la tabla de responsables,
+      // porque un lead puede llevarlo más de uno.
+      const staleLeadsQuery = onlyOwnLeads && user
+        ? supabase.from("lead_assignees").select("lead_id, leads!inner(status, created_at)", { count: "exact", head: true }).eq("profile_id", user.id).eq("leads.status", "new").lt("leads.created_at", leadsBefore)
+        : supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "new").lt("created_at", leadsBefore);
       const [staleLeads, urgentTickets, staleTickets, received, subscriptions] = await Promise.all([
         canLeads ? staleLeadsQuery : null,
         canTickets ? supabase.from("tickets").select("id", { count: "exact", head: true }).eq("priority", "high").in("status", OPEN_TICKET_STATUSES).is("archived_at", null) : null,
