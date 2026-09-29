@@ -9,11 +9,6 @@ import type { VaultActor, VaultEntryAccess } from "@/lib/vault/authorization";
 import type { VaultAuditAction, VaultDeniedReason, VaultPermission, VaultVisibility } from "@/lib/vault/types";
 import type { AppRole } from "@/lib/types";
 
-/**
- * Showing or copying a password needs the app code, and that unlock lasts a
- * working day; everything else only needs a normal signed-in session.
- */
-export const VAULT_UNLOCK_MINUTES = 8 * 60;
 /** Reveal limits per user, so nobody can quietly drain the vault entry by entry. */
 const REVEALS_PER_MINUTE = 20;
 const REVEALS_PER_HOUR = 150;
@@ -26,30 +21,16 @@ function deny(reason: VaultDeniedReason, message: string, status: number): { ok:
   return { ok: false, response: NextResponse.json({ error: message, reason }, { status, headers: { "Cache-Control": "no-store" } }) };
 }
 
-/** Reads the `aal` and `amr` claims of the session's own access token (already verified by getUser). */
-function readAuthClaims(accessToken: string | undefined): { aal: string | null; lastMfaAt: number | null } {
-  if (!accessToken) return { aal: null, lastMfaAt: null };
-  try {
-    const payload = JSON.parse(Buffer.from(accessToken.split(".")[1], "base64").toString("utf8")) as {
-      aal?: string;
-      amr?: { method?: string; timestamp?: number }[];
-    };
-    const mfaTimestamps = (payload.amr ?? [])
-      .filter((entry) => typeof entry.method === "string" && /totp|mfa|webauthn/i.test(entry.method))
-      .map((entry) => (typeof entry.timestamp === "number" ? entry.timestamp : 0));
-    return { aal: payload.aal ?? null, lastMfaAt: mfaTimestamps.length ? Math.max(...mfaTimestamps) : null };
-  } catch {
-    return { aal: null, lastMfaAt: null };
-  }
-}
-
 /**
- * Every vault endpoint starts here: valid session and an active account. With
- * `requireMfa` it also demands a second factor confirmed within the unlock
- * window — that is what protects showing and copying a password.
+ * Every vault endpoint starts here: valid session and an active account.
  * `requireAdmin` additionally demands the vault_admin role.
+ *
+ * Showing or copying a password used to need the code of an authenticator app,
+ * asked again every working day. Dirección decided on 29/09/2026 to drop it:
+ * signing in is enough. What still protects each secret is the permission on
+ * the entry, the reveal rate limit and the audit log.
  */
-export async function guardVault(options: { requireMfa?: boolean; requireAdmin?: boolean } = {}): Promise<Guard> {
+export async function guardVault(options: { requireAdmin?: boolean } = {}): Promise<Guard> {
   if (!isVaultConfigured()) {
     return deny("not_configured", "El gestor de contraseñas no está configurado. Avisa al administrador.", 503);
   }
@@ -62,20 +43,6 @@ export async function guardVault(options: { requireMfa?: boolean; requireAdmin?:
   const { data: profile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
   if (!profile?.is_active) return deny("inactive", "Tu cuenta está desactivada.", 403);
   const roles = (profile.roles ?? []) as AppRole[];
-
-  if (options.requireMfa) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const { aal, lastMfaAt } = readAuthClaims(session?.access_token);
-    if (aal !== "aal2") {
-      const { data: factors } = await supabase.auth.mfa.listFactors();
-      const hasFactor = (factors?.totp ?? []).some((factor) => factor.status === "verified");
-      return hasFactor
-        ? deny("mfa_required", "Introduce el código de tu app de autenticación para ver la contraseña.", 403)
-        : deny("mfa_enrollment_required", "Configura la verificación en dos pasos para poder ver contraseñas.", 403);
-    }
-    const freshEnough = lastMfaAt !== null && Date.now() / 1000 - lastMfaAt < VAULT_UNLOCK_MINUTES * 60;
-    if (!freshEnough) return deny("locked", "Ha pasado la jornada desde tu último código. Vuelve a introducirlo.", 403);
-  }
 
   const isVaultAdmin = roles.includes("vault_admin");
   if (options.requireAdmin && !isVaultAdmin) return deny("forbidden", "No tienes permiso para esta acción.", 403);

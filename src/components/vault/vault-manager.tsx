@@ -7,7 +7,6 @@ import { Toast } from "@/components/ui/toast";
 import { ChevronIcon, CopyIcon, EyeIcon, RefreshIcon, SearchIcon, StarIcon } from "@/components/icons";
 import { MyTicketButton } from "@/components/tickets/my-ticket-button";
 import { VaultTabs } from "@/components/vault/vault-tabs";
-import { VaultUnlock } from "@/components/vault/vault-unlock";
 import { DEFAULT_GENERATOR, generatePassword, MAX_LENGTH, MIN_LENGTH, passwordStrength, type GeneratorOptions } from "@/lib/vault/password-generator";
 import type { VaultBankDetails, VaultEntrySummary, VaultEntryType, VaultPermission, VaultVisibility } from "@/lib/vault/types";
 import { formatDate } from "@/lib/format";
@@ -16,8 +15,6 @@ import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import type { AppRole } from "@/lib/types";
 
 const REVEAL_SECONDS = 30;
-const LOCK_REASONS = ["mfa_enrollment_required", "mfa_required", "locked"] as const;
-type LockReason = (typeof LOCK_REASONS)[number];
 
 const visibilityLabels: Record<VaultVisibility, string> = { shared: "Compartida", personal: "Personal", restricted: "Restringida" };
 const strengthLabels = { weak: "Débil", fair: "Aceptable", strong: "Fuerte" } as const;
@@ -56,25 +53,20 @@ function blankDraft(): EntryDraft {
   return { name: "", url: "", username: "", password: "", notes: "", categoryId: "", visibility: "shared", entryType: "plain", bank: { ...emptyBank } };
 }
 
-function isLockReason(value: unknown): value is LockReason {
-  return typeof value === "string" && (LOCK_REASONS as readonly string[]).includes(value);
-}
-
-/** Every call to the vault API goes through here so a locked vault is handled in one place. */
-async function vaultRequest<T>(path: string, init?: RequestInit): Promise<{ ok: true; data: T } | { ok: false; error: string; lock?: LockReason }> {
+/** Every call to the vault API goes through here, so errors are read in one place. */
+async function vaultRequest<T>(path: string, init?: RequestInit): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
   try {
     const response = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }, cache: "no-store" });
-    const payload = (await response.json().catch(() => ({}))) as { error?: string; reason?: string } & T;
+    const payload = (await response.json().catch(() => ({}))) as { error?: string } & T;
     if (response.ok) return { ok: true, data: payload as T };
-    return { ok: false, error: payload.error ?? "No se pudo completar la operación.", lock: isLockReason(payload.reason) ? payload.reason : undefined };
+    return { ok: false, error: payload.error ?? "No se pudo completar la operación." };
   } catch {
     return { ok: false, error: "No hay conexión con el servidor." };
   }
 }
 
 export function VaultManager() {
-  const [stage, setStage] = useState<"loading" | "locked" | "ready">("loading");
-  const [lockReason, setLockReason] = useState<LockReason>("mfa_required");
+  const [stage, setStage] = useState<"loading" | "ready">("loading");
   const [data, setData] = useState<ListPayload | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
@@ -153,11 +145,6 @@ export function VaultManager() {
       const result = await vaultRequest<ListPayload>(`/api/vault/entries?${params}`);
       if (!active) return;
       if (!result.ok) {
-        if (result.lock) {
-          setLockReason(result.lock);
-          setStage("locked");
-          return;
-        }
         setMessage(result.error);
         setStage("ready");
         return;
@@ -187,7 +174,6 @@ export function VaultManager() {
     if (!requested) return;
     window.history.replaceState(null, "", "/contrasenas");
     void openDetail(requested);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the vault becomes usable
   }, [stage]);
 
   // A revealed secret lives in this state and nowhere else, and only for 30 seconds.
@@ -196,14 +182,6 @@ export function VaultManager() {
     const timer = setTimeout(() => setRevealed((current) => (current && current.seconds > 1 ? { ...current, seconds: current.seconds - 1 } : null)), 1000);
     return () => clearTimeout(timer);
   }, [revealed]);
-
-  function handleLock(lock: LockReason) {
-    setRevealed(null);
-    setDetail(null);
-    setEditorOpen(false);
-    setLockReason(lock);
-    setStage("locked");
-  }
 
   // ---------- folder tree ----------
 
@@ -293,7 +271,6 @@ export function VaultManager() {
     setRevealed(null);
     const result = await vaultRequest<DetailPayload>(`/api/vault/entries/${entryId}`);
     if (!result.ok) {
-      if (result.lock) return handleLock(result.lock);
       setMessage(result.error);
       return;
     }
@@ -303,8 +280,7 @@ export function VaultManager() {
   async function secretOf(entryId: string, field: "password" | "notes", intent: "view" | "copy") {
     const result = await vaultRequest<{ value: string }>(`/api/vault/entries/${entryId}/reveal`, { method: "POST", body: JSON.stringify({ field, intent }) });
     if (!result.ok) {
-      if (result.lock) handleLock(result.lock);
-      else setMessage(result.error);
+      setMessage(result.error);
       return null;
     }
     return result.data.value;
@@ -413,7 +389,6 @@ export function VaultManager() {
       : await vaultRequest<{ entry: VaultEntrySummary }>("/api/vault/entries", { method: "POST", body: JSON.stringify({ ...body, password: draft.password }) });
     if (!result.ok) {
       setBusy(false);
-      if (result.lock) return handleLock(result.lock);
       setError(result.error);
       return;
     }
@@ -445,7 +420,6 @@ export function VaultManager() {
     const result = await vaultRequest(`/api/vault/entries/${pendingDelete.id}`, { method: "DELETE" });
     setBusy(false);
     if (!result.ok) {
-      if (result.lock) return handleLock(result.lock);
       setMessage(result.error);
       return;
     }
@@ -468,7 +442,6 @@ export function VaultManager() {
       body: JSON.stringify({ userId: targetId, canView: true, canEdit: false, canDelete: false, canManagePermissions: false, ...permission }),
     });
     if (!result.ok) {
-      if (result.lock) return handleLock(result.lock);
       setMessage(result.error);
       return;
     }
@@ -479,7 +452,6 @@ export function VaultManager() {
     if (!detail) return;
     const result = await vaultRequest(`/api/vault/entries/${detail.entry.id}/permissions?userId=${targetId}`, { method: "DELETE" });
     if (!result.ok) {
-      if (result.lock) return handleLock(result.lock);
       setMessage(result.error);
       return;
     }
@@ -509,7 +481,6 @@ export function VaultManager() {
   }
 
   if (stage === "loading") return <div className="page-stack" />;
-  if (stage === "locked") return <VaultUnlock reason={lockReason} onUnlocked={() => { setStage("loading"); reload(); }} />;
 
   const strength = draft.password ? passwordStrength(draft.password) : null;
   const scopeTitle =
@@ -523,7 +494,7 @@ export function VaultManager() {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><p>Credenciales de la empresa, cifradas. Para mostrar o copiar una contraseña se pide el código de tu app de autenticación, una vez al día.</p></div>
+        <div><p>Credenciales de la empresa, cifradas. Cada vez que alguien muestra o copia una contraseña queda registrado.</p></div>
         <div className="panel-heading-trailing">
           {isEmployee ? <MyTicketButton userName={userName} /> : null}
           <button type="button" className="button button-primary" onClick={openNew}>+ Nueva credencial</button>

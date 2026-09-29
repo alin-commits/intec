@@ -4,10 +4,10 @@ import { guardVault, loadEntryForActor, logVault, secretResponse, vaultError, wi
 import { revealSchema } from "@/lib/vault/validation";
 
 // The only endpoint in the whole app that returns a decrypted secret. It needs a
-// valid session, the second factor confirmed within the day,
-// permission on this exact entry, and it is always written to the audit log.
+// valid session and permission on this exact entry, stays under the reveal
+// rate limit, and it is always written to the audit log.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await guardVault({ requireMfa: true });
+  const guard = await guardVault();
   if (!guard.ok) return guard.response;
   const { id } = await params;
 

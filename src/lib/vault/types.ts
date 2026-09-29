@@ -57,7 +57,7 @@ export type VaultAuditAction =
   | "IMPORT";
 
 /** Why the vault refused a request, so the UI can ask for the right thing. */
-export type VaultDeniedReason = "signed_out" | "inactive" | "mfa_enrollment_required" | "mfa_required" | "locked" | "forbidden" | "not_configured" | "rate_limited";
+export type VaultDeniedReason = "signed_out" | "inactive" | "forbidden" | "not_configured" | "rate_limited";
 
 export const VAULT_ENTRY_COLUMNS =
   "id, name, url, username, has_notes, category_id, business_unit_id, visibility, entry_type, tags, created_by, created_at, updated_at, last_password_change_at, password_strength";
