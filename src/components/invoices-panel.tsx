@@ -548,7 +548,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <td>{currencyFormatter.format(invoice.baseAmount)}</td>
                   <td>{currencyFormatter.format(invoice.vatAmount)}</td>
                   <td><strong>{currencyFormatter.format(invoice.totalAmount)}</strong></td>
-                  <td>{invoice.expenseId ? <span className="badge" title="Cuenta como el cargo real de esta suscripción en su periodo">Suscripción · {expenseName(invoice.expenseId)}</span> : <span className="badge badge-active">Gasto suelto</span>}</td>
+                  <td>{invoice.expenseId ? <span className="badge" title={`Cuenta como el cargo real de esta suscripción en su periodo: ${expenseName(invoice.expenseId)}`}>Suscripción</span> : <span className="badge badge-active">Gasto suelto</span>}</td>
                   <td className="muted">{formatDate(invoice.createdAt)}</td>
                   <td>
                     <div className="table-actions">
