@@ -7,6 +7,7 @@ import { monthKey, monthShortLabel } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { loadMetaSpendByMonth } from "@/lib/meta/spend-by-unit";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { KpiCard } from "@/components/kpi-card";
 import { ConversionIcon, EuroIcon, LeadsIcon, TrophyIcon } from "@/components/icons";
@@ -52,7 +53,7 @@ export function MarketingDashboardView() {
         { data: leadData, error: leadError },
         { data: campaignData, error: campaignError },
         { data: socialData, error: socialError },
-        { data: adsData, error: adsError },
+        { rows: adsRows, error: adsError },
         { data: mailingData, error: mailingError },
         { data: socialTrendData, error: socialTrendError },
       ] = await Promise.all([
@@ -60,7 +61,9 @@ export function MarketingDashboardView() {
         fetchAllPages((from, to) => supabase.from("leads").select("business_unit_id, campaign_id, status, sale_value").order("id").range(from, to)),
         supabase.from("campaigns").select("id, business_unit_id, name, status, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         supabase.from("social_media_stats").select("new_followers").eq("period_month", currentMonth),
-        supabase.from("meta_ads_entries").select("campaign_id, amount_spent, leads, revenue"),
+        // Lo que dice Meta, no lo que alguien escribió a mano: el mismo origen
+        // que el panel de inicio y que la pestaña de Campañas.
+        loadMetaSpendByMonth(supabase),
         supabase.from("mailing_campaigns").select("sent_count, opens, delivered_count, revenue"),
         supabase.from("social_media_stats").select("period_month, new_followers"),
       ]);
@@ -72,15 +75,15 @@ export function MarketingDashboardView() {
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
       setLeads((leadData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) })));
       setCampaigns((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
-      setAdsEntries((adsData ?? []).map((row) => ({ campaignId: row.campaign_id, amountSpent: Number(row.amount_spent ?? 0), revenue: Number(row.revenue ?? 0) })));
+      setAdsEntries(adsRows.map((row) => ({ campaignId: row.campaignId, amountSpent: row.amountSpent, revenue: row.revenue })));
       const totalDelivered = (mailingData ?? []).reduce((sum, row) => sum + Number(row.delivered_count ?? 0), 0);
       const totalOpens = (mailingData ?? []).reduce((sum, row) => sum + Number(row.opens ?? 0), 0);
-      const adsRevenue = (adsData ?? []).reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
+      const adsRevenue = adsRows.reduce((sum, row) => sum + row.revenue, 0);
       const mailingRevenue = (mailingData ?? []).reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
       setRrssSummary({
         newFollowers: (socialData ?? []).reduce((sum, row) => sum + Number(row.new_followers ?? 0), 0),
-        adsSpend: (adsData ?? []).reduce((sum, row) => sum + Number(row.amount_spent ?? 0), 0),
-        adsLeads: (adsData ?? []).reduce((sum, row) => sum + Number(row.leads ?? 0), 0),
+        adsSpend: adsRows.reduce((sum, row) => sum + row.amountSpent, 0),
+        adsLeads: adsRows.reduce((sum, row) => sum + row.leads, 0),
         revenue: adsRevenue + mailingRevenue,
         mailingSent: (mailingData ?? []).reduce((sum, row) => sum + Number(row.sent_count ?? 0), 0),
         mailingOpenRate: totalDelivered ? (totalOpens / totalDelivered) * 100 : 0,

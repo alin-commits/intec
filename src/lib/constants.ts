@@ -1,5 +1,4 @@
 import type {
-  AdCampaignStatus,
   AppRole,
   CampaignStatus,
   InquiryType,
@@ -123,12 +122,6 @@ export const socialNetworkLabels: Record<SocialNetwork, string> = {
   facebook: "Facebook",
   instagram: "Instagram",
   linkedin: "LinkedIn",
-};
-
-export const adStatusLabels: Record<AdCampaignStatus, string> = {
-  active: "Activa",
-  paused: "Detenida",
-  finished: "Completada",
 };
 
 export const mailingTypeOrder: MailingCampaignType[] = [

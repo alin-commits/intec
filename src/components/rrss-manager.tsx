@@ -23,29 +23,24 @@ import {
 } from "@/lib/constants";
 import {
   businessUnits as demoBusinessUnits,
-  campaigns as demoCampaigns,
   demoMailingCampaigns,
-  demoMetaAdsEntries,
   demoSocialMediaStats,
 } from "@/lib/demo-data";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { exportMailingReportPdf, exportSocialReportPdf } from "@/lib/rrss-report-pdf";
 import { inDateKeyRange, monthKey, monthLabel, monthShortLabel, previousDateRange, previousMonthKey, todayKey, yearOfMonth } from "@/lib/dates";
-import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
+import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
-  AdCampaignStatus,
   BusinessUnit,
   MailingCampaign,
   MailingCampaignType,
-  MetaAdsEntry,
   SocialMediaStat,
   SocialNetwork,
 } from "@/lib/types";
 
 const SOCIAL_STORAGE_KEY = "intec-demo-social-media-stats";
-const ADS_STORAGE_KEY = "intec-demo-meta-ads-entries";
 const MAILING_STORAGE_KEY = "intec-demo-mailing-campaigns";
 
 type Tab = "social" | "ads" | "mailing";
@@ -54,8 +49,7 @@ type ViewMode = "month" | "year";
 type SocialDraft = Omit<SocialMediaStat, "id" | "createdAt" | "createdBy">;
 type MailingDraft = Omit<MailingCampaign, "id" | "createdAt" | "createdBy">;
 
-type PendingDelete = { table: "social_media_stats" | "meta_ads_entries" | "mailing_campaigns"; id: string; label: string };
-type CampaignOption = { id: string; businessUnitId: string; name: string };
+type PendingDelete = { table: "social_media_stats" | "mailing_campaigns"; id: string; label: string };
 
 const NETWORK_COLORS: Record<SocialNetwork, string> = { facebook: "#1877F2", instagram: "#E4405F", linkedin: "#0A66C2" };
 
@@ -161,32 +155,6 @@ function mapSocialRow(row: Record<string, unknown>): SocialMediaStat {
   };
 }
 
-function mapAdsRow(row: Record<string, unknown>): MetaAdsEntry {
-  return {
-    id: String(row.id),
-    businessUnitId: String(row.business_unit_id),
-    campaignId: row.campaign_id ? String(row.campaign_id) : null,
-    campaignName: String(row.campaign_name),
-    adSet: row.ad_set ? String(row.ad_set) : null,
-    adName: row.ad_name ? String(row.ad_name) : null,
-    objective: row.objective ? String(row.objective) : null,
-    status: row.status as AdCampaignStatus,
-    startDate: row.start_date ? String(row.start_date) : null,
-    endDate: row.end_date ? String(row.end_date) : null,
-    amountSpent: Number(row.amount_spent ?? 0),
-    impressions: Number(row.impressions ?? 0),
-    linkClicks: Number(row.link_clicks ?? 0),
-    leads: Number(row.leads ?? 0),
-    qualifiedLeads: Number(row.qualified_leads ?? 0),
-    purchases: Number(row.purchases ?? 0),
-    followersGained: Number(row.followers_gained ?? 0),
-    revenue: Number(row.revenue ?? 0),
-    notes: row.notes ? String(row.notes) : null,
-    createdBy: row.created_by ? String(row.created_by) : null,
-    createdAt: String(row.created_at),
-  };
-}
-
 function mapMailingRow(row: Record<string, unknown>): MailingCampaign {
   return {
     id: String(row.id),
@@ -219,9 +187,7 @@ export function RrssManager() {
   const [tab, setTab] = useState<Tab>("social");
   const [units, setUnits] = useState<BusinessUnit[]>(demoBusinessUnits.filter((unit) => unit.active));
   const [socialStats, setSocialStats] = useState<SocialMediaStat[]>(() => initialDemoState(configured, SOCIAL_STORAGE_KEY, demoSocialMediaStats));
-  const [adsEntries, setAdsEntries] = useState<MetaAdsEntry[]>(() => initialDemoState(configured, ADS_STORAGE_KEY, demoMetaAdsEntries));
   const [mailingCampaigns, setMailingCampaigns] = useState<MailingCampaign[]>(() => initialDemoState(configured, MAILING_STORAGE_KEY, demoMailingCampaigns));
-  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>(demoCampaigns.map((campaign) => ({ id: campaign.id, businessUnitId: campaign.businessUnitId, name: campaign.name })));
   const [canEdit, setCanEdit] = useState(true);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [message, setMessage] = useState<string | null>(null);
@@ -238,28 +204,21 @@ export function RrssManager() {
     const [
       { data: unitData, error: unitError },
       { data: socialData, error: socialError },
-      { data: adsData, error: adsError },
       { data: mailingData, error: mailingError },
-      { data: campaignData, error: campaignError },
       { data: authData },
     ] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("social_media_stats").select("id, business_unit_id, network, period_month, followers_end, new_followers, posts, interactions, reach, active_campaigns, link_clicks, leads, notes, created_by, created_at").order("period_month", { ascending: false }),
-      supabase.from("meta_ads_entries").select("id, business_unit_id, campaign_id, campaign_name, ad_set, ad_name, objective, status, start_date, end_date, amount_spent, impressions, link_clicks, leads, qualified_leads, purchases, followers_gained, revenue, notes, created_by, created_at").order("created_at", { ascending: false }),
       supabase.from("mailing_campaigns").select("id, business_unit_id, campaign_name, campaign_type, sent_date, sent_count, delivered_count, opens, clicks, leads, sales_count, revenue, unsubscribes, notes, created_by, created_at").order("sent_date", { ascending: false }),
-      supabase.from("campaigns").select("id, business_unit_id, name").neq("status", "archived").order("name"),
       supabase.auth.getUser(),
     ]);
-    if (unitError || socialError || adsError || mailingError) {
-      setMessage(reportSafeError(unitError ?? socialError ?? adsError ?? mailingError, "No se pudieron cargar las métricas de marketing."));
+    if (unitError || socialError || mailingError) {
+      setMessage(reportSafeError(unitError ?? socialError ?? mailingError, "No se pudieron cargar las métricas de marketing."));
       return;
     }
     setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
     setSocialStats((socialData ?? []).map((row) => mapSocialRow(row as Record<string, unknown>)));
-    setAdsEntries((adsData ?? []).map((row) => mapAdsRow(row as Record<string, unknown>)));
     setMailingCampaigns((mailingData ?? []).map((row) => mapMailingRow(row as Record<string, unknown>)));
-    if (campaignError) setMessage(PARTIAL_LOAD_MESSAGE);
-    setCampaignOptions((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name })));
     const user = authData.user;
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
@@ -276,11 +235,6 @@ export function RrssManager() {
     window.localStorage.setItem(SOCIAL_STORAGE_KEY, JSON.stringify(next));
   }
 
-  function persistAds(next: MetaAdsEntry[]) {
-    setAdsEntries(next);
-    window.localStorage.setItem(ADS_STORAGE_KEY, JSON.stringify(next));
-  }
-
   function persistMailing(next: MailingCampaign[]) {
     setMailingCampaigns(next);
     window.localStorage.setItem(MAILING_STORAGE_KEY, JSON.stringify(next));
@@ -292,7 +246,6 @@ export function RrssManager() {
     try {
       if (!configured) {
         if (pendingDelete.table === "social_media_stats") persistSocial(socialStats.filter((row) => row.id !== pendingDelete.id));
-        if (pendingDelete.table === "meta_ads_entries") persistAds(adsEntries.filter((row) => row.id !== pendingDelete.id));
         if (pendingDelete.table === "mailing_campaigns") persistMailing(mailingCampaigns.filter((row) => row.id !== pendingDelete.id));
       } else {
         const { error } = await createClient().from(pendingDelete.table).delete().eq("id", pendingDelete.id);
@@ -340,9 +293,7 @@ export function RrssManager() {
       {tab === "social" ? (
         <SocialTab units={units} stats={socialStats} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistSocial} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
       ) : null}
-      {tab === "ads" ? (
-        <AdsTab units={units} entries={adsEntries} campaignOptions={campaignOptions} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistAds} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
-      ) : null}
+      {tab === "ads" ? <MetaAdsSyncedPanel units={units} canEdit={canEdit} /> : null}
       {tab === "mailing" ? (
         <MailingTab units={units} campaigns={mailingCampaigns} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistMailing} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
       ) : null}
@@ -747,10 +698,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       </Modal>
     </>
   );
-}
-
-function AdsTab(props: SharedTabProps<MetaAdsEntry> & { entries: MetaAdsEntry[]; campaignOptions: CampaignOption[] }) {
-  return <MetaAdsSyncedPanel units={props.units} canEdit={props.canEdit} />;
 }
 
 function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setMessage, persist, refresh, onDeleteRequest }: SharedTabProps<MailingCampaign> & { campaigns: MailingCampaign[] }) {

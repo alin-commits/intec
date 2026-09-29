@@ -9,6 +9,7 @@ import { downloadCsv } from "@/lib/csv-export";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { loadMetaSpendByMonth } from "@/lib/meta/spend-by-unit";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
@@ -197,7 +198,7 @@ export function DashboardClient() {
         { data: historyData, error: historyError },
         { data: campaignData, error: campaignError },
         { data: socialData, error: socialError },
-        { data: adsData, error: adsError },
+        { rows: adsRows, error: adsError },
         { data: mailingData, error: mailingError },
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
@@ -206,16 +207,22 @@ export function DashboardClient() {
         fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("lead_status_history").select("lead_id, new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).order("id").range(from, to)),
         supabase.from("campaigns").select("id, business_unit_id, name, status, start_date, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
-        supabase.from("social_media_stats").select("business_unit_id, period_month, new_followers"),
-        supabase.from("meta_ads_entries").select("business_unit_id, campaign_id, start_date, created_at, amount_spent, leads, revenue"),
-        supabase.from("mailing_campaigns").select("business_unit_id, sent_date, sent_count, opens, delivered_count, revenue"),
+        fetchAllPages((from, to) => supabase.from("social_media_stats").select("business_unit_id, period_month, new_followers").order("id").range(from, to)),
+        // El gasto de anuncios sale de lo que manda Meta, igual que en Campañas:
+        // la tabla de entradas a mano decía 1.237 € y 385 leads donde Meta dice
+        // 1.051 € y 293, y colgaba el gasto del mes en que empezó la campaña.
+        loadMetaSpendByMonth(supabase),
+        fetchAllPages((from, to) => supabase.from("mailing_campaigns").select("business_unit_id, sent_date, sent_count, opens, delivered_count, revenue").order("id").range(from, to)),
       ]);
       // Una respuesta vieja que llega tarde no puede pisar a la nueva: al
       // cambiar de año dos veces seguidas, la primera consulta es la más lenta.
       if (!active) return;
-      if (unitError || inquiryError || salesError || leadError || historyError || campaignError) {
+      // Antes estos tres errores se recogían y no se miraban: si fallaba la
+      // consulta, el panel enseñaba cero seguidores y cero gasto como si fuera
+      // verdad. Un número equivocado engaña más que un aviso.
+      if (unitError || inquiryError || salesError || leadError || historyError || campaignError || socialError || adsError || mailingError) {
         setLoadFailed(true);
-        setMessage(reportSafeError(unitError ?? inquiryError ?? salesError ?? leadError ?? historyError ?? campaignError, "No se pudieron cargar los datos del dashboard."));
+        setMessage(reportSafeError(unitError ?? inquiryError ?? salesError ?? leadError ?? historyError ?? campaignError ?? socialError ?? adsError ?? mailingError, "No se pudieron cargar los datos del dashboard."));
         return;
       }
       setLoadFailed(false);
@@ -287,7 +294,7 @@ export function DashboardClient() {
       setSocialStats((socialData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, periodMonth: String(row.period_month).slice(0, 7), newFollowers: Number(row.new_followers ?? 0) })));
       // La fecha de una entrada de Meta Ads es la de inicio de la campaña; si no
       // la tiene, la de cuando se anotó. Es el mismo criterio que usa RRSS.
-      setAdsEntries((adsData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, campaignId: row.campaign_id, month: monthKeyOf(String(row.start_date ?? row.created_at)), amountSpent: Number(row.amount_spent ?? 0), leads: Number(row.leads ?? 0), revenue: Number(row.revenue ?? 0) })));
+      setAdsEntries(adsRows);
       if (socialError || adsError || mailingError) {
         console.error("Métricas de marketing no disponibles en el dashboard:", socialError ?? adsError ?? mailingError);
         setMessage(PARTIAL_LOAD_MESSAGE);

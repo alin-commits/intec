@@ -174,32 +174,6 @@ export type SocialMediaStat = {
   createdAt: string;
 };
 
-export type AdCampaignStatus = "active" | "paused" | "finished";
-
-export type MetaAdsEntry = {
-  id: string;
-  businessUnitId: string;
-  campaignId: string | null;
-  campaignName: string;
-  adSet: string | null;
-  adName: string | null;
-  objective: string | null;
-  status: AdCampaignStatus;
-  startDate: string | null;
-  endDate: string | null;
-  amountSpent: number;
-  impressions: number;
-  linkClicks: number;
-  leads: number;
-  qualifiedLeads: number;
-  purchases: number;
-  followersGained: number;
-  revenue: number;
-  notes: string | null;
-  createdBy: string | null;
-  createdAt: string;
-};
-
 export type MailingCampaignType =
   | "promocion"
   | "captacion"
