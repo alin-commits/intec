@@ -136,11 +136,16 @@ function Buscar-Instancias {
 }
 
 function Nueva-Cadena($servidor) {
-  $cadena = "Server=$servidor;Database=$BaseDeDatos;Connect Timeout=10;Application Name=Agente Intec;"
+  # Usuario, clave y base se leen con $script: a propósito. En PowerShell una
+  # función ve las variables de quien la llama, y $clave y $Clave son la misma:
+  # si cualquier función de por medio tiene una variable llamada así, sin el
+  # $script: se colaría como contraseña. Pasó el 29/09/2026: solo entraban las
+  # ventas y todo lo demás daba "Error de inicio de sesión".
+  $cadena = "Server=$servidor;Database=$($script:BaseDeDatos);Connect Timeout=10;Application Name=Agente Intec;"
   # Si no hay usuario configurado se entra con la cuenta de Windows que ejecuta
   # la tarea. Ojo: $env: devuelve nulo cuando la variable no existe, no cadena
   # vacía, así que hay que comprobarlo así y no con -ne "".
-  if (-not [string]::IsNullOrWhiteSpace($Usuario)) { return $cadena + "User ID=$Usuario;Password=$Clave;" }
+  if (-not [string]::IsNullOrWhiteSpace($script:Usuario)) { return $cadena + "User ID=$($script:Usuario);Password=$($script:Clave);" }
   return $cadena + "Integrated Security=SSPI;"
 }
 
@@ -1272,31 +1277,47 @@ function Enviar($envio, $etiqueta) {
     Apuntar "prueba: no se ha enviado nada. Lo de $etiqueta esta en $muestra"
     Terminar 0 "Prueba sin enviar."
   }
-  try {
-    $json = $envio | ConvertTo-Json -Depth 6 -Compress
-    # El cuerpo va como UTF-8 explícito: con acentos, dejarlo al azar rompe los
-    # nombres de las sociedades.
-    $cuerpo = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $respuesta = Invoke-RestMethod -Uri $Destino -Method Post -Body $cuerpo `
-      -ContentType "application/json; charset=utf-8" `
-      -Headers @{ Authorization = "Bearer $Token" } `
-      -TimeoutSec 300
-    $script:totalEnviado += [int]$respuesta.rowsWritten
-    $script:envios++
-    $detalle = ""
-    if ($respuesta.written) { $detalle = (($respuesta.written.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join " ") }
-    Apuntar "  $etiqueta -> $detalle ($([Math]::Round($cuerpo.Length / 1024)) KB)"
-  } catch {
-    Apuntar "ERROR al enviar $etiqueta : $($_.Exception.Message)"
-    if ($_.ErrorDetails -and $_.ErrorDetails.Message) { Apuntar "respuesta: $($_.ErrorDetails.Message)" }
-    Terminar 1 "No se pudo enviar $etiqueta al Hub."
+  $json = $envio | ConvertTo-Json -Depth 6 -Compress
+  # El cuerpo va como UTF-8 explícito: con acentos, dejarlo al azar rompe los
+  # nombres de las sociedades.
+  $cuerpo = [System.Text.Encoding]::UTF8.GetBytes($json)
+  # A ratos el Hub no contesta a tiempo (504) aunque el envío sea pequeño. Cada
+  # bloque entra entero o no entra, así que repetirlo no duplica nada: se
+  # espera un poco y se vuelve a mandar. Un 4xx no se repite, daría lo mismo.
+  $intentos = 4
+  for ($intento = 1; $intento -le $intentos; $intento++) {
+    try {
+      $respuesta = Invoke-RestMethod -Uri $Destino -Method Post -Body $cuerpo `
+        -ContentType "application/json; charset=utf-8" `
+        -Headers @{ Authorization = "Bearer $Token" } `
+        -TimeoutSec 300
+      break
+    } catch {
+      $codigo = 0
+      if ($_.Exception.Response) { try { $codigo = [int]$_.Exception.Response.StatusCode } catch { } }
+      $repetible = ($codigo -eq 0 -or $codigo -eq 429 -or $codigo -ge 500)
+      if (-not $repetible -or $intento -eq $intentos) {
+        Apuntar "ERROR al enviar $etiqueta : $($_.Exception.Message)"
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { Apuntar "respuesta: $($_.ErrorDetails.Message)" }
+        Terminar 1 "No se pudo enviar $etiqueta al Hub."
+      }
+      $espera = 20 * $intento
+      Apuntar "  $etiqueta : el Hub no contesto ($($_.Exception.Message)). Se repite en $espera s (intento $($intento + 1) de $intentos)"
+      Start-Sleep -Seconds $espera
+    }
   }
+  $script:totalEnviado += [int]$respuesta.rowsWritten
+  $script:envios++
+  $detalle = ""
+  if ($respuesta.written) { $detalle = (($respuesta.written.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join " ") }
+  Apuntar "  $etiqueta -> $detalle ($([Math]::Round($cuerpo.Length / 1024)) KB)"
 }
 
 # Cada parte va en su propio intento: si una falla, se queda fuera de ese envío
 # (y el Hub no toca lo que ya tenía de ella) y las demás siguen.
-function Intentar($envio, $clave, $avisos, $nombre, [scriptblock]$leer) {
-  try { $envio[$clave] = (& $leer) }
+# (La parte se llama $parte y no $clave: con $clave tapaba la contraseña de Sage.)
+function Intentar($envio, $parte, $avisos, $nombre, [scriptblock]$leer) {
+  try { $envio[$parte] = (& $leer) }
   catch { Avisar $avisos "${nombre}: $($_.Exception.Message)" }
 }
 

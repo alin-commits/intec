@@ -19,7 +19,31 @@ import { createAdminClient } from "@/lib/supabase/admin";
   escrituras desde el navegador, ni siquiera de un administrador.
 */
 
-export const maxDuration = 60;
+export const maxDuration = 150;
+
+/**
+ * La base de datos guarda un bloque en menos de un segundo. Lo que falla, a
+ * ratos, es el camino hasta ella: la llamada tarda medio minuto o se queda
+ * colgada sin llegar nunca (el 25/09 y el 29/09, con bloques de 55 filas y de
+ * 600 KB). La función esperaba hasta que Vercel la cortaba y la lectura se
+ * quedaba a medias sin decir por qué. Ahora cada intento tiene su tiempo y,
+ * si no contesta, se repite. Repetir no duplica nada: el bloque entra entero
+ * o no entra.
+ */
+const ATTEMPT_MS = 40_000;
+const ATTEMPTS = 3;
+
+async function saveBlock(admin: NonNullable<ReturnType<typeof createAdminClient>>, payload: Record<string, unknown>) {
+  let result = await admin.rpc("sage_ingest", { p: payload }).abortSignal(AbortSignal.timeout(ATTEMPT_MS));
+  for (let attempt = 2; attempt <= ATTEMPTS; attempt += 1) {
+    // Solo se repite lo que no llegó a contestar (status 0) o lo que cortó la
+    // pasarela. Un error de la propia base de datos daría lo mismo otra vez.
+    if (!result.error || (result.status !== 0 && result.status < 502)) break;
+    console.warn(`Sage: el intento ${attempt - 1} de guardar no contestó (${result.error.message}); se repite.`);
+    result = await admin.rpc("sage_ingest", { p: payload }).abortSignal(AbortSignal.timeout(ATTEMPT_MS));
+  }
+  return result;
+}
 
 export async function POST(request: Request) {
   if (!isSageAgent(request)) {
@@ -52,12 +76,13 @@ export async function POST(request: Request) {
     .single();
   const runId = run?.id as string | undefined;
 
-  const { data, error } = await admin.rpc("sage_ingest", { p: toDatabasePayload(body) });
+  const { data, error, status } = await saveBlock(admin, toDatabasePayload(body));
   if (error) {
     const message = `No se guardó nada de este envío: ${error.message}`;
     if (runId) await admin.from("sage_sync_runs").update({ finished_at: new Date().toISOString(), ok: false, message: message.slice(0, 2000) }).eq("id", runId);
     console.error("Sage:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    // 503 cuando la base de datos no contestó: el agente sabe que puede reintentar.
+    return NextResponse.json({ error: message }, { status: status === 0 || status >= 502 ? 503 : 500 });
   }
 
   const counts = (data ?? {}) as Record<string, number>;
