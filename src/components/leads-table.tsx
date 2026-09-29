@@ -558,7 +558,7 @@ export function LeadsTable() {
         {pendingStatus ? <div className="confirmation-summary"><span>Lead</span><strong>{pendingStatus.lead.contactName || pendingStatus.lead.clientCompanyName}</strong><span>Cambio</span><strong>{leadStatusLabels[pendingStatus.lead.status]} → {leadStatusLabels[pendingStatus.status]}</strong></div> : null}
       </ConfirmationDialog>
 
-      <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" onClose={() => setEditorOpen(false)}>
+      <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" scrollInside onClose={() => setEditorOpen(false)}>
         <form className="lead-editor-form" onSubmit={saveLead}>
           <div className="form-grid">
             <label><span>Unidad de negocio *</span><select value={draft.businessUnitId} disabled={!canEdit || (!editingId && unitId !== "all")} onChange={(event) => { updateDraft("businessUnitId", event.target.value); updateDraft("campaignId", null); }}>{unitOptions.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>

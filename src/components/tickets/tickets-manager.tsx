@@ -594,7 +594,7 @@ export function TicketsManager() {
           <button type="button" className="button button-secondary" onClick={() => setExportTarget(null)}>Cancelar</button>
           <button
             type="button"
-            className="button"
+            className="button button-primary"
             disabled={!exportSelection.valid || exportSelectionTickets.length === 0}
             onClick={runExport}
           >

@@ -389,7 +389,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
 
   if (estado === "error") {
     return (
-      <section className="panel">
+      <section className="panel panel-padded">
         <h3>No se pudieron cargar los datos de Meta</h3>
         <p className="muted">Recarga la página. Si sigue igual, revisa que la sincronización esté corriendo.</p>
       </section>
@@ -397,7 +397,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
   }
   if (estado === "vacio") {
     return (
-      <section className="panel">
+      <section className="panel panel-padded">
         <h3>Todavía no hay nada sincronizado</h3>
         <p className="muted">En cuanto la sincronización con Meta se ejecute por primera vez, aquí aparecerá todo.</p>
       </section>
@@ -539,7 +539,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       </article>
 
       {canEdit && manualDisponible && pendientes.length > 0 ? (
-        <article className="panel meta-pendientes">
+        <article className="panel panel-padded meta-pendientes">
           <div className="panel-heading">
             <div>
               <h3>Quedan {pendientes.length} entradas antiguas por colocar</h3>
@@ -568,7 +568,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
                     <option key={c.meta_id} value={c.meta_id}>{c.name}</option>
                   ))}
                 </select>
-                <button type="button" className="button button-compact" disabled={!asignando[s.id] || guardando} onClick={() => void asignar(s)}>
+                <button type="button" className="button button-compact button-secondary" disabled={!asignando[s.id] || guardando} onClick={() => void asignar(s)}>
                   Colocar
                 </button>
               </li>
@@ -629,7 +629,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         </div>
         <div className="modal-actions">
           <button type="button" className="button button-secondary" onClick={() => setEditando(null)}>Cancelar</button>
-          <button type="button" className="button" disabled={guardando} onClick={() => void guardar()}>
+          <button type="button" className="button button-primary" disabled={guardando} onClick={() => void guardar()}>
             {guardando ? "Guardando…" : "Guardar"}
           </button>
         </div>
