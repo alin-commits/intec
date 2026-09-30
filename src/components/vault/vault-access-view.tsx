@@ -9,6 +9,7 @@ import { VaultTabs } from "@/components/vault/vault-tabs";
 import { KeyIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { roleLabels } from "@/lib/constants";
 import type { AppRole } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 type Folder = { id: string; name: string; parentId: string | null; count: number; userIds: string[] };
 
@@ -137,7 +138,7 @@ export function VaultAccessView() {
       </div>
     );
   }
-  if (!data) return <div className="page-stack" />;
+  if (!data) return <PageLoader label="Cargando los accesos…" />;
 
   const nameOf = (id: string) => data.people.find((person) => person.id === id)?.name ?? "Usuario";
   const restricted = data.folders.filter((folder) => folder.userIds.length > 0);

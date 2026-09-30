@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { VaultTabs } from "@/components/vault/vault-tabs";
 import { ClockIcon, EyeIcon, KeyIcon, UsuariosIcon } from "@/components/icons";
+import { Spinner } from "@/components/ui/page-loader";
 
 type AuditEvent = {
   id: string;
@@ -131,7 +132,7 @@ export function VaultAuditView() {
             <thead><tr><th>Cuándo</th><th>Quién</th><th>Qué hizo</th><th>Credencial</th></tr></thead>
             <tbody>
               {data === null ? (
-                <tr><td colSpan={4} className="muted">Cargando…</td></tr>
+                <tr><td colSpan={4} className="muted"><span className="inline-loading"><Spinner /> Cargando…</span></td></tr>
               ) : data.events.length === 0 ? (
                 <tr><td colSpan={4} className="muted">Sin actividad con estos filtros.</td></tr>
               ) : data.events.map((event) => (

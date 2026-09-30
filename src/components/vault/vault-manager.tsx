@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
@@ -13,6 +13,7 @@ import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import type { AppRole } from "@/lib/types";
+import { PageLoader, Spinner } from "@/components/ui/page-loader";
 
 const REVEAL_SECONDS = 30;
 
@@ -98,6 +99,14 @@ export function VaultManager() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * La lista que hay pintada y la acción que espera al servidor ("ver:<id>",
+   * "copiar:<id>"...). Cada consulta pasa por el servidor, que descifra y lo
+   * apunta en la auditoría, y a ratos tarda: sin esto parecía que el clic no
+   * había hecho nada y se pulsaba otra vez.
+   */
+  const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
   /** El borrado del portapapeles, para poder cancelarlo al salir de la página. */
   const clipboardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (clipboardTimer.current) clearTimeout(clipboardTimer.current); }, []);
@@ -130,9 +139,13 @@ export function VaultManager() {
   }, [query]);
 
   const searchingLocally = Boolean(index && index.length > 0 && query.trim());
+  const listKey = JSON.stringify([searchTerm, scope, page, reloadTick]);
+  // Mientras llega otra carpeta, búsqueda o página, la de antes se atenúa.
+  const listReloading = stage === "ready" && !searchingLocally && loadedListKey !== listKey;
   useEffect(() => {
     if (searchingLocally) return;
     let active = true;
+    const key = JSON.stringify([searchTerm, scope, page, reloadTick]);
     void (async () => {
       const params = new URLSearchParams();
       if (searchTerm.length >= 2) params.set("q", searchTerm);
@@ -144,6 +157,7 @@ export function VaultManager() {
       params.set("page", String(page));
       const result = await vaultRequest<ListPayload>(`/api/vault/entries?${params}`);
       if (!active) return;
+      setLoadedListKey(key);
       if (!result.ok) {
         setMessage(result.error);
         setStage("ready");
@@ -266,6 +280,18 @@ export function VaultManager() {
   }
 
   // ---------- actions ----------
+
+  /** Marca una acción como en curso mientras dura, para que su botón enseñe el giro. */
+  async function track(key: string, work: () => Promise<unknown>) {
+    setPending(key);
+    try {
+      await work();
+    } finally {
+      setPending((current) => (current === key ? null : current));
+    }
+  }
+  /** El icono de un botón, o el giro mientras su acción espera al servidor. */
+  const waiting = (key: string, icon: ReactNode) => (pending === key ? <Spinner /> : icon);
 
   async function openDetail(entryId: string) {
     setRevealed(null);
@@ -480,7 +506,7 @@ export function VaultManager() {
     reload();
   }
 
-  if (stage === "loading") return <div className="page-stack" />;
+  if (stage === "loading") return <PageLoader label="Cargando el gestor de contraseñas…" />;
 
   const strength = draft.password ? passwordStrength(draft.password) : null;
   const scopeTitle =
@@ -555,6 +581,7 @@ export function VaultManager() {
             <div>
               <h2>{scopeTitle}</h2>
               <p className="panel-subtitle">
+                {listReloading ? <span className="inline-loading"><Spinner /> Cargando… · </span> : null}
                 {localResults
                   ? `${localResults.length} ${localResults.length === 1 ? "resultado" : "resultados"} de «${query.trim()}»`
                   : searchTerm ? `Resultados de «${searchTerm}»` : `${data?.total ?? 0} credenciales`}
@@ -574,7 +601,7 @@ export function VaultManager() {
               ) : null}
             </div>
           </div>
-          <div className="table-scroll">
+          <div className={listReloading ? "table-scroll is-reloading" : "table-scroll"} aria-busy={listReloading}>
             <table>
               <thead><tr><th aria-label="Favorita"></th><th>Credencial</th><th>Usuario</th><th>Carpeta</th><th>Acciones</th></tr></thead>
               <tbody>
@@ -599,9 +626,9 @@ export function VaultManager() {
                     <td className="vault-folder-cell" title={categoryPath(entry.categoryId)}>{categoryName(entry.categoryId)}</td>
                     <td>
                       <div className="table-actions vault-row-actions">
-                        <button type="button" className="button button-compact button-primary" aria-label={`Copiar la contraseña de ${entry.name}`} onClick={() => void copySecret(entry.id)} title="Copiar la contraseña"><CopyIcon /> Copiar</button>
+                        <button type="button" className="button button-compact button-primary" aria-label={`Copiar la contraseña de ${entry.name}`} disabled={pending === `copiar:${entry.id}`} onClick={() => void track(`copiar:${entry.id}`, () => copySecret(entry.id))} title="Copiar la contraseña">{waiting(`copiar:${entry.id}`, <CopyIcon />)} Copiar</button>
                         {entry.url ? <a className="button button-compact button-secondary" href={entry.url} target="_blank" rel="noopener noreferrer" aria-label={`Abrir la web de ${entry.name}`} title="Abrir la web">Abrir</a> : null}
-                        <button type="button" className="button button-compact button-secondary" aria-label={`Ver ${entry.name}`} onClick={() => void openDetail(entry.id)}>Ver</button>
+                        <button type="button" className="button button-compact button-secondary" aria-label={`Ver ${entry.name}`} disabled={pending === `ver:${entry.id}`} onClick={() => void track(`ver:${entry.id}`, () => openDetail(entry.id))}>{pending === `ver:${entry.id}` ? <Spinner /> : null}Ver</button>
                       </div>
                     </td>
                   </tr>
@@ -642,8 +669,8 @@ export function VaultManager() {
                 ) : (
                   <code className="vault-secret">••••••••••••</code>
                 )}
-                <button type="button" className="button button-compact button-secondary" onClick={() => void reveal(detail.entry.id, "password")}><EyeIcon /> Mostrar</button>
-                <button type="button" className="button button-compact button-secondary" onClick={() => void copySecret(detail.entry.id)}><CopyIcon /> Copiar</button>
+                <button type="button" className="button button-compact button-secondary" disabled={pending === "mostrar:password"} onClick={() => void track("mostrar:password", () => reveal(detail.entry.id, "password"))}>{waiting("mostrar:password", <EyeIcon />)} Mostrar</button>
+                <button type="button" className="button button-compact button-secondary" disabled={pending === "copiar:ficha"} onClick={() => void track("copiar:ficha", () => copySecret(detail.entry.id))}>{waiting("copiar:ficha", <CopyIcon />)} Copiar</button>
               </strong>
               <span>Web</span>
               <strong>{detail.entry.url ? <a href={detail.entry.url} target="_blank" rel="noopener noreferrer" className="text-link">{detail.entry.url}</a> : "—"}</strong>
@@ -687,7 +714,7 @@ export function VaultManager() {
               <div className="vault-notes">
                 <div className="notice-section-head">
                   <span className="search-group-title">Notas</span>
-                  <button type="button" className="button button-compact button-secondary" onClick={() => void reveal(detail.entry.id, "notes")}>Mostrar notas</button>
+                  <button type="button" className="button button-compact button-secondary" disabled={pending === "mostrar:notes"} onClick={() => void track("mostrar:notes", () => reveal(detail.entry.id, "notes"))}>{pending === "mostrar:notes" ? <Spinner /> : null}Mostrar notas</button>
                 </div>
                 {revealed?.entryId === detail.entry.id && revealed.field === "notes" ? <p className="vault-notes-body">{revealed.value}</p> : <p className="muted">Guardadas y cifradas.</p>}
               </div>

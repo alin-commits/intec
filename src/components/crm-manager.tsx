@@ -16,6 +16,7 @@ import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { KpiCard } from "@/components/kpi-card";
 import { CrmIcon, PlusCircleIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
+import { PageLoader } from "@/components/ui/page-loader";
 
 type ContactDraft = {
   businessUnitId: string;
@@ -244,7 +245,7 @@ export function CrmManager() {
     ]);
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando los contactos…" />;
 
   if (access === "denied") {
     return (

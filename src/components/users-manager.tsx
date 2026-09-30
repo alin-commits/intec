@@ -8,6 +8,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Toast } from "@/components/ui/toast";
 import type { AppRole, Profile } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-users";
 
@@ -269,7 +270,7 @@ export function UsersManager() {
   }
 
   if (access === "checking") {
-    return <div className="page-stack" />;
+    return <PageLoader label="Cargando los usuarios…" />;
   }
 
   if (access === "denied") {

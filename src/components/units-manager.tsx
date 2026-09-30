@@ -13,6 +13,7 @@ import { formatPercent } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const LOGO_BUCKET = "business-unit-logos";
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -294,7 +295,7 @@ export function UnitsManager() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando las unidades…" />;
 
   if (access === "denied") {
     return (

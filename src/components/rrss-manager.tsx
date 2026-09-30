@@ -32,6 +32,7 @@ import { inDateKeyRange, monthKey, monthLabel, monthShortLabel, previousDateRang
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { PageLoader } from "@/components/ui/page-loader";
 import type {
   BusinessUnit,
   MailingCampaign,
@@ -261,7 +262,7 @@ export function RrssManager() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando las métricas…" />;
 
   if (access === "denied") {
     return (

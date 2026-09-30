@@ -19,6 +19,7 @@ import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-campaigns";
 
@@ -386,7 +387,7 @@ export function CampaignsManager() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando las campañas…" />;
 
   if (access === "denied") {
     return (

@@ -24,6 +24,7 @@ import { ItNotesPanel } from "./it-notes-panel";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { Modal } from "@/components/ui/modal";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const priorityRank: Record<Ticket["priority"], number> = { high: 3, medium: 2, low: 1 };
 const PAGE_SIZE = 5;
@@ -366,7 +367,7 @@ export function TicketsManager() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando los tickets…" />;
 
   if (access === "denied") {
     return (

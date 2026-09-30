@@ -21,6 +21,7 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { KpiCard } from "@/components/kpi-card";
 import { ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/components/icons";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-leads";
 
@@ -460,7 +461,7 @@ export function LeadsTable() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando los leads…" />;
 
   if (access === "denied") {
     return (

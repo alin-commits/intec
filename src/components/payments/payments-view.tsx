@@ -10,6 +10,7 @@ import { SageRefreshButton } from "@/components/sage-refresh-button";
 import { RemittancesTab } from "./remittances-tab";
 import { TreasuryTab } from "./treasury-tab";
 import { BankSettingsTab } from "./bank-settings-tab";
+import { PageLoader } from "@/components/ui/page-loader";
 
 /*
   Pagos a proveedores. Las remesas se siguen haciendo en Sage; aquí se
@@ -112,7 +113,7 @@ export function PaymentsView() {
   if (stage === "failed") {
     return <div className="page-stack"><section className="panel panel-padded"><h2>No se pudo cargar</h2><p>Recarga la página para intentarlo otra vez.</p></section></div>;
   }
-  if (stage === "loading") return <div className="page-stack" />;
+  if (stage === "loading") return <PageLoader label="Cargando los pagos…" />;
 
   const context: PaymentsContext = {
     companies,

@@ -11,6 +11,7 @@ import { CheckCircleIcon, ClockIcon, KeyIcon, RefreshIcon, XCircleIcon } from "@
 import { VaultTabs } from "@/components/vault/vault-tabs";
 import { formatDate } from "@/lib/format";
 import { DEFAULT_GENERATOR, generatePassword, passwordStrength } from "@/lib/vault/password-generator";
+import { PageLoader } from "@/components/ui/page-loader";
 
 type HealthItem = { id: string; name: string; folder: string };
 type HealthPayload = {
@@ -104,7 +105,7 @@ export function VaultHealthView() {
       </div>
     );
   }
-  if (!health) return <div className="page-stack" />;
+  if (!health) return <PageLoader label="Revisando las contraseñas…" />;
 
   const reusedShare = health.total ? Math.round((health.reusedCount / health.total) * 100) : 0;
   const weakShare = health.total ? Math.round((health.weak.length / health.total) * 100) : 0;

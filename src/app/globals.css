@@ -1498,6 +1498,22 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sage-refresh { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 320px; }
 .sage-refresh-button { gap: 8px; white-space: nowrap; }
 .sage-refresh-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(51,44,128,.2); border-top-color: var(--primary); animation: note-ai-spin .8s linear infinite; }
+
+/* Mientras carga una página o una acción: el mismo giro en pequeño (botones,
+   líneas de texto) y en grande (la página entera). La página espera un poco
+   antes de enseñarlo, para que en las cargas rápidas no parpadee. */
+.spinner { display: inline-block; flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(51,44,128,.2); border-top-color: var(--primary); animation: note-ai-spin .8s linear infinite; vertical-align: -2px; }
+.button-primary .spinner { border-color: rgba(255,255,255,.35); border-top-color: #fff; }
+.spinner-large { width: 22px; height: 22px; border-width: 2.5px; }
+.page-loader { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 45vh; color: var(--muted); font-size: 14px; font-weight: 600; animation: page-loader-in .25s ease .2s both; }
+@keyframes page-loader-in { from { opacity: 0; } to { opacity: 1; } }
+/* Una lista que se está recargando se atenúa en vez de quedarse con los datos de antes sin avisar. */
+.is-reloading { opacity: .55; transition: opacity .15s ease; pointer-events: none; }
+.inline-loading { display: inline-flex; align-items: center; gap: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+  .page-loader { animation: none; }
+}
 .sage-refresh-status { font-size: 12px; line-height: 1.35; text-align: right; color: var(--muted); }
 .sage-refresh-status.is-ok { color: var(--success); }
 .sage-refresh-status.is-bad { color: var(--danger); }

@@ -22,6 +22,7 @@ import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 type ViewMode = "month" | "year";
 
@@ -937,7 +938,7 @@ export function InquiryRegister() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando las consultas…" />;
 
   if (access === "denied") {
     return (

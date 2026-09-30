@@ -36,6 +36,7 @@ import {
 import type { MarketingInvoice } from "@/lib/invoices";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessUnit } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-expenses";
 const RENEWAL_WINDOW_DAYS = 30;
@@ -500,7 +501,7 @@ export function ExpensesManager() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando los gastos…" />;
 
   if (access === "denied") {
     return (

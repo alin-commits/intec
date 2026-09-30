@@ -35,6 +35,7 @@ import { CommercialPage } from "./page-commercial";
 import { ProductsPage } from "./page-products";
 import { CustomersPage } from "./page-customers";
 import { TargetsPage } from "./page-targets";
+import { PageLoader } from "@/components/ui/page-loader";
 
 /*
   El cuadro de mando de ventas, por páginas y con filtros cruzados como en
@@ -386,7 +387,7 @@ export function SalesDashboard() {
       </div>
     );
   }
-  if (stage === "loading") return <div className="page-stack" />;
+  if (stage === "loading") return <PageLoader label="Cargando las ventas de Sage…" />;
   if (years.length === 0) {
     return (
       <div className="page-stack">

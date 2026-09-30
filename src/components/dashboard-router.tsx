@@ -10,6 +10,7 @@ import type { AppRole } from "@/lib/types";
 import { DashboardClient } from "./dashboard-client";
 import { TicketsDashboardView } from "./tickets-dashboard-view";
 import { MarketingDashboardView } from "./marketing-dashboard-view";
+import { PageLoader } from "@/components/ui/page-loader";
 
 export function DashboardRouter() {
   const configured = isSupabaseConfigured();
@@ -48,7 +49,7 @@ export function DashboardRouter() {
     else if (onlyPayments) router.replace("/pagos");
   }, [onlyEmployee, onlyPayments, router]);
 
-  if (roles === null || onlyEmployee || onlyPayments) return <div className="page-stack" />;
+  if (roles === null || onlyEmployee || onlyPayments) return <PageLoader label="Cargando tu inicio…" />;
 
   /*
    * Dirección tiene tres paneles de inicio, uno por departamento, y se cambia de

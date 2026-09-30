@@ -11,6 +11,7 @@ import { businessUnits as demoBusinessUnits, demoBusinessCards, demoProfiles } f
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessCard, BusinessUnit } from "@/lib/types";
+import { PageLoader } from "@/components/ui/page-loader";
 
 type ProfileOption = { id: string; fullName: string };
 
@@ -324,7 +325,7 @@ export function BusinessCardsManager() {
     }
   }
 
-  if (access === "checking") return <div className="page-stack" />;
+  if (access === "checking") return <PageLoader label="Cargando las tarjetas…" />;
 
   if (access === "denied") {
     return (
