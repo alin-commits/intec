@@ -54,6 +54,7 @@ test("el envío nuevo pasa todo, con los nombres de columna de la base de datos"
   assert.deepEqual(payload.orders, [], "una lista vacía sí se manda: ese periodo no tiene pedidos");
   assert.deepEqual((payload.family_sales as object[])[0], {
     company_code: 1, day: "2026-09-28", family_code: "COMP", units: 2, net_amount: 1400, cost_amount: 950, net_without_cost: 0,
+    gross_amount: null,
   });
   assert.deepEqual((payload.schema as object[])[0], { table_name: "CarteraEfectos", column_name: "ImportePendiente", data_type: "decimal" });
   assert.equal(payload.taken_on, "2026-09-28");
@@ -79,9 +80,48 @@ test("los envíos parciales del agente nuevo no tocan las ventas", () => {
   assert.equal(customer.email, null);
   assert.deepEqual((payload.article_sales as object[])[0], {
     company_code: 1, month: "2026-09-01", article_code: "CMP-100", family_code: "", subfamily_code: "",
-    units: 0, documents: 0, net_amount: 9800, cost_amount: 0, net_without_cost: 0,
+    units: 0, documents: 0, net_amount: 9800, cost_amount: 0, net_without_cost: 0, gross_amount: null,
   });
   assert.match(describeIngest(body, { customer_list: 1, article_sales: 1 }), /1 clientes, 1 de venta por artículo/);
+});
+
+test("lo del director comercial: descuentos, comisiones, ficha del cliente, jefes y contactos", () => {
+  const body = sageIngestSchema.parse({
+    coveredFrom: "2026-09-01",
+    coveredTo: "2026-09-30",
+    reps: [
+      { companyCode: 1, code: 3, name: "Marta", isManager: true },
+      { companyCode: 1, code: 8, name: "Pedro", managerCode: 3, isActive: false, leftOn: "2025-06-30" },
+    ],
+    sales: [{ ...oldAgentBody.sales[0], grossAmount: 1700, lineDiscountAmount: 150, rappelAmount: 12, commissionAmount: 45 }],
+    customerList: [{ companyCode: 1, code: "C0001", name: "TALLERES", zoneCode: "1", channelCode: " ", sectorCode: "SEC2", paymentMethod: "R30" }],
+    customerDays: [{ companyCode: 1, customerCode: "C0001", day: "2026-09-28", documents: 1, netAmount: 1500, grossAmount: 1700, lineDiscountAmount: 150 }],
+    lookups: [{ table: "Zonas", code: "1", name: "Levante", column: "CodigoZona" }, { table: "Sector_", code: "SEC2", name: "Servicios" }],
+    customerContacts: [{ companyCode: 1, customerCode: "C0001", position: 1, name: "Lucía Gómez", phone: "961234567", isCommercial: true }],
+    customerContactsReplace: true,
+  });
+  const payload = toDatabasePayload(body);
+  const reps = payload.reps as Record<string, unknown>[];
+  assert.deepEqual([reps[0].is_manager, reps[0].is_active, reps[0].manager_code], [true, true, null], "por defecto sigue en la empresa");
+  assert.deepEqual([reps[1].manager_code, reps[1].is_active, reps[1].left_on], [3, false, "2025-06-30"]);
+  const sale = (payload.sales as Record<string, unknown>[])[0];
+  assert.deepEqual([sale.gross_amount, sale.line_discount_amount, sale.rappel_amount, sale.commission_amount], [1700, 150, 12, 45]);
+  const customer = (payload.customer_list as Record<string, unknown>[])[0];
+  assert.deepEqual([customer.zone_code, customer.channel_code, customer.sector_code, customer.payment_method], ["1", null, "SEC2", "R30"]);
+  assert.equal((payload.customer_days as Record<string, unknown>[])[0].line_discount_amount, 150);
+  const lookups = payload.lookups as Record<string, unknown>[];
+  assert.equal(lookups[0].code_column, "CodigoZona");
+  assert.equal(lookups[1].code_column, null, "el agente antiguo no manda la columna");
+  const contact = (payload.customer_contacts as Record<string, unknown>[])[0];
+  assert.deepEqual([contact.name, contact.phone, contact.email, contact.is_commercial, contact.is_admin], ["Lucía Gómez", "961234567", null, true, false]);
+  assert.equal(payload.customer_contacts_replace, true);
+  assert.match(describeIngest(body, { customer_contacts: 1 }), /1 contactos de clientes/);
+
+  // El agente antiguo no manda nada de esto: los importes nuevos van nulos, no a cero.
+  const old = toDatabasePayload(sageIngestSchema.parse(oldAgentBody));
+  const oldSale = (old.sales as Record<string, unknown>[])[0];
+  assert.deepEqual([oldSale.gross_amount, oldSale.commission_amount], [null, null]);
+  assert.equal("customer_contacts" in old, false, "sin contactos no se borran los que hay");
 });
 
 test("ofertas y pedidos uno a uno llegan con su enlace y sus fechas", () => {

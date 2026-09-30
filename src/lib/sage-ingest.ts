@@ -12,6 +12,8 @@ const repCode = z.number().int().nullable().default(null);
 const optionalText = (max: number) => z.string().trim().max(max).nullable().default(null).transform((value) => (value ? value : null));
 const optionalDay = day.nullable().default(null);
 const code = z.string().trim().max(40);
+/** Un importe que el agente antiguo no manda: nulo quiere decir «no se leyó», no cero. */
+const optionalAmount = amount.nullable().default(null);
 
 const salesRow = z.object({
   companyCode: z.number().int(),
@@ -28,6 +30,12 @@ const salesRow = z.object({
   netWithoutCost: amount.default(0),
   /** Líneas de los albaranes, para los artículos medios por venta. */
   lines: count.default(0),
+  /** Para el director comercial: el bruto antes de descuentos, el descuento de
+      línea (el que pone el comercial), el rappel y la comisión que calcula Sage. */
+  grossAmount: optionalAmount,
+  lineDiscountAmount: optionalAmount,
+  rappelAmount: optionalAmount,
+  commissionAmount: optionalAmount,
 });
 
 /** Ofertas y pedidos comparten forma: totales por día, serie y comercial. */
@@ -61,6 +69,11 @@ export const sageIngestSchema = z.object({
     code: z.number().int(),
     name: z.string().trim().min(1).max(160),
     isPerson: z.boolean().default(true),
+    /** Jefe de ventas, de quién depende y si sigue en la empresa. */
+    isManager: z.boolean().default(false),
+    managerCode: z.number().int().nullable().default(null),
+    isActive: z.boolean().default(true),
+    leftOn: optionalDay,
   })).max(500).default([]),
   sales: z.array(salesRow).max(20000).optional(),
   offers: z.array(documentRow).max(20000).optional(),
@@ -85,6 +98,7 @@ export const sageIngestSchema = z.object({
     costAmount: amount.default(0),
     /** Parte de netAmount de líneas sin coste grabado, que el margen deja fuera. */
     netWithoutCost: amount.default(0),
+    grossAmount: optionalAmount,
   })).max(40000).optional(),
   customers: z.array(z.object({
     companyCode: z.number().int(),
@@ -130,6 +144,11 @@ export const sageIngestSchema = z.object({
     lastActionOn: optionalDay,
     leaveReason: optionalText(80),
     leftOn: optionalDay,
+    /** Códigos de la ficha: el nombre de cada uno está en las tablas de códigos. */
+    zoneCode: optionalText(40),
+    channelCode: optionalText(40),
+    sectorCode: optionalText(40),
+    paymentMethod: optionalText(40),
   })).max(20000).optional(),
   customerDays: z.array(z.object({
     companyCode: z.number().int(),
@@ -142,6 +161,8 @@ export const sageIngestSchema = z.object({
     netAmount: amount,
     costAmount: amount.default(0),
     netWithoutCost: amount.default(0),
+    grossAmount: optionalAmount,
+    lineDiscountAmount: optionalAmount,
   })).max(30000).optional(),
   customerFamilies: z.array(z.object({
     companyCode: z.number().int(),
@@ -151,6 +172,7 @@ export const sageIngestSchema = z.object({
     netAmount: amount,
     costAmount: amount.default(0),
     netWithoutCost: amount.default(0),
+    grossAmount: optionalAmount,
   })).max(40000).optional(),
   articleList: z.array(z.object({
     companyCode: z.number().int(),
@@ -176,6 +198,7 @@ export const sageIngestSchema = z.object({
     netAmount: amount,
     costAmount: amount.default(0),
     netWithoutCost: amount.default(0),
+    grossAmount: optionalAmount,
   })).max(40000).optional(),
   offerDocuments: z.array(z.object({
     companyCode: z.number().int(),
@@ -230,7 +253,27 @@ export const sageIngestSchema = z.object({
     table: z.string().trim().min(1).max(128),
     code: z.string().trim().min(1).max(60),
     name: z.string().trim().min(1).max(200),
+    /** La columna de código (CodigoZona...): la tabla se llama distinto en cada Sage. */
+    column: optionalText(128),
   })).max(20000).optional(),
+  /** Las personas de contacto de cada cliente. Llegan enteras por la noche. */
+  customerContacts: z.array(z.object({
+    companyCode: z.number().int(),
+    customerCode: code,
+    position: z.number().int(),
+    name: z.string().trim().min(1).max(200),
+    roleCode: optionalText(40),
+    areaCode: optionalText(40),
+    phone: optionalText(40),
+    phone2: optionalText(40),
+    phone3: optionalText(40),
+    email: optionalText(160),
+    isCommercial: z.boolean().default(false),
+    isAdmin: z.boolean().default(false),
+    isOperational: z.boolean().default(false),
+  })).max(20000).optional(),
+  /** El primer trozo de contactos borra los anteriores; los demás se suman. */
+  customerContactsReplace: z.boolean().optional(),
   /** Lo que el agente quiere que conste: qué no pudo leer y por qué. */
   notes: z.array(z.string().trim().max(300)).max(30).optional(),
 
@@ -355,7 +398,10 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
     covered_to: body.coveredTo,
     taken_on: body.takenOn ?? null,
     companies: body.companies.map((company) => ({ code: company.code, name: company.name, is_active: company.isActive })),
-    reps: body.reps.map((rep) => ({ company_code: rep.companyCode, code: rep.code, name: rep.name, is_person: rep.isPerson })),
+    reps: body.reps.map((rep) => ({
+      company_code: rep.companyCode, code: rep.code, name: rep.name, is_person: rep.isPerson,
+      is_manager: rep.isManager, manager_code: rep.managerCode, is_active: rep.isActive, left_on: rep.leftOn,
+    })),
   };
   // Solo se añade lo que ha venido: una clave ausente le dice a la base de datos
   // que esa parte no se toque.
@@ -372,6 +418,10 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       vat_amount: row.vatAmount,
       net_without_cost: row.netWithoutCost,
       lines: row.lines,
+      gross_amount: row.grossAmount,
+      line_discount_amount: row.lineDiscountAmount,
+      rappel_amount: row.rappelAmount,
+      commission_amount: row.commissionAmount,
     }));
   }
   const documents = (rows: z.infer<typeof documentRow>[]) => rows.map((row) => ({
@@ -397,6 +447,7 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       net_without_cost: row.netWithoutCost,
+      gross_amount: row.grossAmount,
     }));
   }
   if (body.customers) {
@@ -429,6 +480,10 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       last_action_on: row.lastActionOn,
       leave_reason: row.leaveReason,
       left_on: row.leftOn,
+      zone_code: row.zoneCode,
+      channel_code: row.channelCode,
+      sector_code: row.sectorCode,
+      payment_method: row.paymentMethod,
     }));
   }
   if (body.customerDays) {
@@ -443,6 +498,8 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       net_without_cost: row.netWithoutCost,
+      gross_amount: row.grossAmount,
+      line_discount_amount: row.lineDiscountAmount,
     }));
   }
   if (body.customerFamilies) {
@@ -454,6 +511,7 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       net_without_cost: row.netWithoutCost,
+      gross_amount: row.grossAmount,
     }));
   }
   if (body.articleList) {
@@ -483,6 +541,7 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       net_without_cost: row.netWithoutCost,
+      gross_amount: row.grossAmount,
     }));
   }
   if (body.offerDocuments) {
@@ -539,7 +598,27 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       net_amount: row.netAmount,
     }));
   }
-  if (body.lookups) payload.lookups = body.lookups.map((row) => ({ table_name: row.table, code: row.code, name: row.name }));
+  if (body.lookups) {
+    payload.lookups = body.lookups.map((row) => ({ table_name: row.table, code: row.code, name: row.name, code_column: row.column }));
+  }
+  if (body.customerContacts) {
+    payload.customer_contacts = body.customerContacts.map((row) => ({
+      company_code: row.companyCode,
+      customer_code: row.customerCode,
+      position: row.position,
+      name: row.name,
+      role_code: row.roleCode,
+      area_code: row.areaCode,
+      phone: row.phone,
+      phone2: row.phone2,
+      phone3: row.phone3,
+      email: row.email,
+      is_commercial: row.isCommercial,
+      is_admin: row.isAdmin,
+      is_operational: row.isOperational,
+    }));
+    payload.customer_contacts_replace = body.customerContactsReplace === true;
+  }
   return payload;
 }
 
@@ -565,6 +644,7 @@ export function describeIngest(body: SageIngestBody, counts: Record<string, numb
     ["order_documents", "pedidos uno a uno"],
     ["incidents", "de abonos e incidencias"],
     ["lookups", "códigos de Sage"],
+    ["customer_contacts", "contactos de clientes"],
     ["company_details", "sociedades con NIF"],
     ["suppliers", "proveedores"],
     ["payment_remittances", "remesas de pagos"],

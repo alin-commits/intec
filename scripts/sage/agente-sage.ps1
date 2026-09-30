@@ -105,6 +105,15 @@ if ([string]::IsNullOrWhiteSpace($Token)) { $Token = [Environment]::GetEnvironme
 if ([string]::IsNullOrWhiteSpace($Usuario)) { $Usuario = [Environment]::GetEnvironmentVariable("INTEC_SAGE_DB_USER", "Machine") }
 if ([string]::IsNullOrWhiteSpace($Clave)) { $Clave = [Environment]::GetEnvironmentVariable("INTEC_SAGE_DB_PASSWORD", "Machine") }
 
+# Con qué se entra en Sage, apartado en variables de solo lectura que nada más
+# usa. En PowerShell $clave y $Clave son la misma variable: el 29/09/2026 una
+# función la tapó y el 30/09 un $clave del script la pisó (las remesas de pagos
+# la usaban para agrupar), y todo lo que venía detrás daba "Error de inicio de
+# sesión". Así, si algo vuelve a llamarse igual, no cambia la contraseña.
+New-Variable -Name SageConexionUsuario -Value $Usuario -Option ReadOnly -Scope Script
+New-Variable -Name SageConexionClave -Value $Clave -Option ReadOnly -Scope Script
+New-Variable -Name SageConexionBase -Value $BaseDeDatos -Option ReadOnly -Scope Script
+
 if ($Registro -eq "") {
   $Registro = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "agente-sage.log"
 }
@@ -114,6 +123,11 @@ function Apuntar($texto) {
   Write-Host $linea
   try { Add-Content -Path $Registro -Value $linea -Encoding UTF8 } catch { }
 }
+
+# Qué versión del agente es. Sale en el registro y en el envío de pagos de la
+# lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
+# cada vez que se manda una versión nueva al servidor.
+$VersionAgente = "2026-09-30 director comercial"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -136,16 +150,13 @@ function Buscar-Instancias {
 }
 
 function Nueva-Cadena($servidor) {
-  # Usuario, clave y base se leen con $script: a propósito. En PowerShell una
-  # función ve las variables de quien la llama, y $clave y $Clave son la misma:
-  # si cualquier función de por medio tiene una variable llamada así, sin el
-  # $script: se colaría como contraseña. Pasó el 29/09/2026: solo entraban las
-  # ventas y todo lo demás daba "Error de inicio de sesión".
-  $cadena = "Server=$servidor;Database=$($script:BaseDeDatos);Connect Timeout=10;Application Name=Agente Intec;"
+  # Usuario, clave y base salen de las copias de solo lectura del principio, no
+  # de $Usuario y $Clave: cualquier $clave de por medio se colaría como contraseña.
+  $cadena = "Server=$servidor;Database=$($script:SageConexionBase);Connect Timeout=10;Application Name=Agente Intec;"
   # Si no hay usuario configurado se entra con la cuenta de Windows que ejecuta
   # la tarea. Ojo: $env: devuelve nulo cuando la variable no existe, no cadena
   # vacía, así que hay que comprobarlo así y no con -ne "".
-  if (-not [string]::IsNullOrWhiteSpace($script:Usuario)) { return $cadena + "User ID=$($script:Usuario);Password=$($script:Clave);" }
+  if (-not [string]::IsNullOrWhiteSpace($script:SageConexionUsuario)) { return $cadena + "User ID=$($script:SageConexionUsuario);Password=$($script:SageConexionClave);" }
   return $cadena + "Integrated Security=SSPI;"
 }
 
@@ -181,6 +192,12 @@ function Entero-O-Nulo($valor) {
 }
 function Numero($valor) {
   if ($valor -eq [DBNull]::Value -or $null -eq $valor) { return [double]0 }
+  return [double]$valor
+}
+# Para los importes que esta instalación puede no tener (bruto, comisión...):
+# nulo le dice al Hub "no se leyó", que no es lo mismo que cero.
+function Numero-O-Nulo($valor) {
+  if ($valor -eq [DBNull]::Value -or $null -eq $valor) { return $null }
   return [double]$valor
 }
 function Texto($valor, [int]$maximo) {
@@ -265,7 +282,7 @@ if ($Vigilar) {
   Apuntar "lectura pedida desde el panel"
 }
 
-Apuntar "----- arranque: ultimos $Dias dias -----"
+Apuntar "----- arranque: ultimos $Dias dias (agente $VersionAgente) -----"
 
 $candidatos = @()
 if ($Servidor -ne "") { $candidatos = @($Servidor) } else { $candidatos = Buscar-Instancias }
@@ -366,8 +383,15 @@ foreach ($fila in $columnasComercial.Rows) {
 }
 $expresionNombre = if ($trozos.Count -gt 0) { "coalesce(" + ($trozos -join ", ") + ", 'Sin nombre')" } else { "'Sin nombre'" }
 
+# Para el director comercial: quién es jefe de ventas, de quién depende cada uno
+# y quién ya no está. Son columnas de Sage que no todas las instalaciones tienen.
+$expJefe = if (Tiene "Comisionistas" "IndicadorJefeVenta_") { "isnull(IndicadorJefeVenta_, 0)" } else { "0" }
+$expSuJefe = if (Tiene "Comisionistas" "CodigoJefeVenta_") { "CodigoJefeVenta_" } else { "cast(null as int)" }
+$expFechaBaja = if (Tiene "Comisionistas" "FechaBajaLc") { "FechaBajaLc" } else { "cast(null as datetime)" }
+$expBaja = if (Tiene "Comisionistas" "BajaEmpresaLc") { "isnull(BajaEmpresaLc, 0)" } else { "0" }
 $comerciales = Consultar $servidorBueno @"
-select CodigoEmpresa, CodigoComisionista, $expresionNombre as Nombre
+select CodigoEmpresa, CodigoComisionista, $expresionNombre as Nombre,
+  $expJefe as Jefe, $expSuJefe as SuJefe, $expFechaBaja as FechaBaja, $expBaja as Baja
 from Comisionistas
 where CodigoEmpresa not in ($excluidas);
 "@
@@ -383,11 +407,21 @@ foreach ($fila in $comerciales.Rows) {
   # "GENERAL" y las altas automáticas no son personas: el panel las enseña como
   # ventas sin comercial asignado.
   $esPersona = -not ($nombre -match "GENERAL|AUTOM|NO ASIG|SAT ")
+  # En Sage el sí es -1. La baja puede estar marcada, fechada o las dos cosas; con
+  # fecha futura todavía está.
+  $fechaBaja = Fecha-O-Nulo $fila["FechaBaja"]
+  $deBaja = ((Numero $fila["Baja"]) -ne 0) -or ($fechaBaja -and $fechaBaja -le (Get-Date).ToString("yyyy-MM-dd"))
+  $suJefe = Entero-O-Nulo $fila["SuJefe"]
+  if ($suJefe -in @(0, 9999)) { $suJefe = $null }
   $vendedores += [PSCustomObject]@{
     companyCode = [int]$fila["CodigoEmpresa"]
     code        = [int]$fila["CodigoComisionista"]
     name        = $nombre
     isPerson    = $esPersona
+    isManager   = ((Numero $fila["Jefe"]) -ne 0)
+    managerCode = $suJefe
+    isActive    = (-not $deBaja)
+    leftOn      = $fechaBaja
   }
 }
 
@@ -399,6 +433,19 @@ foreach ($fila in $comerciales.Rows) {
 # restan de la venta del día.
 # ---------------------------------------------------------------------------
 $expLineasAlbaran = if (Tiene "CabeceraAlbaranCliente" "NumeroLineas") { "isnull(a.NumeroLineas, 0)" } else { "0" }
+# Para el director comercial, de la cabecera del albarán: el bruto antes de
+# descuentos, el descuento de las líneas (el que pone el comercial; el resto
+# hasta el neto son el descuento de la ficha del cliente y el pronto pago), el
+# rappel y la comisión que calcula Sage para el comercial del albarán. Si la
+# columna no existe va nulo: el Hub lo toma como "no se leyó", no como cero.
+function Sql-SumaCabecera($columna) {
+  if (Tiene "CabeceraAlbaranCliente" $columna) { return "sum(isnull(a.[$columna], 0))" }
+  return "cast(null as decimal(14, 2))"
+}
+$expBruto = Sql-SumaCabecera "ImporteBruto"
+$expDescuentoLineas = Sql-SumaCabecera "ImporteDescuentoLineas"
+$expRappel = Sql-SumaCabecera "ImporteRappel"
+$expComision = Sql-SumaCabecera "ImporteComision"
 
 function Sql-Ventas($campoFecha, $filtro, $desdeBloque, $hastaBloque) {
   return @"
@@ -414,7 +461,11 @@ select
   -- La venta cuyos albaranes no llevan coste: si se contara como si no
   -- costara nada, el margen saldría más alto de lo que es.
   sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste,
-  sum($expLineasAlbaran)                       as Lineas
+  sum($expLineasAlbaran)                       as Lineas,
+  $expBruto                                    as Bruto,
+  $expDescuentoLineas                          as DescuentoLineas,
+  $expRappel                                   as Rappel,
+  $expComision                                 as Comision
 from CabeceraAlbaranCliente a
 where a.$campoFecha >= convert(datetime, '$desdeBloque', 112) and a.$campoFecha < convert(datetime, '$hastaBloque', 112)
   and a.CodigoEmpresa not in ($excluidas)
@@ -442,6 +493,10 @@ function Filas-Venta($tabla, $base) {
       vatAmount   = [double]$fila["Iva"]
       netWithoutCost = [double]$fila["NetoSinCoste"]
       lines       = [int]$fila["Lineas"]
+      grossAmount = (Numero-O-Nulo $fila["Bruto"])
+      lineDiscountAmount = (Numero-O-Nulo $fila["DescuentoLineas"])
+      rappelAmount = (Numero-O-Nulo $fila["Rappel"])
+      commissionAmount = (Numero-O-Nulo $fila["Comision"])
     })
   }
   # La coma evita que PowerShell desenrolle la lista: una lista vacía llegaría
@@ -522,10 +577,20 @@ function Preparar-Familias {
   elseif ($unidades -and (Tiene "LineasAlbaranCliente" "PrecioCoste")) { $expCoste = "l.[PrecioCoste] * l.[$unidades]" }
   else { Avisar $avisosDeArranque "familias: las lineas no traen coste; se envia la venta sin margen" }
 
+  # El bruto de la línea, antes de descuentos: con el neto da el descuento por
+  # familia, artículo y cliente.
+  $bruto = $null
+  if (Tiene "LineasAlbaranCliente" "ImporteBruto") { $bruto = "l.[ImporteBruto]" }
+
   return @{
     Importe = $importe; Familia = $familia; Subfamilia = $subfamilia; Unir = $unirArticulos
-    Unidades = $expUnidades; Coste = $expCoste; ConArticulo = $conArticulo
+    Unidades = $expUnidades; Coste = $expCoste; ConArticulo = $conArticulo; Bruto = $bruto
   }
+}
+
+function Sql-BrutoLineas($cfg) {
+  if ($cfg.Bruto) { return "sum(isnull($($cfg.Bruto), 0))" }
+  return "cast(null as decimal(14, 2))"
 }
 
 # Lo que se repite en todas las consultas de líneas: la unión con su cabecera.
@@ -547,7 +612,8 @@ select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, $codigo as Familia,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
   sum(isnull($($cfg.Coste), 0)) as Coste,
   -- Lo vendido sin coste grabado: el margen de la familia lo deja fuera.
-  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste
+  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste,
+  $(Sql-BrutoLineas $cfg) as Bruto
 $(Sql-UnirLineas $cfg)
 where $(Sql-Entre "a.FechaAlbaran" $desdeBloque $hastaBloque)
   and a.CodigoEmpresa not in ($excluidas)
@@ -566,6 +632,7 @@ function Filas-Familias($tabla) {
       netAmount   = (Numero $fila["Neto"])
       costAmount  = (Numero $fila["Coste"])
       netWithoutCost = (Numero $fila["NetoSinCoste"])
+      grossAmount = (Numero-O-Nulo $fila["Bruto"])
     })
   }
   return ,$lista
@@ -630,7 +697,8 @@ select a.CodigoEmpresa, convert(char(7), a.FechaAlbaran, 120) as Mes, $articulo 
   count(distinct concat(a.EjercicioAlbaran, '|', a.SerieAlbaran, '|', a.NumeroAlbaran)) as Documentos,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
   sum(isnull($($cfg.Coste), 0)) as Coste,
-  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste
+  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste,
+  $(Sql-BrutoLineas $cfg) as Bruto
 $(Sql-UnirLineas $cfg)
 where $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
   and a.CodigoEmpresa not in ($excluidas)
@@ -659,7 +727,19 @@ function Sql-ArticulosLista($cfgArt, $cfg, $mesDesde, $mesHasta) {
   $obsoleto = if ($cfgArt.Obsoleto) { "case when isnull(ar.[$($cfgArt.Obsoleto)], 0) <> 0 then 1 else 0 end" } else { "0" }
   $alta = ""
   if ($cfgArt.Alta) { $alta = "or ($(Sql-Entre "ar.[$($cfgArt.Alta)]" $mesDesde $mesHasta))" }
+  # Primero los artículos vendidos en el mes, de una pasada por los albaranes de
+  # ese mes, y luego su ficha. Antes se preguntaba artículo por artículo si se
+  # había vendido: con el catálogo entero, diciembre de 2024 tardaba 115 s.
   return @"
+with vendidos as (
+  select distinct l.CodigoEmpresa, l.CodigoArticulo
+  from CabeceraAlbaranCliente a
+  join LineasAlbaranCliente l
+    on l.CodigoEmpresa = a.CodigoEmpresa and l.EjercicioAlbaran = a.EjercicioAlbaran
+   and l.SerieAlbaran = a.SerieAlbaran and l.NumeroAlbaran = a.NumeroAlbaran
+  where $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
+    and a.CodigoEmpresa not in ($excluidas)
+)
 select ar.CodigoEmpresa, ltrim(rtrim(cast(ar.CodigoArticulo as nvarchar(40)))) as Codigo,
   $(Sql-Texto "ar" $cfgArt.Nombre 200) as Nombre,
   $(Sql-Texto "ar" $cfgArt.Familia 40) as Familia,
@@ -671,17 +751,10 @@ select ar.CodigoEmpresa, ltrim(rtrim(cast(ar.CodigoArticulo as nvarchar(40)))) a
   $(Sql-Fecha "ar" $cfgArt.Alta) as Alta,
   $obsoleto as Obsoleto
 from Articulos ar
+left join vendidos v on v.CodigoEmpresa = ar.CodigoEmpresa and v.CodigoArticulo = ar.CodigoArticulo
 where ar.CodigoEmpresa not in ($excluidas)
   and (
-    exists (
-      select 1
-      from LineasAlbaranCliente l
-      join CabeceraAlbaranCliente a
-        on a.CodigoEmpresa = l.CodigoEmpresa and a.EjercicioAlbaran = l.EjercicioAlbaran
-       and a.SerieAlbaran = l.SerieAlbaran and a.NumeroAlbaran = l.NumeroAlbaran
-      where l.CodigoEmpresa = ar.CodigoEmpresa and l.CodigoArticulo = ar.CodigoArticulo
-        and $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
-    )
+    v.CodigoArticulo is not null
     $alta
   );
 "@
@@ -707,6 +780,12 @@ function Preparar-Clientes {
     UltimaAccion = (Elegir "Clientes" @("FechaUltimaAccionLc"))
     MotivoBaja = (Elegir "Clientes" @("CodigoMotivoBajaClienteLc"))
     Baja = (Elegir "Clientes" @("FechaBajaLc"))
+    # Para ver la venta por zona, canal, sector y forma de pago. Van los códigos;
+    # los nombres llegan con las tablas de códigos.
+    Zona = (Elegir "Clientes" @("CodigoZona"))
+    Canal = (Elegir "Clientes" @("CodigoCanal"))
+    Sector = (Elegir "Clientes" @("CodigoSector_", "CodigoSector"))
+    FormaPago = (Elegir "Clientes" @("FormadePago", "CodigoFormaPago"))
   }
 }
 
@@ -737,7 +816,11 @@ select c.CodigoEmpresa, ltrim(rtrim(cast(c.CodigoCliente as nvarchar(40)))) as C
   $(Sql-Fecha "c" $cfgCli.Alta) as Alta,
   $(Sql-Fecha "c" $cfgCli.UltimaAccion) as UltimaAccion,
   $(Sql-Texto "c" $cfgCli.MotivoBaja 80) as MotivoBaja,
-  $(Sql-Fecha "c" $cfgCli.Baja) as Baja
+  $(Sql-Fecha "c" $cfgCli.Baja) as Baja,
+  $(Sql-Texto "c" $cfgCli.Zona 40) as Zona,
+  $(Sql-Texto "c" $cfgCli.Canal 40) as Canal,
+  $(Sql-Texto "c" $cfgCli.Sector 40) as Sector,
+  $(Sql-Texto "c" $cfgCli.FormaPago 40) as FormaPago
 from Clientes c
 where c.CodigoEmpresa not in ($excluidas)
   and (
@@ -773,6 +856,75 @@ function Filas-ClientesLista($tabla) {
       lastActionOn  = (Fecha-O-Nulo $fila["UltimaAccion"])
       leaveReason   = (Texto-O-Nulo $fila["MotivoBaja"] 80)
       leftOn        = (Fecha-O-Nulo $fila["Baja"])
+      # La zona es un número y 0 quiere decir que no tiene.
+      zoneCode      = $(if ((Texto $fila["Zona"] 40) -in @("", "0")) { $null } else { Texto $fila["Zona"] 40 })
+      channelCode   = (Texto-O-Nulo $fila["Canal"] 40)
+      sectorCode    = (Texto-O-Nulo $fila["Sector"] 40)
+      paymentMethod = (Texto-O-Nulo $fila["FormaPago"] 40)
+    })
+  }
+  return ,$lista
+}
+
+# --- Contactos de los clientes ---------------------------------------------
+# La persona, su cargo y cómo localizarla, para que las listas de "a quién
+# llamar" digan a quién y a qué número. No se mandan los que ya no están en el
+# cliente ni los marcados para excluir por protección de datos.
+function Sql-Marca($alias, $tabla, $columna) {
+  if (Tiene $tabla $columna) { return "case when isnull($alias.[$columna], 0) <> 0 then 1 else 0 end" }
+  return "0"
+}
+
+function Leer-ContactosClientes($avisos) {
+  $t = "LcClienteContactos"
+  $faltan = Faltan $t @("CodigoEmpresa", "CodigoCliente", "ContactoPosicionLc")
+  if ($faltan.Count -gt 0) { Avisar $avisos "contactos de clientes: faltan $($faltan -join ', ')"; return $null }
+  # El nombre entero si lo hay; si no, nombre y apellidos.
+  $partes = @()
+  foreach ($c in @("Nombre", "Apellido1", "Apellido2")) {
+    if (Tiene $t $c) { $partes += "isnull(ltrim(rtrim(cast(k.[$c] as nvarchar(80)))), '')" }
+  }
+  $compuesto = if ($partes.Count -gt 0) { "ltrim(rtrim(" + ($partes -join " + ' ' + ") + "))" } else { "cast('' as nvarchar(200))" }
+  $entero = Elegir $t @("NombreContactoLc")
+  $nombre = if ($entero) { "coalesce($(Sql-Texto "k" $entero 200), $compuesto)" } else { $compuesto }
+  $filtros = ""
+  foreach ($c in @("BajaEmpresaLc", "ExcluirPorLOPDLc")) { if (Tiene $t $c) { $filtros += " and isnull(k.[$c], 0) = 0" } }
+  $correo = "coalesce($(Sql-Texto "k" (Elegir $t @("EMail1")) 160), $(Sql-Texto "k" (Elegir $t @("EMail2")) 160))"
+  $tabla = Consultar $servidorBueno @"
+select k.CodigoEmpresa, ltrim(rtrim(cast(k.CodigoCliente as nvarchar(40)))) as Cliente, k.ContactoPosicionLc as Posicion,
+  $nombre as Nombre,
+  $(Sql-Texto "k" (Elegir $t @("CodigoCargoLc")) 40) as Cargo,
+  $(Sql-Texto "k" (Elegir $t @("CodigoAreaContactoLc")) 40) as Area,
+  $(Sql-Texto "k" (Elegir $t @("TelefonoContactoLc")) 40) as Telefono,
+  $(Sql-Texto "k" (Elegir $t @("Telefono2ContactoLc")) 40) as Telefono2,
+  $(Sql-Texto "k" (Elegir $t @("Telefono3ContactoLc")) 40) as Telefono3,
+  $correo as Correo,
+  $(Sql-Marca "k" $t "EsContactoComercialLc") as Comercial,
+  $(Sql-Marca "k" $t "EsAdminClienteLc") as Administracion,
+  $(Sql-Marca "k" $t "EsContactoOperativoLc") as Operativo
+from [$t] k
+where k.CodigoEmpresa not in ($excluidas)
+  and k.ContactoPosicionLc is not null
+  and isnull(ltrim(rtrim(cast(k.CodigoCliente as nvarchar(40)))), '') <> ''$filtros;
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $nombreContacto = (Texto $fila["Nombre"] 200) -replace "\s+", " "
+    if ($nombreContacto -eq "") { continue }
+    $lista.Add([PSCustomObject]@{
+      companyCode   = [int]$fila["CodigoEmpresa"]
+      customerCode  = (Texto $fila["Cliente"] 40)
+      position      = [int]$fila["Posicion"]
+      name          = $nombreContacto
+      roleCode      = (Texto-O-Nulo $fila["Cargo"] 40)
+      areaCode      = (Texto-O-Nulo $fila["Area"] 40)
+      phone         = (Texto-O-Nulo $fila["Telefono"] 40)
+      phone2        = (Texto-O-Nulo $fila["Telefono2"] 40)
+      phone3        = (Texto-O-Nulo $fila["Telefono3"] 40)
+      email         = (Texto-O-Nulo $fila["Correo"] 160)
+      isCommercial  = ([int]$fila["Comercial"] -eq 1)
+      isAdmin       = ([int]$fila["Administracion"] -eq 1)
+      isOperational = ([int]$fila["Operativo"] -eq 1)
     })
   }
   return ,$lista
@@ -788,7 +940,9 @@ select a.CodigoEmpresa, ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40)))) as C
   sum($expLineasAlbaran) as Lineas,
   sum(isnull(a.BaseImponible, 0)) as Neto,
   sum(isnull(a.ImporteCoste, 0)) as Coste,
-  sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste
+  sum(case when isnull(a.ImporteCoste, 0) = 0 then isnull(a.BaseImponible, 0) else 0 end) as NetoSinCoste,
+  $expBruto as Bruto,
+  $expDescuentoLineas as DescuentoLineas
 from CabeceraAlbaranCliente a
 where $(Sql-Entre "a.FechaAlbaran" $desdeBloque $hastaBloque)
   and a.CodigoEmpresa not in ($excluidas)
@@ -813,6 +967,8 @@ function Filas-ClientesDia($tabla) {
       netAmount      = (Numero $fila["Neto"])
       costAmount     = (Numero $fila["Coste"])
       netWithoutCost = (Numero $fila["NetoSinCoste"])
+      grossAmount    = (Numero-O-Nulo $fila["Bruto"])
+      lineDiscountAmount = (Numero-O-Nulo $fila["DescuentoLineas"])
     })
   }
   return ,$lista
@@ -826,7 +982,8 @@ function Sql-ClientesFamilia($cfg, $mesDesde, $mesHasta) {
 select a.CodigoEmpresa, $cliente as Cliente, convert(char(7), a.FechaAlbaran, 120) as Mes, $familia as Familia,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
   sum(isnull($($cfg.Coste), 0)) as Coste,
-  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste
+  sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste,
+  $(Sql-BrutoLineas $cfg) as Bruto
 $(Sql-UnirLineas $cfg)
 where $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
   and a.CodigoEmpresa not in ($excluidas)
@@ -1150,6 +1307,8 @@ function Filas-Incidencias($tabla) {
 # Tablas pequeñas cuyo nombre suena a catálogo. De cada una se coge la primera
 # columna de código y la de descripción. No son datos de nadie, solo nombres.
 function Leer-Codigos {
+  # Las de nóminas, impuestos y sincronización coinciden con "Incidencia" o
+  # "Actividad" pero no dicen nada de ventas: se dejan fuera.
   $candidatas = Consultar $servidorBueno @"
 select t.name as Tabla, sum(p.rows) as Filas
 from sys.tables t
@@ -1157,8 +1316,12 @@ join sys.partitions p on p.object_id = t.object_id and p.index_id in (0, 1)
 where (t.name like '%Motivo%' or t.name like '%Probabilidad%' or t.name like '%TipoCliente%' or t.name like '%TiposCliente%'
     or t.name like '%GrupoCliente%' or t.name like '%GruposCliente%' or t.name like '%Actividad%' or t.name like '%Marca%'
     or t.name like '%Fabricante%' or t.name like '%Incidencia%' or t.name like '%Categoria%' or t.name like '%Sector%'
-    or t.name like '%TipoAccion%' or t.name like '%ClaseLlamada%' or t.name like '%ClasesLlamada%' or t.name = 'Provincias')
-  and t.name not like '%bak%' and t.name not like 'Tmp%'
+    or t.name like '%TipoAccion%' or t.name like '%ClaseLlamada%' or t.name like '%ClasesLlamada%' or t.name = 'Provincias'
+    or t.name like '%Zona%' or t.name like '%Canal%' or t.name like '%FormasPago%' or t.name like '%FormaPago%'
+    or t.name like '%Cargo%' or t.name like '%AreasContacto%')
+  and t.name not like '%bak%' and t.name not like 'Tmp%' and t.name not like '%[_]Sync'
+  and t.name not like 'IOF[_]%' and t.name not like 'IMP[_]%' and t.name not like 'RHH[_]%' and t.name not like 'NOM[_]%'
+  and t.name not like 'GFP[_]%' and t.name not like 'GDPR[_]%' and t.name not like 'Nomina%'
 group by t.name
 having sum(p.rows) between 1 and 2000
 order by t.name;
@@ -1166,18 +1329,35 @@ order by t.name;
   $lista = New-Object System.Collections.Generic.List[object]
   $tablas = 0
   foreach ($candidata in $candidatas.Rows) {
-    if ($tablas -ge 40 -or $lista.Count -ge 18000) { break }
+    if ($tablas -ge 60 -or $lista.Count -ge 18000) { break }
     $nombreTabla = [string]$candidata["Tabla"]
     try {
-      $columnas = Consultar $servidorBueno "select c.name from sys.columns c join sys.tables t on t.object_id = c.object_id where t.name = '$nombreTabla' order by c.column_id;"
+      $columnas = Consultar $servidorBueno "select c.name, ty.name as tipo from sys.columns c join sys.tables t on t.object_id = c.object_id join sys.types ty on ty.user_type_id = c.user_type_id where t.name = '$nombreTabla' order by c.column_id;"
+      $nombres = @($columnas.Rows | ForEach-Object { [string]$_["name"] })
       $codigo = $null
       $descripcion = $null
-      foreach ($c in $columnas.Rows) {
-        $n = [string]$c["name"]
+      foreach ($n in $nombres) {
         if (-not $codigo -and $n -like "Codigo*" -and $n -ne "CodigoEmpresa") { $codigo = $n }
+      }
+      # Las formas de pago no tienen columna "Codigo...": su código es FormadePago.
+      if (-not $codigo -and $nombres -contains "FormadePago") { $codigo = "FormadePago" }
+      if (-not $codigo) { continue }
+      # El nombre: una descripción, o la columna que se llama como el código sin
+      # "Codigo" delante (CodigoMotivoAbonoLc -> MotivoAbonoLc, CodigoZona -> Zona).
+      $gemela = $codigo -replace "^Codigo", ""
+      foreach ($n in $nombres) {
         if (-not $descripcion -and ($n -like "*Descripcion*" -or $n -like "Nombre*" -or $n -eq "Motivo" -or $n -like "Denominacion*")) { $descripcion = $n }
       }
-      if (-not $codigo -or -not $descripcion) { continue }
+      if (-not $descripcion -and $gemela -ne $codigo -and ($nombres -contains $gemela)) { $descripcion = $gemela }
+      if (-not $descripcion) {
+        # Si no, la primera columna de texto que no sea otro código.
+        foreach ($c in $columnas.Rows) {
+          $n = [string]$c["name"]
+          if ($n -eq $codigo -or $n -like "Codigo*" -or $n -like "Id*" -or $n -like "Status*" -or $n -like "sys*") { continue }
+          if (@("varchar", "nvarchar", "char", "nchar") -contains [string]$c["tipo"]) { $descripcion = $n; break }
+        }
+      }
+      if (-not $descripcion) { continue }
       $filas = Consultar $servidorBueno @"
 select top 2000 ltrim(rtrim(cast([$codigo] as nvarchar(60)))) as Codigo, max(ltrim(rtrim(cast([$descripcion] as nvarchar(200))))) as Nombre
 from [$nombreTabla]
@@ -1186,7 +1366,7 @@ group by ltrim(rtrim(cast([$codigo] as nvarchar(60))));
       foreach ($f in $filas.Rows) {
         $cod = Texto $f["Codigo"] 60
         $nom = Texto $f["Nombre"] 200
-        if ($cod -ne "" -and $nom -ne "") { $lista.Add([PSCustomObject]@{ table = $nombreTabla; code = $cod; name = $nom }) }
+        if ($cod -ne "" -and $nom -ne "") { $lista.Add([PSCustomObject]@{ table = $nombreTabla; code = $cod; name = $nom; column = $codigo }) }
       }
       $tablas++
     } catch { }
@@ -1208,6 +1388,7 @@ t.name in ('CabeceraAlbaranCliente', 'LineasAlbaranCliente', 'CabeceraOfertaClie
    or t.name like '%Actividad%' or t.name like '%Contacto%'
    or t.name in ('Proveedores', 'Empresas', 'Remesas', 'CarteraEfectos', 'Domicilios', 'Naciones')
    or t.name like '%Banco%'
+   or t.name like '%Zona%' or t.name like '%Canal%' or t.name like '%FormasPago%' or t.name like '%FormaPago%' or t.name like '%Cargo%'
 "@
   $tabla = Consultar $servidorBueno @"
 select top 14000 x.Tabla, x.Columna, x.Tipo from (
@@ -1280,6 +1461,7 @@ function Preparar-Pagos {
       Nacion       = (Elegir "Proveedores" @("Nacion", "CodigoNacion"))
       Telefono     = (Elegir "Proveedores" @("Telefono", "Telefono2"))
       Correo       = (Elegir "Proveedores" @("EMail1", "Email1", "EMail2", "E_Mail"))
+      Iban         = (Elegir "Proveedores" @("IBAN"))
     }
   } else {
     Avisar $avisosDeArranque "proveedores: no se encuentra la tabla Proveedores"
@@ -1310,6 +1492,12 @@ function Sql-NoBorrado($cfg) {
 
 # Las remesas de pagos de los últimos 180 días, con sus efectos.
 function Leer-RemesasPagos($cfg) {
+  # En Sage las remesas de cobro y las de pago comparten numeración: un efecto de
+  # pago de la remesa 12 se cruzaba también con la remesa de cobro 12. El
+  # 30/09/2026 llegaron 17 de 183 remesas de pagos con la cabecera de una de
+  # cobro ("Cobro" o "Descuento"). Las de confirming se hacen como "Talones".
+  $soloPagos = ""
+  if ($cfg.RTipo) { $soloPagos = "and isnull(r.[$($cfg.RTipo)], '') not in ('Cobro', 'Descuento')" }
   # Las remesas con algún pago se sacan de una sola pasada por la cartera.
   $remesas = Consultar $servidorBueno @"
 with pagos as (
@@ -1327,8 +1515,25 @@ select r.CodigoEmpresa, r.NumeroRemesa, cast(r.FechaRemesa as date) as FechaReme
   $(Sql-Numero "r" $cfg.RProvisional) as Provisional
 from Remesas r
 join pagos x on x.CodigoEmpresa = r.CodigoEmpresa and x.NumeroRemesa = r.NumeroRemesa
-where r.FechaRemesa >= dateadd(day, -180, getdate());
+where r.FechaRemesa >= dateadd(day, -180, getdate())
+  $soloPagos;
 "@
+  # El IBAN del efecto, y si no lo tiene, el de la ficha del proveedor. El
+  # 30/09/2026 cuatro de cada diez efectos remesados no lo traían en el efecto,
+  # y sin IBAN no se puede hacer el fichero del banco.
+  $iban = Sql-Texto "e" $cfg.Iban 40
+  $ibanFicha = ""
+  if ($cfg.Proveedores -and $cfg.Proveedores.Iban) {
+    $iban = "coalesce($iban, $(Sql-Texto "pv" "Iban" 40))"
+    $ibanFicha = @"
+outer apply (
+  select top 1 pr.[$($cfg.Proveedores.Iban)] as Iban
+  from Proveedores pr
+  where pr.CodigoEmpresa = e.CodigoEmpresa and pr.CodigoProveedor = e.CodigoClienteProveedor
+    and nullif(ltrim(rtrim(pr.[$($cfg.Proveedores.Iban)])), '') is not null
+) pv
+"@
+  }
   $efectos = Consultar $servidorBueno @"
 select e.CodigoEmpresa, e.[$($cfg.Remesa)] as Remesa, $(Sql-MovEfecto $cfg) as Mov,
   $(if ($cfg.NumeroEfecto) { "e.[$($cfg.NumeroEfecto)]" } else { "cast(null as int)" }) as NumeroEfecto,
@@ -1338,11 +1543,13 @@ select e.CodigoEmpresa, e.[$($cfg.Remesa)] as Remesa, $(Sql-MovEfecto $cfg) as M
   cast(e.FechaVencimiento as date) as Vencimiento,
   $(Sql-Numero "e" $cfg.Importe) as Importe,
   isnull(e.ImportePendiente, 0) as Pendiente,
-  $(Sql-Texto "e" $cfg.Iban 40) as Iban
+  $iban as Iban
 from CarteraEfectos e
 join Remesas r on r.CodigoEmpresa = e.CodigoEmpresa and r.NumeroRemesa = e.[$($cfg.Remesa)]
+$ibanFicha
 where e.CodigoEmpresa not in ($excluidas) and e.Prevision = 'P'
   and r.FechaRemesa >= dateadd(day, -180, getdate())
+  $soloPagos
   $(Sql-NoBorrado $cfg);
 "@
   $cabeceras = New-Object System.Collections.Generic.List[object]
@@ -1503,6 +1710,50 @@ where e.CodigoEmpresa not in ($excluidas)
   return ,$lista
 }
 
+# Cómo son las remesas en esta instalación, para ver en el Hub sin entrar en el
+# servidor cuáles son de pagos. El 30/09/2026 llegaron remesas de pagos con
+# cabecera de tipo "Cobro" o "Descuento" y muchas "Talones" sin ningún pago:
+# parece que cobros y pagos comparten numeración. Va como aviso en el envío.
+function Resumen-Remesas($cfg) {
+  $notas = New-Object System.Collections.Generic.List[string]
+  if (-not $cfg.RTipo -or -not $cfg.Remesa) { return ,$notas }
+  # SQL Server no deja sumar un exists ni una subconsulta dentro de sum(): las
+  # marcas se calculan fila a fila en una tabla derivada y se suman fuera.
+  $tabla = Consultar $servidorBueno @"
+select x.Tipo, count(*) as Remesas, sum(x.ConCobros) as ConCobros, sum(x.ConPagos) as ConPagos, sum(x.Repetido) as NumeroRepetido
+from (
+  select isnull(r.[$($cfg.RTipo)], '(sin tipo)') as Tipo,
+    case when exists (select 1 from CarteraEfectos e where e.CodigoEmpresa = r.CodigoEmpresa and e.[$($cfg.Remesa)] = r.NumeroRemesa and e.Prevision = 'C') then 1 else 0 end as ConCobros,
+    case when exists (select 1 from CarteraEfectos e where e.CodigoEmpresa = r.CodigoEmpresa and e.[$($cfg.Remesa)] = r.NumeroRemesa and e.Prevision = 'P') then 1 else 0 end as ConPagos,
+    case when (select count(*) from Remesas r2 where r2.CodigoEmpresa = r.CodigoEmpresa and r2.NumeroRemesa = r.NumeroRemesa) > 1 then 1 else 0 end as Repetido
+  from Remesas r
+  where r.CodigoEmpresa not in ($excluidas) and r.FechaRemesa >= dateadd(day, -400, getdate())
+) x
+group by x.Tipo;
+"@
+  foreach ($f in $tabla.Rows) {
+    $notas.Add("remesas tipo $([string]$f['Tipo']): $([int]$f['Remesas']) en 400 dias; $([int]$f['ConCobros']) con cobros, $([int]$f['ConPagos']) con pagos, $([int]$f['NumeroRepetido']) con numero repetido")
+  }
+  # De los efectos de pago remesados, cuántos están borrados, cuántos ya no
+  # tienen nada pendiente y cuántos apuntan a una remesa que no está.
+  $borrado = if ($cfg.Borrado) { "case when isnull(e.[$($cfg.Borrado)], 0) <> 0 then 1 else 0 end" } else { "0" }
+  $sueltos = Consultar $servidorBueno @"
+select count(*) as Efectos, isnull(sum(x.Borrado), 0) as Borrados, isnull(sum(x.Pagado), 0) as Pagados, isnull(sum(x.SinRemesa), 0) as SinRemesa
+from (
+  select $borrado as Borrado,
+    case when isnull(e.ImportePendiente, 0) = 0 then 1 else 0 end as Pagado,
+    case when not exists (select 1 from Remesas r where r.CodigoEmpresa = e.CodigoEmpresa and r.NumeroRemesa = e.[$($cfg.Remesa)]) then 1 else 0 end as SinRemesa
+  from CarteraEfectos e
+  where e.CodigoEmpresa not in ($excluidas) and e.Prevision = 'P' and isnull(e.[$($cfg.Remesa)], 0) > 0
+    and e.FechaVencimiento >= dateadd(day, -400, getdate())
+) x;
+"@
+  foreach ($f in $sueltos.Rows) {
+    $notas.Add("efectos de pago remesados (400 dias): $([int]$f['Efectos']); borrados $([int]$f['Borrados']), sin nada pendiente $([int]$f['Pagados']), con una remesa que no esta $([int]$f['SinRemesa'])")
+  }
+  return ,$notas
+}
+
 # ---------------------------------------------------------------------------
 # Qué se puede leer en esta instalación
 # ---------------------------------------------------------------------------
@@ -1581,6 +1832,7 @@ function Enviar($envio, $etiqueta) {
       if ($_.Exception.Response) { try { $codigo = [int]$_.Exception.Response.StatusCode } catch { } }
       $repetible = ($codigo -eq 0 -or $codigo -eq 429 -or $codigo -ge 500)
       if (-not $repetible -or $intento -eq $intentos) {
+        if ($codigo -eq 413) { Apuntar "ERROR: el envio de $etiqueta pesa $([Math]::Round($cuerpo.Length / 1024)) KB y el Hub admite como mucho unos 4.500 KB" }
         Apuntar "ERROR al enviar $etiqueta : $($_.Exception.Message)"
         if ($_.ErrorDetails -and $_.ErrorDetails.Message) { Apuntar "respuesta: $($_.ErrorDetails.Message)" }
         Terminar 1 "No se pudo enviar $etiqueta al Hub."
@@ -1694,6 +1946,7 @@ if (-not $SoloVentas) {
             netAmount      = (Numero $fila["Neto"])
             costAmount     = (Numero $fila["Coste"])
             netWithoutCost = (Numero $fila["NetoSinCoste"])
+            grossAmount    = (Numero-O-Nulo $fila["Bruto"])
           })
         }
         ,$lista
@@ -1715,6 +1968,7 @@ if (-not $SoloVentas) {
             netAmount      = (Numero $fila["Neto"])
             costAmount     = (Numero $fila["Coste"])
             netWithoutCost = (Numero $fila["NetoSinCoste"])
+            grossAmount    = (Numero-O-Nulo $fila["Bruto"])
           })
         }
         ,$lista
@@ -1750,8 +2004,32 @@ if (-not $SoloVentas) {
       Intentar $envio "customerList" $avisos "ficha de clientes ($etiqueta)" { Filas-ClientesLista (Consultar $servidorBueno (Sql-ClientesLista $cfgClientes $desdeSql $hastaSql)) }
     }
 
+    # Las fichas de artículos y de clientes van aparte y por trozos. En diciembre
+    # de 2024 se dieron de alta 12.050 artículos de golpe y el envío del mes pasó
+    # de los 4,5 MB que admite el Hub (413): la carga se paraba ahí. Trocearlas es
+    # seguro porque el Hub las añade o actualiza, nunca las borra. Lo demás del
+    # mes sí va junto: se reescribe entero con lo que llega.
+    $fichas = New-Object System.Collections.Generic.List[object]
+    foreach ($parte in @("articleList", "customerList")) {
+      if ($envio.Contains($parte) -and $null -ne $envio[$parte]) {
+        $fichas.Add([PSCustomObject]@{ Parte = $parte; Filas = $envio[$parte] })
+        $envio.Remove($parte)
+      }
+    }
     if ($avisos.Count -gt 0) { $envio.notes = $avisos }
     Enviar $envio $etiqueta
+    foreach ($ficha in $fichas) {
+      $parte = $ficha.Parte
+      $filas = $ficha.Filas
+      for ($inicio = 0; $inicio -lt $filas.Count; $inicio += 2000) {
+        $fin = [Math]::Min($inicio + 2000, $filas.Count)
+        $trozo = New-Object System.Collections.Generic.List[object]
+        for ($k = $inicio; $k -lt $fin; $k++) { $trozo.Add($filas[$k]) }
+        $envioFichas = Nuevo-Envio $mes $siguiente
+        $envioFichas[$parte] = $trozo
+        Enviar $envioFichas "$etiqueta, $(if ($parte -eq 'articleList') { 'fichas de articulos' } else { 'fichas de clientes' }) $fin de $($filas.Count)"
+      }
+    }
     $mes = $siguiente
   }
 }
@@ -1789,14 +2067,33 @@ if (-not $SoloVentas) {
   Intentar $envio "backlog" $avisos "cartera de pedidos" { Leer-Cartera }
   if ($null -eq $envio["backlog"]) { $envio.Remove("backlog") }
   if ($clientesListos) { Intentar $envio "dormant" $avisos "clientes dormidos" { Leer-Dormidos } }
+  # Los contactos de los clientes, de noche. Se leen aquí para que, si fallan, el
+  # aviso vaya en el anexo; se mandan aparte porque son miles.
+  $contactos = $null
   if ($lecturaLarga -or $Reconocer) {
     Intentar $envio "lookups" $avisos "tablas de codigos" { Leer-Codigos }
     Intentar $envio "schema" $avisos "estructura" { Leer-Estructura }
+    try { $contactos = Leer-ContactosClientes $avisos } catch { Avisar $avisos "contactos de clientes: $($_.Exception.Message)" }
   }
   if ($null -eq $envio["families"]) { $envio.Remove("families") }
   for ($k = $avisosEnviados; $k -lt $avisosDeArranque.Count; $k++) { if ($avisos.Count -lt 30) { $avisos.Add($avisosDeArranque[$k]) } }
   if ($avisos.Count -gt 0) { $envio.notes = $avisos }
   Enviar $envio "anexo"
+
+  # Por trozos; el primero sustituye a los contactos que había.
+  if ($null -ne $contactos) {
+    $primero = $true
+    for ($inicio = 0; $inicio -lt [Math]::Max($contactos.Count, 1); $inicio += 4000) {
+      $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+      $fin = [Math]::Min($inicio + 4000, $contactos.Count)
+      $trozoContactos = New-Object System.Collections.Generic.List[object]
+      for ($k = $inicio; $k -lt $fin; $k++) { $trozoContactos.Add($contactos[$k]) }
+      $envio.customerContacts = $trozoContactos
+      $envio.customerContactsReplace = $primero
+      $primero = $false
+      Enviar $envio "contactos de clientes ($fin de $($contactos.Count))"
+    }
+  }
 }
 
 # ----- 5. Pagos: remesas de pagos, proveedores y, de noche, la cartera pendiente -----
@@ -1812,6 +2109,16 @@ if (-not $SoloVentas -and $cfgPagos) {
   if ($cfgPagos.ConRemesas -and $cfgPagos.Remesa) {
     try { $remesasPagos = Leer-RemesasPagos $cfgPagos } catch { Avisar $avisos "remesas de pagos: $($_.Exception.Message)" }
   }
+  # La cartera pendiente, solo en las lecturas largas (la de la noche): es una
+  # foto del día y para la previsión de tesorería basta con una al día. Se lee
+  # antes de mandar las remesas para que, si falla, el aviso llegue al Hub con
+  # ellas: el 29 y el 30/09 falló y solo quedó dicho en el registro del servidor.
+  $cartera = $null
+  if ($lecturaLarga -or $Reconocer) {
+    Avisar $avisos "agente $VersionAgente"
+    try { $cartera = Leer-CarteraPendiente $cfgPagos } catch { Avisar $avisos "cartera pendiente: $($_.Exception.Message)" }
+    try { foreach ($nota in (Resumen-Remesas $cfgPagos)) { Avisar $avisos $nota } } catch { Avisar $avisos "resumen de remesas: $($_.Exception.Message)" }
+  }
   foreach ($parte in @("companyDetails", "suppliers")) { if ($null -eq $envio[$parte]) { $envio.Remove($parte) } }
   if ($avisos.Count -gt 0) { $envio.notes = $avisos }
 
@@ -1819,16 +2126,17 @@ if (-not $SoloVentas -and $cfgPagos) {
     # Por trozos de hasta 3000 efectos, sin partir ninguna remesa.
     $porRemesa = @{}
     foreach ($linea in $remesasPagos.Efectos) {
-      $clave = "$($linea.companyCode)-$($linea.remittanceNumber)"
-      if (-not $porRemesa.ContainsKey($clave)) { $porRemesa[$clave] = New-Object System.Collections.Generic.List[object] }
-      $porRemesa[$clave].Add($linea)
+      # Se llama $idRemesa y no $clave: $clave es la contraseña de Sage.
+      $idRemesa = "$($linea.companyCode)-$($linea.remittanceNumber)"
+      if (-not $porRemesa.ContainsKey($idRemesa)) { $porRemesa[$idRemesa] = New-Object System.Collections.Generic.List[object] }
+      $porRemesa[$idRemesa].Add($linea)
     }
     $cabeceras = New-Object System.Collections.Generic.List[object]
     $lineas = New-Object System.Collections.Generic.List[object]
     $trozo = 0
     foreach ($remesa in $remesasPagos.Remesas) {
-      $clave = "$($remesa.companyCode)-$($remesa.number)"
-      $suyas = if ($porRemesa.ContainsKey($clave)) { $porRemesa[$clave] } else { @() }
+      $idRemesa = "$($remesa.companyCode)-$($remesa.number)"
+      $suyas = if ($porRemesa.ContainsKey($idRemesa)) { $porRemesa[$idRemesa] } else { @() }
       if ($cabeceras.Count -gt 0 -and ($lineas.Count + $suyas.Count) -gt 3000) {
         $envio.paymentRemittances = $cabeceras
         $envio.paymentItems = $lineas
@@ -1849,24 +2157,20 @@ if (-not $SoloVentas -and $cfgPagos) {
     Enviar $envio "proveedores y sociedades"
   }
 
-  # La cartera pendiente, solo en las lecturas largas (la de la noche): es una
-  # foto del día y para la previsión de tesorería basta con una al día.
-  if ($lecturaLarga -or $Reconocer) {
-    $cartera = $null
-    try { $cartera = Leer-CarteraPendiente $cfgPagos } catch { Apuntar "  aviso: cartera pendiente: $($_.Exception.Message)" }
-    if ($cartera) {
-      $primero = $true
-      for ($inicio = 0; $inicio -lt [Math]::Max($cartera.Count, 1); $inicio += 4000) {
-        $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
-        $fin = [Math]::Min($inicio + 4000, $cartera.Count)
-        $trozoCartera = New-Object System.Collections.Generic.List[object]
-        for ($k = $inicio; $k -lt $fin; $k++) { $trozoCartera.Add($cartera[$k]) }
-        $envio.openItems = $trozoCartera
-        # El primer trozo borra la foto anterior; los demás se suman.
-        $envio.openItemsReplace = $primero
-        $primero = $false
-        Enviar $envio "cartera pendiente ($fin de $($cartera.Count))"
-      }
+  # La cartera leída arriba, por trozos. Aunque venga vacía se manda: la foto
+  # anterior se tiene que borrar igual.
+  if ($null -ne $cartera) {
+    $primero = $true
+    for ($inicio = 0; $inicio -lt [Math]::Max($cartera.Count, 1); $inicio += 4000) {
+      $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+      $fin = [Math]::Min($inicio + 4000, $cartera.Count)
+      $trozoCartera = New-Object System.Collections.Generic.List[object]
+      for ($k = $inicio; $k -lt $fin; $k++) { $trozoCartera.Add($cartera[$k]) }
+      $envio.openItems = $trozoCartera
+      # El primer trozo borra la foto anterior; los demás se suman.
+      $envio.openItemsReplace = $primero
+      $primero = $false
+      Enviar $envio "cartera pendiente ($fin de $($cartera.Count))"
     }
   }
 }
