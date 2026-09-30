@@ -137,6 +137,16 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
   /** Guarda de qué factura son los envíos, para no enseñar los de la anterior. */
   const [sendLog, setSendLog] = useState<{ id: string; sends: InvoiceSend[] } | null>(null);
 
+  /**
+   * Abre el envío de una factura con la empresa de la factura ya marcada
+   * (siempre se puede cambiar). Se marca aquí, al abrir, y no después de pintar
+   * la ventana: así se dibuja una sola vez y con el valor bueno.
+   */
+  function openSend(target: PendingSend) {
+    setSendTo(mailboxForUnit(target.unitSlug));
+    setPendingSend(target);
+  }
+
   const subscriptions = expenses.filter((expense) => expense.kind === "subscription");
   const unitName = (id: string | null) => (id ? units.find((unit) => unit.id === id)?.name ?? "—" : "General");
   const unitSlug = (id: string | null) => (id ? units.find((unit) => unit.id === id)?.slug ?? null : null);
@@ -317,7 +327,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
       await onChanged();
       onMessage(createdExpenseId ? `Factura guardada y suscripción «${payload.supplier}» creada.` : editingId ? "Factura actualizada." : "Factura guardada.");
       // Solo se pregunta al subir una nueva con PDF: al editar ya se decidió en su día.
-      if (!editingId && savedId && payload.file_path) setPendingSend({ id: savedId, supplier: payload.supplier, unitSlug: unitSlug(payload.business_unit_id) });
+      if (!editingId && savedId && payload.file_path) openSend({ id: savedId, supplier: payload.supplier, unitSlug: unitSlug(payload.business_unit_id) });
     } catch (cause) {
       onMessage(reportSafeError(cause, "No se pudo guardar la factura."));
     } finally {
@@ -344,10 +354,10 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
     }
   }
 
+  // El historial de envíos de la factura que se va a mandar (la empresa ya la ha
+  // marcado openSend al abrir).
   useEffect(() => {
     if (!pendingSend) return;
-    // La empresa de la factura viene ya marcada; siempre se puede cambiar.
-    setSendTo(mailboxForUnit(pendingSend.unitSlug));
     let active = true;
     void (async () => {
       try {
@@ -561,7 +571,7 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
                   <td>
                     <div className="table-actions">
                       {invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => void viewPdf(invoice.filePath as string)}>PDF</button> : null}
-                      {canEdit && invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingSend({ id: invoice.id, supplier: invoice.supplier, unitSlug: unitSlug(invoice.businessUnitId) })} title="Enviar esta factura por correo a la administración de la empresa">Enviar</button> : null}
+                      {canEdit && invoice.filePath ? <button type="button" className="button button-compact button-secondary" onClick={() => openSend({ id: invoice.id, supplier: invoice.supplier, unitSlug: unitSlug(invoice.businessUnitId) })} title="Enviar esta factura por correo a la administración de la empresa">Enviar</button> : null}
                       <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(invoice)}>{canEdit ? "Editar" : "Ver"}</button>
                     </div>
                   </td>
