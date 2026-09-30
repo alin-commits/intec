@@ -30,6 +30,13 @@ export type CustomerRow = {
   net_amount: number;
   documents: number;
   days_since_last: number | null;
+  /** La persona a la que llamar: el contacto comercial del cliente en Sage, o el primero con teléfono. */
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  /** El bruto y el neto de lo que lo trae, para el descuento de cada cliente. */
+  gross_amount?: number;
+  gross_net?: number;
 };
 type OfferRow = {
   company_code: number; year: number; series: string; number: number; offer_date: string; valid_until: string | null;
@@ -72,7 +79,8 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
   const text = (row: AnyRow) => {
     if (request.type === "clientes") {
       const customer = row as CustomerRow;
-      return [customer.name, customer.trade_name, customer.customer_code, customer.municipality, customer.province, customer.phone, customer.email, rep(customer.company_code, customer.rep_code)].join(" ");
+      return [customer.name, customer.trade_name, customer.customer_code, customer.municipality, customer.province, customer.phone, customer.email,
+        customer.contact_name, customer.contact_phone, customer.contact_email, rep(customer.company_code, customer.rep_code)].join(" ");
     }
     const doc = row as OfferRow | OrderRow;
     return [doc.customer_name, doc.customer_code, `${doc.series}${doc.number}`, "reason" in doc ? doc.reason : "", rep(doc.company_code, doc.rep_code)].join(" ");
@@ -98,13 +106,20 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
           <small>{[row.trade_name ? row.name : null, row.customer_code, multiCompany ? company(row.company_code) : null].filter(Boolean).join(" · ")}</small>
         </span>
       ), sort: (row) => row.trade_name || row.name },
-      { key: "contacto", header: "Contacto", text: true, render: (row) => (
-        <span className="sales-contact">
-          {row.phone ? <a href={`tel:${row.phone.replace(/\s+/g, "")}`}>{row.phone}</a> : null}
-          {row.email ? <a href={`mailto:${row.email}`}>{row.email}</a> : null}
-          {!row.phone && !row.email ? <span className="muted">Sin datos</span> : null}
-        </span>
-      ) },
+      { key: "contacto", header: "Contacto", text: true, render: (row) => {
+        // Primero la persona (con su teléfono directo) y luego los datos generales del
+        // cliente, sin repetir el mismo número dos veces.
+        const phones = [row.contact_phone, row.phone].filter((value, index, list): value is string => Boolean(value) && list.indexOf(value) === index);
+        const email = row.contact_email || row.email;
+        return (
+          <span className="sales-contact">
+            {row.contact_name ? <strong>{row.contact_name}</strong> : null}
+            {phones.map((value) => <a key={value} href={`tel:${value.replace(/\s+/g, "")}`}>{value}</a>)}
+            {email ? <a href={`mailto:${email}`}>{email}</a> : null}
+            {!row.contact_name && phones.length === 0 && !email ? <span className="muted">Sin datos</span> : null}
+          </span>
+        );
+      } },
       { key: "zona", header: "Zona", text: true, optional: true, render: (row) => [row.municipality, row.province].filter(Boolean).join(", ") || "—", sort: (row) => row.province ?? "" },
       { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => rep(row.company_code, row.rep_code), sort: (row) => rep(row.company_code, row.rep_code) },
       { key: "compra", header: request.kind === "perdidos" ? "Compraba" : request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
@@ -123,6 +138,9 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
       { header: "Nombre comercial", value: (row) => row.trade_name },
       { header: "Teléfono", value: (row) => row.phone },
       { header: "Correo", value: (row) => row.email },
+      { header: "Persona de contacto", value: (row) => row.contact_name ?? null },
+      { header: "Teléfono de contacto", value: (row) => row.contact_phone ?? null },
+      { header: "Correo de contacto", value: (row) => row.contact_email ?? null },
       { header: "Municipio", value: (row) => row.municipality },
       { header: "Provincia", value: (row) => row.province },
       { header: "Comercial", value: (row) => rep(row.company_code, row.rep_code) },

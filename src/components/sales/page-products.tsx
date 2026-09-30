@@ -5,7 +5,7 @@ import { DonutChart } from "@/components/charts/donut-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin } from "@/lib/sage-panel";
-import { channelColors, euros, monthName, monthNames, variation } from "@/lib/sales-model";
+import { channelColors, discountPercent, euros, monthName, monthNames, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
@@ -26,17 +26,30 @@ type FamilyRow = {
   trusted_net: number;
   trusted_cost: number;
   trusted_without_cost: number;
+  /** El bruto antes de descuentos y el neto de lo que lo trae. */
+  gross_amount: number;
+  gross_net: number;
 };
-type GroupRow = { code: string; family_code: string; name: string | null; articles: number; net_amount: number; trusted_net: number; trusted_cost: number; trusted_without_cost: number };
+type GroupRow = {
+  code: string; family_code: string; name: string | null; articles: number; net_amount: number; trusted_net: number; trusted_cost: number;
+  trusted_without_cost: number; gross_amount: number; gross_net: number;
+};
 type ArticleRow = {
   article_code: string; name: string | null; brand: string | null; family_code: string; subfamily_code: string;
   units: number; documents: number; net_amount: number; trusted_net: number; trusted_cost: number; trusted_without_cost: number;
+  gross_amount: number; gross_net: number;
 };
 
 const margin = (row: { trusted_net: number; trusted_cost: number; trusted_without_cost: number }) => {
   const value = familyMargin(row);
   return value === null ? <span className="muted">—</span> : formatPercent(value);
 };
+/** Lo rebajado sobre tarifa en esas líneas (el de línea y el del cliente, que Sage reparte en ellas). */
+const discount = (row: { gross_amount: number; gross_net: number }) => {
+  const value = discountPercent(row.gross_amount, row.gross_net);
+  return value === null ? <span className="muted">—</span> : formatPercent(value);
+};
+const discountSort = (row: { gross_amount: number; gross_net: number }) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity;
 const change = (now: number, before: number) => {
   const value = variation(now, before);
   if (value === null) return <span className="muted">—</span>;
@@ -86,14 +99,16 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   // ---- Familias, juntando las que se llaman igual en cada sociedad ----
   const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
   const groupFamilies = (list: FamilyRow[]) => {
-    const map = new Map<string, { code: string; net: number; units: number; trusted_net: number; trusted_cost: number; trusted_without_cost: number }>();
+    const map = new Map<string, { code: string; net: number; units: number; trusted_net: number; trusted_cost: number; trusted_without_cost: number; gross_amount: number; gross_net: number }>();
     for (const row of list.filter(inCompany)) {
-      const entry = map.get(row.family_code) ?? { code: row.family_code, net: 0, units: 0, trusted_net: 0, trusted_cost: 0, trusted_without_cost: 0 };
+      const entry = map.get(row.family_code) ?? { code: row.family_code, net: 0, units: 0, trusted_net: 0, trusted_cost: 0, trusted_without_cost: 0, gross_amount: 0, gross_net: 0 };
       entry.net += Number(row.net_amount);
       entry.units += Number(row.units);
       entry.trusted_net += Number(row.trusted_net);
       entry.trusted_cost += Number(row.trusted_cost);
       entry.trusted_without_cost += Number(row.trusted_without_cost);
+      entry.gross_amount += Number(row.gross_amount ?? 0);
+      entry.gross_net += Number(row.gross_net ?? 0);
       map.set(row.family_code, entry);
     }
     return map;
@@ -116,6 +131,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     { key: "var", header: `vs ${shownYear - 1}`, render: (row) => change(row.net, row.before), sort: (row) => variation(row.net, row.before) ?? -Infinity },
     { key: "peso", header: "Peso", optional: true, render: (row) => share(Math.max(row.net, 0), familyTotal), sort: (row) => row.net },
     { key: "margen", header: "Margen %", render: (row) => margin(row), sort: (row) => familyMargin(row) ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => discount(row), sort: discountSort },
     { key: "unidades", header: "Unidades", optional: true, render: (row) => numberFormatter.format(Math.round(row.units)), sort: (row) => row.units },
   ];
 
@@ -139,6 +155,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     { key: "nombre", header: label, text: true, render: (row) => row.name || (row.code ? `Código ${row.code}` : "Sin asignar"), sort: (row) => row.name ?? row.code },
     { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
     { key: "margen", header: "Margen %", render: (row) => margin(row), sort: (row) => familyMargin(row) ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => discount(row), sort: discountSort },
     { key: "articulos", header: "Artículos", optional: true, render: (row) => numberFormatter.format(Number(row.articles)), sort: (row) => Number(row.articles) },
   ];
   const articleColumns: Column<ArticleRow>[] = [
@@ -151,6 +168,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
     { key: "unidades", header: "Unidades", render: (row) => numberFormatter.format(Math.round(Number(row.units))), sort: (row) => Number(row.units) },
     { key: "margen", header: "Margen %", render: (row) => margin(row), sort: (row) => familyMargin(row) ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => discount(row), sort: discountSort },
     { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents) },
   ];
   const periodName = filters.month ? monthName(filters.month) : String(shownYear);
@@ -163,7 +181,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
       <section className="sales-board">
         <Panel
           title={`Familias en ${periodName}`}
-          subtitle="Suma de las líneas de albarán (puede no cuadrar al euro con el total por los descuentos de cabecera). Pulsa una para filtrar todo el panel"
+          subtitle="Suma de las líneas de albarán (puede no cuadrar al euro con el total por los descuentos de cabecera). Dto.: rebaja sobre tarifa. Pulsa una para filtrar todo el panel"
           className="panel table-panel sales-board-wide"
         >
           <DataTable

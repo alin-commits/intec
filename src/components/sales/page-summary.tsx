@@ -4,7 +4,7 @@ import { useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
-import { CalendarIcon, ConsultasIcon, ConversionIcon, EuroIcon, TrophyIcon, UsuariosIcon, WalletIcon, XCircleIcon } from "@/components/icons";
+import { CalendarIcon, ConsultasIcon, ConversionIcon, EuroIcon, TarjetasIcon, TrophyIcon, UsuariosIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { lastCompleteMonth, trustedNewCustomersFrom } from "@/lib/sage-panel";
 import {
   bucketMargin,
@@ -37,8 +37,10 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const counts = useCustomerCounts(ctx);
   const totals = useCustomerTotals(ctx);
 
-  const { current, previous, currentMargin, previousMargin, marginSpansMatch, monthly } = model;
+  const { current, previous, currentMargin, previousMargin, marginSpansMatch, monthly, currentDiscount, previousDiscount } = model;
   const marginDelta = currentMargin && previousMargin && marginSpansMatch;
+  // Un descuento que sube es malo: la flecha va en verde cuando baja.
+  const discountChange = currentDiscount && previousDiscount ? currentDiscount.percent - previousDiscount.percent : null;
   const selectedMonthIndex = filters.month ? monthly.months.findIndex((month) => month.key === filters.month) : -1;
 
   // El objetivo se compara con la venta de su ámbito (sociedad y comercial), sin
@@ -104,6 +106,19 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             ? `${currentMargin.percent - previousMargin.percent >= 0 ? "+" : ""}${(currentMargin.percent - previousMargin.percent).toFixed(1).replace(".", ",")} pts`
             : "Sin comparación"}
           positive={marginDelta ? currentMargin.percent >= previousMargin.percent : true}
+        />
+        <KpiCard
+          label="Descuento medio"
+          value={currentDiscount ? formatPercent(currentDiscount.percent) : "—"}
+          helper={currentDiscount
+            ? `sobre tarifa; ${formatPercent(currentDiscount.linePercent)} lo ponen los comerciales en la línea`
+            : "llega con la próxima lectura de Sage"}
+          icon={<TarjetasIcon />}
+          tone={discountChange !== null && discountChange >= 1 ? "rose" : "sky"}
+          onClick={() => ctx.goTo("ventas")}
+          actionLabel="Ver por comercial"
+          delta={discountChange === null ? "Sin comparación" : `${discountChange >= 0 ? "+" : ""}${discountChange.toFixed(1).replace(".", ",")} pts`}
+          positive={discountChange === null || discountChange <= 0}
         />
         <KpiCard
           label="Albaranes"

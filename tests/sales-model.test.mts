@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  bucketDiscount,
   buildRepIdentities,
   computeSalesModel,
+  discountPercent,
+  emptyBucket,
   filterRows,
+  mergeBucket,
+  sumRows,
   makeRepOf,
   noFilters,
   periodOf,
@@ -91,6 +96,47 @@ test("computeSalesModel: el mes filtra los totales pero no el gráfico ni se fil
   assert.equal(model.byChannel.buckets.get("Crédito")?.net, 700);
   // El margen, con el coste al 70 %.
   assert.equal(Math.round(model.currentMargin?.percent ?? 0), 30);
+});
+
+/** Una fila con bruto: `discount` es lo rebajado sobre tarifa, y la mitad de eso va en las líneas. */
+const discounted = (month: string, rep: number | null, net: number, discount: number): SummaryRow => {
+  const gross = net / (1 - discount);
+  return { ...row(month, 1, "CRE", rep, net), gross_amount: gross, gross_net: net, line_discount_amount: (gross - net) / 2, commission_amount: 0 };
+};
+
+test("el descuento se mide solo con las filas que traen bruto", () => {
+  // 800 € con bruto (1.000 € de tarifa, un 20 % de rebaja) y 500 € cargados antes de leer el bruto.
+  const bucket = sumRows([discounted("2026-08", 5, 800, 0.2), row("2026-08", 1, "CRE", 5, 500)]);
+  assert.equal(bucket.net, 1300);
+  const discount = bucketDiscount(bucket);
+  assert.equal(Math.round(discount?.percent ?? 0), 20, "no un 35 %, que saldría restando los 1.300 € al bruto");
+  assert.equal(Math.round(discount?.linePercent ?? 0), 10);
+  assert.equal(bucketDiscount(sumRows([row("2026-08", 1, "CRE", 5, 500)])), null, "sin bruto no hay descuento, no un 0 %");
+  assert.equal(discountPercent(0, 0), null);
+  assert.equal(Math.round(discountPercent(1250, 1000) ?? 0), 20);
+  // Solo abonos: el bruto es negativo y no se puede hablar de descuento.
+  assert.equal(bucketDiscount(sumRows([discounted("2026-08", 5, -100, 0.2)])), null);
+  const total = mergeBucket(emptyBucket(), bucket);
+  assert.deepEqual(total, bucket, "sumar un grupo a uno vacío lo deja igual, con el bruto incluido");
+});
+
+test("el panel señala al comercial que más rebaja y la subida del descuento", () => {
+  const rows = [
+    discounted("2026-08", 5, 10000, 0.3),
+    discounted("2026-08", 7, 30000, 0.15),
+  ];
+  const previousRows = [discounted("2025-08", 5, 10000, 0.15), discounted("2025-08", 7, 30000, 0.15)];
+  const model = computeSalesModel({
+    rows, previousRows, filters: noFilters, shownYear: 2026, companies: [{ code: 1, name: "Intec", is_active: true }],
+    repOf, comparisonIsPartial: true, today: new Date(2026, 8, 29),
+  });
+  assert.equal(Math.round(model.previousDiscount?.percent ?? 0), 15);
+  assert.ok((model.currentDiscount?.percent ?? 0) > 17);
+  assert.equal(model.hasCommissions, false, "sin comisiones en Sage no se enseña la columna");
+  const texts = model.findings.map((finding) => finding.text);
+  assert.ok(texts.some((text) => text.startsWith("Sergio Almodóvar Alcaraz rebaja un 30,0 %")), texts.join(" | "));
+  assert.ok(texts.some((text) => text.startsWith("El descuento medio sube")), texts.join(" | "));
+  assert.equal(texts.some((text) => text.startsWith("Ana Ruiz rebaja")), false, "Ana está en la media");
 });
 
 test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los días", () => {

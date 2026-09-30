@@ -16,6 +16,18 @@ export type SummaryRow = {
   net_amount: number;
   cost_amount: number;
   net_without_cost: number;
+  /**
+   * El bruto antes de descuentos y la venta neta de las filas que lo traen: lo
+   * cargado antes de que el agente leyera el bruto no lo tiene, y el descuento se
+   * mide con los dos sobre las mismas filas. Opcionales porque la venta día a día
+   * no los pide.
+   */
+  gross_amount?: number;
+  gross_net?: number;
+  /** El descuento de línea: el que pone el comercial en el albarán. */
+  line_discount_amount?: number;
+  /** La comisión que calcula Sage (cero si allí no se usan comisiones). */
+  commission_amount?: number;
 };
 export type Company = { code: number; name: string; is_active: boolean };
 export type Rep = { company_code: number; code: number; name: string; is_person: boolean };
@@ -73,23 +85,68 @@ export const monthName = (month: string) => monthLongNames[Number(month.slice(5,
  */
 export const COST_TRUSTED_FROM_MONTH = "2025-11";
 
-/** Lo que se suma de un grupo de filas: la venta siempre, el coste solo si vale. */
-export type Bucket = { net: number; documents: number; costNet: number; cost: number; withoutCost: number };
-export const emptyBucket = (): Bucket => ({ net: 0, documents: 0, costNet: 0, cost: 0, withoutCost: 0 });
+/**
+ * Lo que se suma de un grupo de filas: la venta siempre, el coste solo si vale.
+ * El bruto y los descuentos sí valen de todos los años: el cambio de series de
+ * 2025 estropeó el coste, no los precios (el descuento sale entre el 18 y el
+ * 22 % todos los meses, antes y después).
+ */
+export type Bucket = {
+  net: number;
+  documents: number;
+  costNet: number;
+  cost: number;
+  withoutCost: number;
+  gross: number;
+  grossNet: number;
+  lineDiscount: number;
+  commission: number;
+};
+export const emptyBucket = (): Bucket => ({
+  net: 0, documents: 0, costNet: 0, cost: 0, withoutCost: 0, gross: 0, grossNet: 0, lineDiscount: 0, commission: 0,
+});
 
 export function addRow(bucket: Bucket, row: SummaryRow): void {
   bucket.net += Number(row.net_amount);
   bucket.documents += Number(row.documents);
+  bucket.gross += Number(row.gross_amount ?? 0);
+  bucket.grossNet += Number(row.gross_net ?? 0);
+  bucket.lineDiscount += Number(row.line_discount_amount ?? 0);
+  bucket.commission += Number(row.commission_amount ?? 0);
   if (row.month < COST_TRUSTED_FROM_MONTH) return;
   bucket.costNet += Number(row.net_amount);
   bucket.cost += Number(row.cost_amount);
   bucket.withoutCost += Number(row.net_without_cost);
 }
 
+/** Suma un grupo ya sumado a otro (los totales de las tablas). */
+export function mergeBucket(target: Bucket, source: Bucket): Bucket {
+  for (const key of Object.keys(target) as (keyof Bucket)[]) target[key] += source[key];
+  return target;
+}
+
 export function sumRows(list: SummaryRow[]): Bucket {
   const bucket = emptyBucket();
   for (const row of list) addRow(bucket, row);
   return bucket;
+}
+
+/**
+ * Lo rebajado sobre el precio de tarifa (el bruto), o null si no hay con qué
+ * medirlo. `linePercent` es la parte que pone el comercial en la línea; el
+ * resto hasta el total son el descuento de la ficha del cliente y el pronto
+ * pago. Solo cuenta lo que trae bruto: lo cargado antes de leerlo no está ni en
+ * el bruto ni en el neto de la cuenta.
+ */
+export function bucketDiscount(bucket: Pick<Bucket, "gross" | "grossNet" | "lineDiscount">): { amount: number; percent: number; linePercent: number } | null {
+  if (bucket.gross <= 0 || bucket.grossNet <= 0) return null;
+  const amount = bucket.gross - bucket.grossNet;
+  return { amount, percent: (amount / bucket.gross) * 100, linePercent: (bucket.lineDiscount / bucket.gross) * 100 };
+}
+
+/** El descuento de una fila de familia, artículo o grupo de clientes (bruto y neto con bruto). */
+export function discountPercent(gross: number | null | undefined, grossNet: number | null | undefined): number | null {
+  return bucketDiscount({ gross: Number(gross ?? 0), grossNet: Number(grossNet ?? 0), lineDiscount: 0 })?.percent ?? null;
 }
 
 /**
@@ -438,13 +495,7 @@ export function computeSalesModel(input: {
     margin: bucketMargin(bucket),
   })).sort((a, b) => b.bucket.net - a.bucket.net);
   const companiesTotal = emptyBucket();
-  for (const company of byCompany) {
-    companiesTotal.net += company.bucket.net;
-    companiesTotal.documents += company.bucket.documents;
-    companiesTotal.costNet += company.bucket.costNet;
-    companiesTotal.cost += company.bucket.cost;
-    companiesTotal.withoutCost += company.bucket.withoutCost;
-  }
+  for (const company of byCompany) mergeBucket(companiesTotal, company.bucket);
 
   // ---- Por comercial: sin el filtro de comercial ----
   const forReps = filterRows(rows, filters, repOf, ["rep"]);
@@ -551,6 +602,33 @@ export function computeSalesModel(input: {
     if (unassigned && unassigned.bucket.net > repsTotal.net * 0.08) {
       findings.push({ tone: "warn", filter: { repKey: UNASSIGNED_KEY }, text: `${euros(unassigned.bucket.net)} de venta no tienen comercial asignado en Sage, el ${formatPercent((unassigned.bucket.net / repsTotal.net) * 100)} del total.` });
     }
+    // El descuento es lo que el director comercial controla: quién rebaja más que
+    // el resto y si la rebaja media sube respecto al año pasado.
+    const repsDiscount = bucketDiscount(repsTotal);
+    if (repsDiscount) {
+      byRep
+        .flatMap((rep) => {
+          const discount = bucketDiscount(rep.bucket);
+          return rep.isPerson && discount && rep.bucket.net > repsTotal.net * 0.03 ? [{ rep, discount }] : [];
+        })
+        .filter((item) => item.discount.percent >= repsDiscount.percent + 5)
+        .sort((a, b) => b.discount.percent - a.discount.percent)
+        .slice(0, 2)
+        .forEach(({ rep, discount }) => findings.push({
+          tone: "warn",
+          filter: { repKey: rep.key },
+          text: `${rep.name} rebaja un ${formatPercent(discount.percent)} sobre tarifa, ${(discount.percent - repsDiscount.percent).toFixed(1).replace(".", ",")} puntos más que la media, en ${euros(rep.bucket.net)} de venta.`,
+        }));
+    }
+    const nowDiscount = bucketDiscount(current);
+    const beforeDiscount = bucketDiscount(previous);
+    if (nowDiscount && beforeDiscount && nowDiscount.percent - beforeDiscount.percent >= 2) {
+      const desde = filters.month ? `${monthName(filters.month)} de ${shownYear - 1}` : String(shownYear - 1);
+      findings.push({
+        tone: "warn",
+        text: `El descuento medio sube al ${formatPercent(nowDiscount.percent)}, frente al ${formatPercent(beforeDiscount.percent)} de ${desde}: cada punto de descuento cuesta unos ${euros(current.gross / 100)}.`,
+      });
+    }
     // Decir que agosto es el mes más flojo no es un hallazgo, lo es todos los
     // años. Lo que importa es el mes que vende menos que ese mismo mes del año
     // pasado. El mes en curso se deja fuera porque va por la mitad.
@@ -576,6 +654,10 @@ export function computeSalesModel(input: {
     previous,
     currentMargin,
     previousMargin,
+    currentDiscount: bucketDiscount(current),
+    previousDiscount: bucketDiscount(previous),
+    /** Si Sage calcula comisiones: allí pueden no usarse, y entonces no se enseñan ceros. */
+    hasCommissions: rows.some((row) => Number(row.commission_amount ?? 0) !== 0),
     marginSpansMatch,
     withoutCostShare,
     netBeforeSeriesChange,

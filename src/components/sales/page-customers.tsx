@@ -1,11 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, RefreshIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
-import { numberFormatter } from "@/lib/format";
-import { addMonths, trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { euros, monthName, monthNames, ticketFormatter, variation, delta } from "@/lib/sales-model";
+import { formatPercent, numberFormatter } from "@/lib/format";
+import { addMonths, familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
+import { discountPercent, euros, monthName, monthNames, ticketFormatter, variation, delta } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import type { CustomerKind, SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
@@ -20,6 +21,83 @@ import type { CustomerRow } from "./sales-list-modal";
 */
 
 type MonthlyRow = { month: string; activos: number; nuevos: number; neto: number };
+
+/** Los tipos de cliente de la ficha de Sage por los que se puede partir la venta. */
+const segmentDimensions = [
+  { key: "zona", label: "Zona" },
+  { key: "sector", label: "Sector" },
+  { key: "canal", label: "Canal" },
+  { key: "forma_pago", label: "Forma de pago" },
+  { key: "provincia", label: "Provincia" },
+] as const;
+type SegmentDimension = (typeof segmentDimensions)[number]["key"];
+type SegmentRow = {
+  code: string; name: string | null; customers: number; net_amount: number; gross_amount: number; gross_net: number;
+  trusted_net: number; trusted_cost: number; trusted_without_cost: number;
+};
+
+/**
+ * La venta partida por cómo es el cliente según su ficha de Sage: zona, sector,
+ * canal, forma de pago o provincia. Respeta los filtros del panel; con una
+ * familia elegida salen los clientes que la compraron, con todo lo que compraron.
+ */
+function SegmentsPanel({ ctx, periodName }: { ctx: SalesContext; periodName: string }) {
+  const [dimension, setDimension] = useState<SegmentDimension>("zona");
+  const args = { p_dim: dimension, p_from: ctx.period.from, p_to: ctx.period.to, ...ctx.rpc };
+  const segments = useSageQuery<SegmentRow[]>(JSON.stringify(["segmentos", args, ctx.reloadKey]), async () =>
+    await createClient().rpc("sage_customer_segments", args));
+  const rows = segments.data ?? [];
+  const total = rows.reduce((sum, row) => sum + Math.max(Number(row.net_amount), 0), 0);
+  const label = segmentDimensions.find((item) => item.key === dimension)?.label ?? "";
+  // Si en Sage no se rellena ese campo, todo cae en "Sin asignar": se dice, en vez
+  // de pintar una tabla de una sola fila al 100 %.
+  const unfilled = rows.length > 0 && rows.every((row) => row.code === "");
+
+  const columns: Column<SegmentRow>[] = [
+    // Sin nombre en las tablas de códigos, un código numérico se dice como tal; uno
+    // de texto ya se entiende solo (las formas de pago son "Giro a 60 días"...).
+    { key: "nombre", header: label, text: true, render: (row) => (row.code === "" ? <span className="muted">Sin asignar en Sage</span> : row.name || (/^\d+$/.test(row.code) ? `Código ${row.code}` : row.code)), sort: (row) => row.name ?? row.code },
+    { key: "clientes", header: "Clientes", render: (row) => numberFormatter.format(Number(row.customers)), sort: (row) => Number(row.customers) },
+    { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+    { key: "peso", header: "Peso", optional: true, render: (row) => share(Math.max(Number(row.net_amount), 0), total), sort: (row) => Number(row.net_amount) },
+    { key: "porcliente", header: "Por cliente", optional: true, render: (row) => (Number(row.customers) ? euros(Number(row.net_amount) / Number(row.customers)) : "—"), sort: (row) => (Number(row.customers) ? Number(row.net_amount) / Number(row.customers) : 0) },
+    { key: "margen", header: "Margen %", render: (row) => { const value = familyMargin(row); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => familyMargin(row) ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity },
+  ];
+
+  return (
+    <Panel
+      title={`Clientes por ${label.toLowerCase()} en ${periodName}`}
+      subtitle={`Según la ficha del cliente en Sage, con los filtros puestos${ctx.filters.family ? ` (los que compran ${ctx.familyName(ctx.filters.family)}, con todo lo que compran)` : ""}. Dto.: rebaja sobre tarifa`}
+      trailing={(
+        <div className="sales-switch is-wrap" role="group" aria-label="Partir la venta por">
+          {segmentDimensions.map((item) => (
+            <button key={item.key} type="button" className={dimension === item.key ? "is-active" : undefined} onClick={() => setDimension(item.key)} aria-pressed={dimension === item.key}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+      className="panel table-panel sales-board-full"
+    >
+      {segments.failed ? <LoadFailed what={`la venta por ${label.toLowerCase()}`} /> : unfilled ? (
+        <p className="muted">
+          En Sage no está rellenado {dimension === "forma_pago" ? "la forma de pago" : `el campo ${label.toLowerCase()}`} de estos clientes, o todavía no
+          ha llegado con la lectura de Sage. Prueba con otro.
+        </p>
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          rowKey={(row) => row.code || "sin"}
+          initialSort={{ key: "ventas", desc: true }}
+          limit={12}
+          empty={segments.loading ? "Cargando…" : "Sin ventas con estos filtros."}
+        />
+      )}
+    </Panel>
+  );
+}
 
 export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   const { filters, shownYear, period } = ctx;
@@ -96,8 +174,19 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
       </span>
     ), sort: (row) => row.trade_name || row.name },
     { key: "compra", header: "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+    { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity },
     { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents) },
     { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => (row.rep_code === null ? <span className="muted">—</span> : ctx.repOf(row.company_code, row.rep_code).label), sort: (row) => (row.rep_code === null ? "" : ctx.repOf(row.company_code, row.rep_code).label) },
+    { key: "contacto", header: "Contacto", text: true, optional: true, render: (row) => {
+      const phone = row.contact_phone || row.phone;
+      if (!row.contact_name && !phone) return <span className="muted">—</span>;
+      return (
+        <span className="sales-contact">
+          {row.contact_name ? <strong>{row.contact_name}</strong> : null}
+          {phone ? <a href={`tel:${phone.replace(/\s+/g, "")}`} onClick={(event) => event.stopPropagation()}>{phone}</a> : null}
+        </span>
+      );
+    } },
     { key: "ultima", header: "Última compra", render: (row) => shortDate(row.last_purchase), sort: (row) => row.last_purchase ?? "" },
   ];
 
@@ -208,7 +297,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         {ctx.detail.customers ? (
           <Panel
             title={`Mejores clientes de ${periodName}`}
-            subtitle="Por venta en el periodo, con los filtros puestos"
+            subtitle="Por venta en el periodo, con los filtros puestos. Dto.: rebaja sobre tarifa"
             trailing={<button type="button" className="sales-chip sales-chip-pick" onClick={() => open("activos", `Clientes con compra en ${periodName}`, "Todos los que han comprado en el periodo, de más a menos venta.")}>Ver todos con teléfono</button>}
             className="panel table-panel sales-board-full"
           >
@@ -224,6 +313,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
             )}
           </Panel>
         ) : null}
+        {ctx.detail.customers ? <SegmentsPanel ctx={ctx} periodName={periodName} /> : null}
       </section>
 
       {ctx.detail.customers && counts.data ? (

@@ -1372,6 +1372,8 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sales-switch { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--surface-muted); border: 1px solid var(--border); }
 .sales-switch button { border: 0; background: transparent; border-radius: 999px; padding: 6px 13px; font-size: 12.5px; font-weight: 700; color: var(--muted); cursor: pointer; min-height: 32px; }
 .sales-switch button.is-active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(15,23,42,.12); }
+/* Con más opciones de las que caben en una línea del móvil, pasan a la siguiente. */
+.sales-switch.is-wrap { flex-wrap: wrap; border-radius: 16px; max-width: 100%; }
 
 /* Canales con su margen: filtra y además dice cuál de ellos deja dinero. */
 .sales-channel-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 1px; }

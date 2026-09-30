@@ -3,12 +3,14 @@
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import {
+  bucketDiscount,
   bucketMargin,
   channelLabel,
   emptyBucket,
   euros,
   filterRows,
   groupRows,
+  mergeBucket,
   monthName,
   previousYearMonth,
   ticketFormatter,
@@ -39,6 +41,14 @@ const marginCell = (bucket: Bucket, kind: "amount" | "percent") => {
   return kind === "amount" ? euros(margin.amount) : formatPercent(margin.percent);
 };
 const ticket = (bucket: Bucket) => (bucket.documents ? ticketFormatter.format(bucket.net / bucket.documents) : "—");
+/** Lo rebajado sobre tarifa; al pasar el ratón, cuánto de eso es descuento de línea (el del comercial). */
+const discountCell = (bucket: Bucket) => {
+  const discount = bucketDiscount(bucket);
+  if (!discount) return <span className="muted">—</span>;
+  return <span title={`${formatPercent(discount.linePercent)} en las líneas; el resto, descuento del cliente y pronto pago`}>{formatPercent(discount.percent)}</span>;
+};
+const discountSort = (bucket: Bucket) => bucketDiscount(bucket)?.percent ?? -Infinity;
+const commissionCell = (bucket: Bucket) => (bucket.commission ? euros(bucket.commission) : <span className="muted">—</span>);
 
 export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const { model, filters, shownYear } = ctx;
@@ -59,6 +69,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     { key: "var", header: "Variación", render: (row) => change(row.bucket.net, row.beforeNet), sort: (row) => variation(row.bucket.net, row.beforeNet) ?? -Infinity },
     { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
     { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
     { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0) },
   ];
@@ -70,6 +81,11 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     { key: "var", header: `vs ${shownYear - 1}`, render: (row) => change(row.bucket.net, row.beforeNet), sort: (row) => variation(row.bucket.net, row.beforeNet) ?? -Infinity },
     { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
+    // En Sage pueden no usarse comisiones: entonces la columna no sale, en vez de una fila de ceros.
+    ...(model.hasCommissions
+      ? [{ key: "comision", header: "Comisión", optional: true, render: (row: RepRow) => commissionCell(row.bucket), sort: (row: RepRow) => row.bucket.commission }]
+      : []),
     { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
     { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0) },
   ];
@@ -80,18 +96,12 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
     { key: "var", header: `vs ${shownYear - 1}`, render: (row) => change(row.bucket.net, row.before), sort: (row) => variation(row.bucket.net, row.before) ?? -Infinity },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => bucketMargin(row.bucket)?.percent ?? -Infinity },
+    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
     { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
     { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0) },
   ];
 
-  const monthTotal = model.monthly.months.reduce((total, month) => {
-    total.net += month.bucket.net;
-    total.documents += month.bucket.documents;
-    total.costNet += month.bucket.costNet;
-    total.cost += month.bucket.cost;
-    total.withoutCost += month.bucket.withoutCost;
-    return total;
-  }, emptyBucket());
+  const monthTotal = model.monthly.months.reduce((total, month) => mergeBucket(total, month.bucket), emptyBucket());
   const monthBefore = model.monthly.months.reduce((sum, month) => sum + month.beforeNet, 0);
 
   return (
@@ -120,6 +130,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
                 <td>{change(monthTotal.net, monthBefore)}</td>
                 <td className="is-optional">{marginCell(monthTotal, "amount")}</td>
                 <td>{marginCell(monthTotal, "percent")}</td>
+                <td>{discountCell(monthTotal)}</td>
                 <td className="is-optional">{numberFormatter.format(monthTotal.documents)}</td>
                 <td className="is-optional">{ticket(monthTotal)}</td>
               </tr>
@@ -129,7 +140,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
         <Panel
           title="Comerciales"
-          subtitle={`Venta, margen y ticket de cada uno${filters.month ? ` en ${monthName(filters.month)}` : ""}. Pulsa uno para filtrar`}
+          subtitle={`Venta, margen, descuento (Dto., rebaja sobre tarifa) y ticket de cada uno${filters.month ? ` en ${monthName(filters.month)}` : ""}. Pulsa uno para filtrar`}
           className="panel table-panel sales-board-half"
         >
           <DataTable
