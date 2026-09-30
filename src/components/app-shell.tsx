@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, DocumentIcon, EuroIcon, KeyIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
+import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, DocumentIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, EXPENSES_ROLES, LEADS_ROLES, PAYMENTS_ROLES, RRSS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
@@ -15,6 +15,7 @@ import type { AppRole } from "@/lib/types";
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
   { href: "/ventas", label: "Ventas", icon: EuroIcon, roles: SALES_ROLES },
+  { href: "/administracion", label: "Administración", icon: InboxIcon, roles: PAYMENTS_ROLES },
   { href: "/pagos", label: "Pagos", icon: DocumentIcon, roles: PAYMENTS_ROLES },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
@@ -38,6 +39,7 @@ function nameFromEmail(email: string): string {
 const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
   "/ventas": "Ventas de Sage",
+  "/administracion": "Hoy en Administración",
   "/pagos": "Pagos a proveedores",
   "/consultas": "Consultas",
   "/leads": "Leads",

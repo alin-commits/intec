@@ -149,6 +149,9 @@ export const sageIngestSchema = z.object({
     channelCode: optionalText(40),
     sectorCode: optionalText(40),
     paymentMethod: optionalText(40),
+    /** Para Administración: el límite de riesgo del cliente y si está bloqueado. */
+    creditLimit: optionalAmount,
+    isBlocked: z.boolean().default(false),
   })).max(20000).optional(),
   customerDays: z.array(z.object({
     companyCode: z.number().int(),
@@ -341,13 +344,50 @@ export const sageIngestSchema = z.object({
     remittanceNumber: z.number().int().nullable().default(null),
     bankCode: optionalText(40),
     effectType: optionalText(20),
+    /** Recibo devuelto por el banco, y cuándo. */
+    isReturned: z.boolean().default(false),
+    returnedOn: optionalDay,
   })).max(20000).optional(),
   openItemsReplace: z.boolean().optional(),
+  /** Los albaranes sin facturar del último año. Llegan enteros; el primer trozo sustituye a los anteriores. */
+  uninvoicedNotes: z.array(z.object({
+    companyCode: z.number().int(),
+    year: z.number().int(),
+    series: z.string().trim().max(20).default(""),
+    number: z.number().int(),
+    noteDate: day,
+    customerCode: optionalText(40),
+    repCode,
+    netAmount: amount.default(0),
+    billingPeriod: optionalText(20),
+  })).max(20000).optional(),
+  uninvoicedNotesReplace: z.boolean().optional(),
+  /** Las cuentas de los bancos, con la línea de riesgo y lo dispuesto. */
+  bankAccounts: z.array(z.object({
+    companyCode: z.number().int(),
+    accountCode: z.string().trim().min(1).max(40),
+    bankCode: optionalText(20),
+    bankName: optionalText(120),
+    description: optionalText(160),
+    iban: optionalText(40),
+    creditLimit: optionalAmount,
+    creditUsed: optionalAmount,
+  })).max(500).optional(),
+  /** El saldo de cada cuenta día a día. Llega entero; el primer trozo sustituye al anterior. */
+  bankBalances: z.array(z.object({
+    companyCode: z.number().int(),
+    accountCode: z.string().trim().min(1).max(40),
+    day,
+    balance: amount.default(0),
+    movement: amount.default(0),
+  })).max(20000).optional(),
+  bankBalancesReplace: z.boolean().optional(),
 });
 
 /** Si el envío trae algo de pagos, que va a una función aparte. */
 export function hasPaymentParts(body: SageIngestBody): boolean {
-  return Boolean(body.companyDetails || body.suppliers || body.paymentRemittances || body.paymentItems || body.openItems);
+  return Boolean(body.companyDetails || body.suppliers || body.paymentRemittances || body.paymentItems || body.openItems
+    || body.uninvoicedNotes || body.bankAccounts || body.bankBalances);
 }
 
 /** Lo que recibe `sage_ingest_payments`. */
@@ -383,8 +423,29 @@ export function toPaymentsPayload(body: SageIngestBody): Record<string, unknown>
       company_code: row.companyCode, kind: row.kind, movement_id: row.movementId, counterpart_code: row.counterpartCode,
       invoice_number: row.invoiceNumber, invoice_date: row.invoiceDate, due_date: row.dueDate, amount: row.amount, pending: row.pending,
       remittance_number: row.remittanceNumber, bank_code: row.bankCode, effect_type: row.effectType, taken_on: body.takenOn ?? null,
+      is_returned: row.isReturned, returned_on: row.returnedOn,
     }));
     payload.open_items_replace = body.openItemsReplace === true;
+  }
+  if (body.uninvoicedNotes) {
+    payload.uninvoiced_notes = body.uninvoicedNotes.map((row) => ({
+      company_code: row.companyCode, year: row.year, series: row.series, number: row.number, note_date: row.noteDate,
+      customer_code: row.customerCode, rep_code: row.repCode, net_amount: row.netAmount, billing_period: row.billingPeriod,
+      taken_on: body.takenOn ?? null,
+    }));
+    payload.uninvoiced_notes_replace = body.uninvoicedNotesReplace === true;
+  }
+  if (body.bankAccounts) {
+    payload.bank_accounts = body.bankAccounts.map((row) => ({
+      company_code: row.companyCode, account_code: row.accountCode, bank_code: row.bankCode, bank_name: row.bankName,
+      description: row.description, iban: row.iban, credit_limit: row.creditLimit, credit_used: row.creditUsed,
+    }));
+  }
+  if (body.bankBalances) {
+    payload.bank_balances = body.bankBalances.map((row) => ({
+      company_code: row.companyCode, account_code: row.accountCode, day: row.day, balance: row.balance, movement: row.movement,
+    }));
+    payload.bank_balances_replace = body.bankBalancesReplace === true;
   }
   return payload;
 }
@@ -484,6 +545,8 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       channel_code: row.channelCode,
       sector_code: row.sectorCode,
       payment_method: row.paymentMethod,
+      credit_limit: row.creditLimit,
+      is_blocked: row.isBlocked,
     }));
   }
   if (body.customerDays) {
@@ -650,6 +713,9 @@ export function describeIngest(body: SageIngestBody, counts: Record<string, numb
     ["payment_remittances", "remesas de pagos"],
     ["payment_items", "efectos en remesas"],
     ["open_items", "de cartera pendiente"],
+    ["uninvoiced_notes", "albaranes sin facturar"],
+    ["bank_accounts", "cuentas de banco"],
+    ["bank_balances", "saldos de banco"],
   ];
   for (const [key, label] of extra) {
     if (counts[key] !== undefined) parts.push(`${counts[key]} ${label}`);

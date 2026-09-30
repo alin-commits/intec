@@ -1624,6 +1624,7 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .sales-data-table th, .sales-data-table td { padding: 10px 8px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sales-data-table th.is-text, .sales-data-table td.is-text { text-align: left; white-space: normal; }
 .sales-data-table td.is-text { min-width: 140px; }
+.sales-data-table td.is-day { white-space: nowrap; }
 .sales-data-table tr.is-clickable { cursor: pointer; }
 .sales-data-table tr.is-active, .sales-clickable-table tr.is-active { background: var(--primary-soft); }
 .sales-data-table tr.is-active:hover, .sales-clickable-table tr.is-active:hover { background: #e3e1f6; }

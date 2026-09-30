@@ -42,11 +42,11 @@ export function DashboardRouter() {
   // El rol de empleado solo llega a Contraseñas. La redirección va en un efecto:
   // navegar desde el cuerpo del render se repite en cada pasada.
   const onlyEmployee = roles !== null && roles.length > 0 && roles.every((role) => role === "employee");
-  // Administración no tiene panel de inicio: su página es Pagos.
+  // Administración empieza el día en «Hoy en Administración»: lo que tiene que atender.
   const onlyPayments = roles !== null && roles.includes("accounting") && roles.every((role) => role === "accounting" || role === "employee");
   useEffect(() => {
     if (onlyEmployee) router.replace("/contrasenas");
-    else if (onlyPayments) router.replace("/pagos");
+    else if (onlyPayments) router.replace("/administracion");
   }, [onlyEmployee, onlyPayments, router]);
 
   if (roles === null || onlyEmployee || onlyPayments) return <PageLoader label="Cargando tu inicio…" />;

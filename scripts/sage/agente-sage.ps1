@@ -127,7 +127,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-09-30 director comercial"
+$VersionAgente = "2026-09-30 administracion"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -786,6 +786,10 @@ function Preparar-Clientes {
     Canal = (Elegir "Clientes" @("CodigoCanal"))
     Sector = (Elegir "Clientes" @("CodigoSector_", "CodigoSector"))
     FormaPago = (Elegir "Clientes" @("FormadePago", "CodigoFormaPago"))
+    # Para Administración: el límite de riesgo y si tiene bloqueados albaranes o pedidos.
+    Riesgo = (Elegir "Clientes" @("RiesgoMaximo"))
+    BloqueoAlbaran = (Elegir "Clientes" @("BloqueoAlbaran"))
+    BloqueoPedido = (Elegir "Clientes" @("BloqueoPedido"))
   }
 }
 
@@ -800,6 +804,10 @@ function Sql-ClientesLista($cfgCli, $mesDesde, $mesHasta) {
     $otros += " or exists (select 1 from CabeceraPedidoCliente p where p.CodigoEmpresa = c.CodigoEmpresa and p.CodigoCliente = c.CodigoCliente and $(Sql-Entre "p.FechaPedido" $mesDesde $mesHasta))"
   }
   if ($cfgCli.Alta) { $otros += " or ($(Sql-Entre "c.[$($cfgCli.Alta)]" $mesDesde $mesHasta))" }
+  # Bloqueado si no se le pueden hacer albaranes o pedidos (en Sage el sí es -1).
+  $marcas = @()
+  foreach ($columna in @($cfgCli.BloqueoAlbaran, $cfgCli.BloqueoPedido)) { if ($columna) { $marcas += "isnull(c.[$columna], 0) <> 0" } }
+  $bloqueo = if ($marcas.Count -gt 0) { "case when $($marcas -join ' or ') then 1 else 0 end" } else { "0" }
   return @"
 select c.CodigoEmpresa, ltrim(rtrim(cast(c.CodigoCliente as nvarchar(40)))) as Codigo,
   $(Sql-Texto "c" $cfgCli.Razon 200) as Razon,
@@ -820,7 +828,9 @@ select c.CodigoEmpresa, ltrim(rtrim(cast(c.CodigoCliente as nvarchar(40)))) as C
   $(Sql-Texto "c" $cfgCli.Zona 40) as Zona,
   $(Sql-Texto "c" $cfgCli.Canal 40) as Canal,
   $(Sql-Texto "c" $cfgCli.Sector 40) as Sector,
-  $(Sql-Texto "c" $cfgCli.FormaPago 40) as FormaPago
+  $(Sql-Texto "c" $cfgCli.FormaPago 40) as FormaPago,
+  $(if ($cfgCli.Riesgo) { "c.[$($cfgCli.Riesgo)]" } else { "cast(null as decimal(14, 2))" }) as Riesgo,
+  $bloqueo as Bloqueado
 from Clientes c
 where c.CodigoEmpresa not in ($excluidas)
   and (
@@ -861,6 +871,9 @@ function Filas-ClientesLista($tabla) {
       channelCode   = (Texto-O-Nulo $fila["Canal"] 40)
       sectorCode    = (Texto-O-Nulo $fila["Sector"] 40)
       paymentMethod = (Texto-O-Nulo $fila["FormaPago"] 40)
+      # Un límite de cero es que no tiene límite puesto, no que no pueda deber nada.
+      creditLimit   = $(if ((Numero $fila["Riesgo"]) -gt 0) { Numero $fila["Riesgo"] } else { $null })
+      isBlocked     = ([int]$fila["Bloqueado"] -eq 1)
     })
   }
   return ,$lista
@@ -1389,6 +1402,7 @@ t.name in ('CabeceraAlbaranCliente', 'LineasAlbaranCliente', 'CabeceraOfertaClie
    or t.name in ('Proveedores', 'Empresas', 'Remesas', 'CarteraEfectos', 'Domicilios', 'Naciones')
    or t.name like '%Banco%'
    or t.name like '%Zona%' or t.name like '%Canal%' or t.name like '%FormasPago%' or t.name like '%FormaPago%' or t.name like '%Cargo%'
+   or t.name like '%Saldo%'
 "@
   $tabla = Consultar $servidorBueno @"
 select top 14000 x.Tabla, x.Columna, x.Tipo from (
@@ -1437,6 +1451,9 @@ function Preparar-Pagos {
     BancoRemesa  = (Elegir "CarteraEfectos" @("BancoRemesa"))
     TipoEfecto   = (Elegir "CarteraEfectos" @("TipoEfecto"))
     Borrado      = (Elegir "CarteraEfectos" @("StatusBorrado"))
+    # Los recibos que el banco ha devuelto (impagados), para Administración.
+    Impagado     = (Elegir "CarteraEfectos" @("StatusImpagado"))
+    FechaImpagado = (Elegir "CarteraEfectos" @("FechaImpagado"))
     ConRemesas   = ((Faltan "Remesas" @("CodigoEmpresa", "NumeroRemesa", "FechaRemesa")).Count -eq 0)
     RFechaValor  = (Elegir "Remesas" @("FechaValor"))
     RBanco       = (Elegir "Remesas" @("BancoRemesa"))
@@ -1679,7 +1696,9 @@ select e.CodigoEmpresa, e.Prevision, $(Sql-MovEfecto $cfg) as Mov,
   e.ImportePendiente as Pendiente,
   $(if ($cfg.Remesa) { "nullif(e.[$($cfg.Remesa)], 0)" } else { "cast(null as int)" }) as Remesa,
   $(Sql-Texto "e" $cfg.BancoRemesa 40) as Banco,
-  $(Sql-Texto "e" $cfg.TipoEfecto 20) as TipoEfecto
+  $(Sql-Texto "e" $cfg.TipoEfecto 20) as TipoEfecto,
+  $(if ($cfg.Impagado) { "case when isnull(e.[$($cfg.Impagado)], 0) <> 0 then 1 else 0 end" } else { "0" }) as Impagado,
+  $(Sql-Fecha "e" $cfg.FechaImpagado) as FechaImpagado
 from CarteraEfectos e
 where e.CodigoEmpresa not in ($excluidas)
   and e.Prevision in ('C', 'P')
@@ -1705,6 +1724,8 @@ where e.CodigoEmpresa not in ($excluidas)
       remittanceNumber = (Entero-O-Nulo $fila["Remesa"])
       bankCode         = (Texto-O-Nulo $fila["Banco"] 40)
       effectType       = (Texto-O-Nulo $fila["TipoEfecto"] 20)
+      isReturned       = ([int]$fila["Impagado"] -eq 1)
+      returnedOn       = (Fecha-O-Nulo $fila["FechaImpagado"])
     })
   }
   return ,$lista
@@ -1752,6 +1773,133 @@ from (
     $notas.Add("efectos de pago remesados (400 dias): $([int]$f['Efectos']); borrados $([int]$f['Borrados']), sin nada pendiente $([int]$f['Pagados']), con una remesa que no esta $([int]$f['SinRemesa'])")
   }
   return ,$notas
+}
+
+# ---------------------------------------------------------------------------
+# Administración: albaranes sin facturar y bancos
+# ---------------------------------------------------------------------------
+# Lo servido en el último año que sigue sin facturar: es dinero que no se cobra
+# hasta que se factura. Los marcados en Sage como "no facturable" y los de
+# importe cero no cuentan. La periodicidad dice si el cliente se factura a fin
+# de mes: entonces lo de este mes es normal que espere.
+function Leer-AlbaranesSinFacturar {
+  $t = "CabeceraAlbaranCliente"
+  $faltan = Faltan $t @("CodigoEmpresa", "EjercicioAlbaran", "SerieAlbaran", "NumeroAlbaran", "FechaAlbaran", "StatusFacturado")
+  if ($faltan.Count -gt 0) { throw "faltan $($faltan -join ', ')" }
+  $noFacturable = if (Tiene $t "NoFacturable") { "and isnull(a.NoFacturable, 0) = 0" } else { "" }
+  $periodicidad = if (Tiene $t "PeriodicidadFacturas") { "cast(a.PeriodicidadFacturas as nvarchar(20))" } else { "cast(null as nvarchar(20))" }
+  $tabla = Consultar $servidorBueno @"
+select a.CodigoEmpresa, a.EjercicioAlbaran as Ejercicio, isnull(ltrim(rtrim(a.SerieAlbaran)), '') as Serie, a.NumeroAlbaran as Numero,
+  cast(a.FechaAlbaran as date) as Fecha, ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40)))) as Cliente,
+  case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end as Comercial,
+  isnull(a.BaseImponible, 0) as Neto, $periodicidad as Periodicidad
+from CabeceraAlbaranCliente a
+where a.CodigoEmpresa not in ($excluidas)
+  and isnull(a.StatusFacturado, 0) = 0
+  $noFacturable
+  and isnull(a.BaseImponible, 0) <> 0
+  and a.FechaAlbaran >= dateadd(day, -365, getdate());
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode   = [int]$fila["CodigoEmpresa"]
+      year          = [int]$fila["Ejercicio"]
+      series        = (Texto $fila["Serie"] 20)
+      number        = [int]$fila["Numero"]
+      noteDate      = ([datetime]$fila["Fecha"]).ToString("yyyy-MM-dd")
+      customerCode  = (Texto-O-Nulo $fila["Cliente"] 40)
+      repCode       = (Entero-O-Nulo $fila["Comercial"])
+      netAmount     = (Numero $fila["Neto"])
+      billingPeriod = (Texto-O-Nulo $fila["Periodicidad"] 20)
+    })
+  }
+  return ,$lista
+}
+
+# Las cuentas de los bancos de cada sociedad: la cuenta contable (572...), que es
+# la que usan las remesas, el nombre del banco y la línea de riesgo con lo
+# dispuesto.
+function Leer-CuentasBanco {
+  $t = "BancosConta"
+  $faltan = Faltan $t @("CodigoEmpresa", "CodigoCuenta")
+  if ($faltan.Count -gt 0) { throw "faltan $($faltan -join ', ')" }
+  $nombre = "cast(null as nvarchar(120))"
+  if ((Tiene $t "CodigoBanco") -and (@(Faltan "Bancos" @("CodigoBanco", "Banco")).Count -eq 0)) {
+    $nombre = "(select top 1 nullif(ltrim(rtrim(cast(b.Banco as nvarchar(120)))), '') from Bancos b where b.CodigoBanco = c.CodigoBanco)"
+  }
+  $descripcion = "cast(null as nvarchar(160))"
+  if (@(Faltan "pwb_Bancos" @("EmpresaID", "CuentaID", "Descripcion")).Count -eq 0) {
+    $descripcion = "(select top 1 nullif(ltrim(rtrim(cast(d.Descripcion as nvarchar(160)))), '') from pwb_Bancos d where ltrim(rtrim(d.CuentaID)) = ltrim(rtrim(c.CodigoCuenta)) and ltrim(rtrim(d.EmpresaID)) = cast(c.CodigoEmpresa as nvarchar(10)))"
+  }
+  $tabla = Consultar $servidorBueno @"
+select c.CodigoEmpresa, ltrim(rtrim(cast(c.CodigoCuenta as nvarchar(40)))) as Cuenta,
+  $(Sql-Texto "c" (Elegir $t @("CodigoBanco")) 20) as Banco,
+  $nombre as NombreBanco,
+  $descripcion as Descripcion,
+  $(Sql-Texto "c" (Elegir $t @("IBAN")) 40) as Iban,
+  $(if (Tiene $t "Riesgo") { "c.Riesgo" } else { "cast(null as decimal(14, 2))" }) as Riesgo,
+  $(if (Tiene $t "RiesgoUtilizado") { "c.RiesgoUtilizado" } else { "cast(null as decimal(14, 2))" }) as Dispuesto
+from BancosConta c
+where c.CodigoEmpresa not in ($excluidas)
+  and isnull(ltrim(rtrim(cast(c.CodigoCuenta as nvarchar(40)))), '') <> '';
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode = [int]$fila["CodigoEmpresa"]
+      accountCode = (Texto $fila["Cuenta"] 40)
+      bankCode    = (Texto-O-Nulo $fila["Banco"] 20)
+      bankName    = (Texto-O-Nulo $fila["NombreBanco"] 120)
+      description = (Texto-O-Nulo $fila["Descripcion"] 160)
+      iban        = (Texto-O-Nulo $fila["Iban"] 40)
+      creditLimit = (Numero-O-Nulo $fila["Riesgo"])
+      creditUsed  = (Numero-O-Nulo $fila["Dispuesto"])
+    })
+  }
+  return ,$lista
+}
+
+# El saldo de cada cuenta de banco día a día (últimos 120 días), de la tabla de
+# saldos que rellena Sage. De cada día se queda el último apunte. En la lectura
+# larga se cuenta además qué tiene la tabla, para comprobar que está al día.
+function Leer-SaldosBanco($avisos, [bool]$conResumen) {
+  $t = "pwb_SaldoBanco"
+  $faltan = Faltan $t @("EmpresaID", "CuentaContable", "Fecha", "Saldo")
+  if ($faltan.Count -gt 0) { throw "faltan $($faltan -join ', ')" }
+  $movimiento = if (Tiene $t "MovimientoSaldo") { "isnull(s.MovimientoSaldo, 0)" } else { "0" }
+  $orden = if (Tiene $t "SaldoBancoID") { "s.SaldoBancoID desc" } else { "s.Fecha desc" }
+  $tabla = Consultar $servidorBueno @"
+with filas as (
+  select try_cast(ltrim(rtrim(s.EmpresaID)) as smallint) as CodigoEmpresa, ltrim(rtrim(cast(s.CuentaContable as nvarchar(40)))) as Cuenta,
+    cast(s.Fecha as date) as Dia, s.Saldo, $movimiento as Movimiento,
+    row_number() over (partition by s.EmpresaID, s.CuentaContable, cast(s.Fecha as date) order by $orden) as Orden
+  from pwb_SaldoBanco s
+  where s.Fecha >= dateadd(day, -120, getdate())
+)
+select CodigoEmpresa, Cuenta, Dia, max(case when Orden = 1 then Saldo end) as Saldo, sum(Movimiento) as Movimiento
+from filas
+where CodigoEmpresa is not null and CodigoEmpresa not in ($excluidas) and isnull(Cuenta, '') <> ''
+group by CodigoEmpresa, Cuenta, Dia;
+"@
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode = [int]$fila["CodigoEmpresa"]
+      accountCode = (Texto $fila["Cuenta"] 40)
+      day         = ([datetime]$fila["Dia"]).ToString("yyyy-MM-dd")
+      balance     = (Numero $fila["Saldo"])
+      movement    = (Numero $fila["Movimiento"])
+    })
+  }
+  if ($conResumen) {
+    $tipo = if (Tiene $t "TipoDocumento") { "isnull(cast(TipoDocumento as nvarchar(40)), '(sin tipo)')" } else { "'(sin tipo)'" }
+    $resumen = Consultar $servidorBueno "select top 6 $tipo as Tipo, count(*) as Filas, min(Fecha) as Desde, max(Fecha) as Hasta from pwb_SaldoBanco group by $tipo order by count(*) desc;"
+    foreach ($f in $resumen.Rows) {
+      Avisar $avisos "saldos de banco, tipo $([string]$f['Tipo']): $([int]$f['Filas']) filas del $(Fecha-O-Nulo $f['Desde']) al $(Fecha-O-Nulo $f['Hasta'])"
+    }
+  }
+  return ,$lista
 }
 
 # ---------------------------------------------------------------------------
@@ -2171,6 +2319,42 @@ if (-not $SoloVentas -and $cfgPagos) {
       $envio.openItemsReplace = $primero
       $primero = $false
       Enviar $envio "cartera pendiente ($fin de $($cartera.Count))"
+    }
+  }
+}
+
+# ----- 6. Administración: bancos y albaranes sin facturar -----
+# En cada lectura: son pocos y así lo que se factura durante el día desaparece
+# pronto de la lista. Cada cosa en su intento: si una falla, las demás siguen y
+# el aviso llega al Hub.
+if (-not $SoloVentas) {
+  $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+  $avisos = New-Object System.Collections.Generic.List[string]
+  Intentar $envio "bankAccounts" $avisos "cuentas de banco" { Leer-CuentasBanco }
+  if ($null -eq $envio["bankAccounts"]) { $envio.Remove("bankAccounts") }
+  $saldos = $null
+  try { $saldos = Leer-SaldosBanco $avisos ($lecturaLarga -or $Reconocer) } catch { Avisar $avisos "saldos de banco: $($_.Exception.Message)" }
+  if ($null -ne $saldos) {
+    $envio.bankBalances = $saldos
+    $envio.bankBalancesReplace = $true
+  }
+  $sinFacturar = $null
+  try { $sinFacturar = Leer-AlbaranesSinFacturar } catch { Avisar $avisos "albaranes sin facturar: $($_.Exception.Message)" }
+  if ($avisos.Count -gt 0) { $envio.notes = $avisos }
+  Enviar $envio "bancos"
+
+  # Los albaranes, por trozos; el primero sustituye a los que había.
+  if ($null -ne $sinFacturar) {
+    $primero = $true
+    for ($inicio = 0; $inicio -lt [Math]::Max($sinFacturar.Count, 1); $inicio += 3000) {
+      $envio = Nuevo-Envio (Get-Date).Date (Get-Date).Date.AddDays(1)
+      $fin = [Math]::Min($inicio + 3000, $sinFacturar.Count)
+      $trozoAlbaranes = New-Object System.Collections.Generic.List[object]
+      for ($k = $inicio; $k -lt $fin; $k++) { $trozoAlbaranes.Add($sinFacturar[$k]) }
+      $envio.uninvoicedNotes = $trozoAlbaranes
+      $envio.uninvoicedNotesReplace = $primero
+      $primero = $false
+      Enviar $envio "albaranes sin facturar ($fin de $($sinFacturar.Count))"
     }
   }
 }
