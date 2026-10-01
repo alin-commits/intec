@@ -27,7 +27,27 @@ const parseAmount = (text: string): number | null => {
 const formatInput = (value: number | null) => (value === null ? "" : new Intl.NumberFormat("es-ES", { maximumFractionDigits: 2 }).format(value));
 
 export function TargetsPage({ ctx }: { ctx: SalesContext }) {
-  const { filters, shownYear, today } = ctx;
+  // Los objetivos se ponen mes a mes dentro de un año: con otro periodo no hay año que enseñar.
+  if (ctx.period.year === null) return <TargetsNeedYear ctx={ctx} />;
+  return <TargetsOfYear ctx={ctx} shownYear={ctx.period.year} />;
+}
+
+function TargetsNeedYear({ ctx }: { ctx: SalesContext }) {
+  const year = ctx.today.getFullYear();
+  return (
+    <section className="panel panel-padded sales-need-year">
+      <h2>Los objetivos son por año</h2>
+      <p className="muted">
+        Se ponen mes a mes dentro de un año natural, y ahora estás mirando {ctx.period.baseLabel}. Elige un año en
+        «Periodo» para ver cómo se va contra su objetivo o para ponerlo.
+      </p>
+      <button type="button" className="button button-primary" onClick={() => ctx.choosePeriod({ kind: "year", year })}>Ver {year}</button>
+    </section>
+  );
+}
+
+function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: number }) {
+  const { filters, today } = ctx;
   const months = targetsFor(ctx.targets, shownYear, filters.company, filters.repKey);
   const scopeKey = JSON.stringify([shownYear, filters.company, filters.repKey, ctx.targets]);
   const [draft, setDraft] = useState<string[]>(() => months.map(formatInput));

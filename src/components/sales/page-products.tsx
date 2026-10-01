@@ -5,7 +5,7 @@ import { DonutChart } from "@/components/charts/donut-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin } from "@/lib/sage-panel";
-import { channelColors, discountPercent, euros, monthName, monthNames, variation } from "@/lib/sales-model";
+import { channelColors, discountPercent, euros, monthLabel, pairOf, tenths, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
@@ -51,13 +51,16 @@ const discount = (row: { gross_amount: number; gross_net: number }) => {
 };
 const discountSort = (row: { gross_amount: number; gross_net: number }) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity;
 const change = (now: number, before: number) => {
-  const value = variation(now, before);
-  if (value === null) return <span className="muted">—</span>;
-  return <span className={value >= 0 ? "sales-up" : "sales-down"}>{value >= 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %</span>;
+  const raw = variation(now, before);
+  if (raw === null) return <span className="muted">—</span>;
+  // Sin "-0,0 %" en rojo: lo que no se mueve ni una décima va sin color.
+  const value = tenths(raw);
+  if (value === 0) return <span>0,0 %</span>;
+  return <span className={value > 0 ? "sales-up" : "sales-down"}>{value > 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %</span>;
 };
 
 export function ProductsPage({ ctx }: { ctx: SalesContext }) {
-  const { filters, period, shownYear } = ctx;
+  const { filters, period } = ctx;
   const [subfamily, setSubfamily] = useState<string | null>(null);
   const [brand, setBrand] = useState<string | null>(null);
   // La subfamilia es de una familia: al cambiar de familia deja de tener sentido.
@@ -68,23 +71,27 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   }
 
   const reload = ctx.reloadKey;
-  const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period, reload]), async () => {
+  const compare = period.compare;
+  const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period.from, period.to, compare, reload]), async () => {
     const supabase = createClient();
     const [now, before] = await Promise.all([
       supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to }),
-      supabase.rpc("sage_family_summary", { p_from: period.previousFrom, p_to: period.previousTo }),
+      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to }) : Promise.resolve({ data: [], error: null }),
     ]);
     const error = now.error ?? before.error;
     return { data: error ? null : { now: (now.data ?? []) as FamilyRow[], before: (before.data ?? []) as FamilyRow[] }, error };
   });
-  // La evolución de la familia elegida, mes a mes (sin el filtro de mes, para poder pulsar otro).
+  // La evolución de la familia elegida, mes a mes (sin el filtro de mes, para poder
+  // pulsar otro), del periodo y de lo que se le pone al lado.
+  const spanFrom = period.baseCompare && period.baseCompare.from < period.base.from ? period.baseCompare.from : period.base.from;
+  const spanTo = period.baseCompare && period.baseCompare.to > period.base.to ? period.baseCompare.to : period.base.to;
   const familyMonths = useSageQuery<{ day: string; company_code: number; net_amount: number }[]>(
-    filters.family !== null ? JSON.stringify(["familia-meses", filters.family, shownYear, reload]) : null,
+    filters.family !== null ? JSON.stringify(["familia-meses", filters.family, spanFrom, spanTo, reload]) : null,
     async () => {
       const supabase = createClient();
       return fetchAllPages<{ day: string; company_code: number; net_amount: number }>((start, end) =>
         supabase.from("sage_family_sales_daily").select("day, company_code, net_amount")
-          .eq("family_code", filters.family ?? "").gte("day", `${shownYear - 1}-01-01`).lte("day", `${shownYear}-12-31`)
+          .eq("family_code", filters.family ?? "").gte("day", spanFrom).lte("day", spanTo)
           .order("id").range(start, end));
     },
   );
@@ -128,7 +135,9 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   const familyColumns: Column<FamilyTableRow>[] = [
     { key: "familia", header: "Familia", text: true, render: (row) => row.name, sort: (row) => row.name },
     { key: "ventas", header: "Ventas", render: (row) => euros(row.net), sort: (row) => row.net },
-    { key: "var", header: `vs ${shownYear - 1}`, render: (row) => change(row.net, row.before), sort: (row) => variation(row.net, row.before) ?? -Infinity },
+    ...(compare
+      ? [{ key: "var", header: `vs ${period.compareShort}`, render: (row: FamilyTableRow) => change(row.net, row.before), sort: (row: FamilyTableRow) => variation(row.net, row.before) ?? -Infinity }]
+      : []),
     { key: "peso", header: "Peso", optional: true, render: (row) => share(Math.max(row.net, 0), familyTotal), sort: (row) => row.net },
     { key: "margen", header: "Margen %", render: (row) => margin(row), sort: (row) => familyMargin(row) ?? -Infinity },
     { key: "dto", header: "Dto.", render: (row) => discount(row), sort: discountSort },
@@ -136,18 +145,20 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   ];
 
   // ---- Evolución de la familia elegida ----
-  const lastMonthIndex = shownYear === ctx.today.getFullYear() ? ctx.today.getMonth() : 11;
-  const monthKeys = Array.from({ length: lastMonthIndex + 1 }, (_, index) => `${shownYear}-${String(index + 1).padStart(2, "0")}`);
+  const monthKeys = period.months;
   const familyByMonth = new Map<string, number>();
   for (const row of (familyMonths.data ?? []).filter(inCompany)) {
     const key = row.day.slice(0, 7);
     familyByMonth.set(key, (familyByMonth.get(key) ?? 0) + Number(row.net_amount));
   }
-  const familyPoints = monthKeys.map((key, index) => ({
-    label: monthNames[index],
-    ventas: Math.round(familyByMonth.get(key) ?? 0),
-    anterior: Math.round(familyByMonth.get(`${shownYear - 1}${key.slice(4)}`) ?? 0),
-  }));
+  const familyPoints = monthKeys.map((key) => {
+    const pair = pairOf(key, period.monthOffset);
+    return {
+      label: monthLabel(key, period.multiYear),
+      ventas: Math.round(familyByMonth.get(key) ?? 0),
+      anterior: pair ? Math.round(familyByMonth.get(pair) ?? 0) : 0,
+    };
+  });
   const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;
 
   // ---- Subfamilias, marcas y artículos ----
@@ -171,7 +182,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     { key: "dto", header: "Dto.", render: (row) => discount(row), sort: discountSort },
     { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents) },
   ];
-  const periodName = filters.month ? monthName(filters.month) : String(shownYear);
+  const periodName = ctx.periodName;
   const scope = [filters.family !== null ? ctx.familyName(filters.family) : null, subfamily !== null ? (subfamilies.data ?? []).find((row) => row.code === subfamily)?.name ?? subfamily : null, brand].filter(Boolean).join(" · ");
 
   return (
@@ -199,13 +210,13 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
         {filters.family !== null ? (
           <Panel
             title={`${ctx.familyName(filters.family)} mes a mes`}
-            subtitle={`Con ${shownYear - 1} en gris. Pulsa un mes para filtrar`}
+            subtitle={`${period.baseCompare ? `Con ${period.baseCompareShort} en gris. ` : ""}Pulsa un mes para filtrar`}
             className="panel chart-panel sales-board-narrow"
           >
             <TrendChart
               data={familyPoints}
               series={[
-                { key: "anterior", label: String(shownYear - 1), color: "#cbd5e1" },
+                ...(period.baseCompare ? [{ key: "anterior", label: period.baseCompareShort ?? "", color: "#cbd5e1" }] : []),
                 { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ]}
               ariaLabel={`Venta mensual de la familia ${ctx.familyName(filters.family)}`}

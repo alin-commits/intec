@@ -5,7 +5,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { CalendarIcon, ConsultasIcon, ConversionIcon, EuroIcon, TarjetasIcon, TrophyIcon, UsuariosIcon, WalletIcon, XCircleIcon } from "@/components/icons";
-import { lastCompleteMonth, trustedNewCustomersFrom } from "@/lib/sage-panel";
+import { trustedNewCustomersFrom } from "@/lib/sage-panel";
 import {
   bucketMargin,
   delta,
@@ -16,15 +16,17 @@ import {
   sumRows,
   targetsFor,
   targetToDate,
+  tenths,
   ticketFormatter,
   UNASSIGNED_KEY,
   variation,
 } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import type { SalesContext } from "./sales-context";
+import { lostCustomers, type SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals } from "./sales-queries";
 import { Panel, RankList } from "./sales-ui";
 import { MarginNotices } from "./page-sales";
+import { DifferencePanel, VersusPanel, YearsPanels } from "./sales-comparison";
 
 /*
   Resumen: lo que Dirección tiene que ver de un vistazo. Cada cifra lleva a su
@@ -32,7 +34,7 @@ import { MarginNotices } from "./page-sales";
 */
 
 export function SummaryPage({ ctx }: { ctx: SalesContext }) {
-  const { model, filters, shownYear, today } = ctx;
+  const { model, filters, period, today } = ctx;
   const [chartMode, setChartMode] = useState<"mensual" | "acumulado">("mensual");
   const counts = useCustomerCounts(ctx);
   const totals = useCustomerTotals(ctx);
@@ -40,14 +42,19 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const { current, previous, currentMargin, previousMargin, marginSpansMatch, monthly, currentDiscount, previousDiscount } = model;
   const marginDelta = currentMargin && previousMargin && marginSpansMatch;
   // Un descuento que sube es malo: la flecha va en verde cuando baja.
-  const discountChange = currentDiscount && previousDiscount ? currentDiscount.percent - previousDiscount.percent : null;
+  const discountChange = currentDiscount && previousDiscount ? tenths(currentDiscount.percent - previousDiscount.percent) : null;
+  const marginChange = marginDelta ? tenths(currentMargin.percent - previousMargin.percent) : null;
+  const points = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} pts`;
   const selectedMonthIndex = filters.month ? monthly.months.findIndex((month) => month.key === filters.month) : -1;
 
   // El objetivo se compara con la venta de su ámbito (sociedad y comercial), sin
-  // el filtro de canal: los objetivos no se ponen por canal.
-  const targetMonths = targetsFor(ctx.targets, shownYear, filters.company, filters.repKey);
+  // el filtro de canal: los objetivos no se ponen por canal. Son por año natural,
+  // así que con otro periodo no se enseñan.
+  const targetYear = period.year;
   const monthIndex = filters.month ? Number(filters.month.slice(5, 7)) - 1 : null;
-  const targetSoFar = targetToDate(targetMonths, shownYear, today, monthIndex);
+  const targetSoFar = targetYear !== null
+    ? targetToDate(targetsFor(ctx.targets, targetYear, filters.company, filters.repKey), targetYear, today, monthIndex)
+    : null;
   // Solo los meses que tienen objetivo: si falta el de marzo, su venta no cuenta.
   const targetReal = targetSoFar
     ? sumRows(filterRows(ctx.rows, filters, ctx.repOf, ["channel", "month"]).filter((row) => targetSoFar.months.includes(row.month))).net
@@ -57,7 +64,9 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const customerFallback = (() => {
     if (ctx.detail.customers || !totals.data) return null;
     const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
-    const monthKey = filters.month ?? lastCompleteMonth(shownYear, today);
+    // El último mes cerrado del periodo: el que va por la mitad no dice nada.
+    const closed = period.basePartial ? period.months.slice(0, -1) : period.months;
+    const monthKey = filters.month ?? closed[closed.length - 1] ?? null;
     const trustedFrom = trustedNewCustomersFrom(totals.data.firstMonth);
     const rows = totals.data.monthly.filter((row) => inCompany(row) && monthKey !== null && row.month.startsWith(monthKey));
     const dormant = snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.company);
@@ -71,13 +80,17 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     };
   })();
   const backlog = totals.data ? snapshotTotal(totals.data.snapshots, "pedidos_pendientes", filters.company) : null;
-  const periodName = filters.month ? `${monthName(filters.month)}` : String(shownYear);
+  const periodName = ctx.periodName;
+  const lost = lostCustomers(period);
+  // El mes en curso contra los mismos días de su pareja: solo cuando se compara
+  // con el año anterior, que es cuando lo cargado acaba el mismo día que hoy.
+  const currentPair = period.compareKind === "year" ? model.monthly.currentMonth?.pair ?? null : null;
 
   return (
     <div className="page-stack">
       <section className="kpi-grid kpi-grid-sales">
         <KpiCard
-          label={filters.month ? `Ventas de ${monthName(filters.month)}` : "Ventas"}
+          label={filters.month ? `Ventas de ${periodName}` : "Ventas"}
           value={euros(current.net)}
           helper={ctx.comparisonHelper}
           icon={<EuroIcon />}
@@ -102,10 +115,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
           helper={currentMargin ? "sobre lo que tiene coste" : "el coste de las series antiguas no sirve"}
           icon={<ConversionIcon />}
           tone={currentMargin ? "emerald" : "amber"}
-          delta={marginDelta
-            ? `${currentMargin.percent - previousMargin.percent >= 0 ? "+" : ""}${(currentMargin.percent - previousMargin.percent).toFixed(1).replace(".", ",")} pts`
-            : "Sin comparación"}
-          positive={marginDelta ? currentMargin.percent >= previousMargin.percent : true}
+          delta={marginChange === null ? "Sin comparación" : points(marginChange)}
+          positive={marginChange === null || marginChange >= 0}
         />
         <KpiCard
           label="Descuento medio"
@@ -117,7 +128,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
           tone={discountChange !== null && discountChange >= 1 ? "rose" : "sky"}
           onClick={() => ctx.goTo("ventas")}
           actionLabel="Ver por comercial"
-          delta={discountChange === null ? "Sin comparación" : `${discountChange >= 0 ? "+" : ""}${discountChange.toFixed(1).replace(".", ",")} pts`}
+          delta={discountChange === null ? "Sin comparación" : points(discountChange)}
           positive={discountChange === null || discountChange <= 0}
         />
         <KpiCard
@@ -143,28 +154,30 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
           <KpiCard
             label={`Va de ${monthName(monthly.currentMonth.key)}`}
             value={euros(monthly.currentMonth.bucket.net)}
-            helper={`frente a los mismos días de ${shownYear - 1}`}
+            helper={currentPair ? `frente a los mismos días de ${monthName(currentPair)} de ${currentPair.slice(0, 4)}` : "lo que llevamos de mes"}
             icon={<CalendarIcon />}
             tone="sky"
             onClick={() => ctx.setFilters({ month: monthly.currentMonth?.key ?? null })}
             actionLabel="Filtrar este mes"
-            {...delta(variation(monthly.currentMonth.bucket.net, monthly.currentMonth.beforeNet))}
+            {...(currentPair ? delta(variation(monthly.currentMonth.bucket.net, monthly.currentMonth.beforeNet)) : { delta: "Sin comparación", positive: true })}
           />
         ) : null}
-        <KpiCard
-          label="Objetivo"
-          value={targetSoFar ? formatPercent((targetReal / Math.max(targetSoFar.target, 1)) * 100) : "Sin fijar"}
-          helper={targetSoFar
-            ? `${euros(targetReal)} de ${euros(targetSoFar.target)} a hoy${filters.channel ? " (sin filtro de canal)" : ""}`
-            : "pon el objetivo de ventas en la página Objetivos"}
-          icon={<TrophyIcon />}
-          tone={targetSoFar ? (targetReal >= targetSoFar.target ? "emerald" : "rose") : "amber"}
-          onClick={() => ctx.goTo("objetivos")}
-          actionLabel={targetSoFar ? "Ver objetivos" : "Fijar objetivo"}
-          {...(targetSoFar
-            ? { delta: `${targetReal >= targetSoFar.target ? "+" : "-"}${euros(Math.abs(targetReal - targetSoFar.target))}`, positive: targetReal >= targetSoFar.target }
-            : { delta: "Sin comparación", positive: true })}
-        />
+        {targetYear !== null ? (
+          <KpiCard
+            label="Objetivo"
+            value={targetSoFar ? formatPercent((targetReal / Math.max(targetSoFar.target, 1)) * 100) : "Sin fijar"}
+            helper={targetSoFar
+              ? `${euros(targetReal)} de ${euros(targetSoFar.target)} a hoy${filters.channel ? " (sin filtro de canal)" : ""}`
+              : "pon el objetivo de ventas en la página Objetivos"}
+            icon={<TrophyIcon />}
+            tone={targetSoFar ? (targetReal >= targetSoFar.target ? "emerald" : "rose") : "amber"}
+            onClick={() => ctx.goTo("objetivos")}
+            actionLabel={targetSoFar ? "Ver objetivos" : "Fijar objetivo"}
+            {...(targetSoFar
+              ? { delta: `${targetReal >= targetSoFar.target ? "+" : "-"}${euros(Math.abs(targetReal - targetSoFar.target))}`, positive: targetReal >= targetSoFar.target }
+              : { delta: "Sin comparación", positive: true })}
+          />
+        ) : null}
       </section>
 
       <section className="sales-section">
@@ -208,11 +221,11 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
               <KpiCard
                 label="Han dejado de comprar"
                 value={counts.data ? numberFormatter.format(counts.data.perdidos) : "…"}
-                helper={counts.data ? `compraban ${euros(counts.data.neto_perdidos)}` : "cargando"}
+                helper={counts.data ? `compraban ${euros(counts.data.neto_perdidos)} en ${lost.previous}; en ${lost.year}, nada` : "cargando"}
                 delta="Sin comparación"
                 icon={<XCircleIcon />}
                 tone="rose"
-                onClick={() => ctx.openList({ type: "clientes", kind: "perdidos", title: "Clientes que han dejado de comprar", description: "Clientes habituales (compraron en 2 días o más) en el año anterior a los últimos 90 días, que desde entonces no han vuelto. Son los primeros a los que llamar. Los de una sola compra no cuentan." })}
+                onClick={() => ctx.openList({ type: "clientes", kind: "perdidos", title: lost.title, description: lost.description })}
                 actionLabel="Ver a quién llamar"
               />
               <KpiCard
@@ -286,12 +299,12 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
         <article className="panel chart-panel sales-board-wide">
           <div className="panel-heading">
             <div>
-              <h2>Evolución de {shownYear}</h2>
+              <h2>Evolución de {period.baseLabel}</h2>
               <p className="panel-subtitle">
                 {chartMode === "acumulado"
                   ? `Lo que se lleva vendido a cada mes${monthly.marginComplete ? ", con el margen" : ""}`
                   : monthly.marginComplete ? "Ventas y margen por mes" : "Ventas por mes"}
-                {monthly.hasBefore ? `, con ${shownYear - 1} detrás en gris` : ""}. Pulsa un mes para filtrar.
+                {monthly.hasBefore ? `, con ${period.baseCompareShort} detrás en gris` : ""}. Pulsa un mes para filtrar.
               </p>
             </div>
             <div className="sales-switch" role="group" aria-label="Cómo se mira la evolución">
@@ -305,11 +318,11 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
           <TrendChart
             data={chartMode === "acumulado" ? monthly.running : monthly.points}
             series={[
-              ...(monthly.hasBefore ? [{ key: "anterior", label: String(shownYear - 1), color: "#cbd5e1" }] : []),
+              ...(monthly.hasBefore ? [{ key: "anterior", label: period.baseCompareShort ?? "Comparado", color: "#cbd5e1" }] : []),
               { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ...(monthly.marginComplete ? [{ key: "margen", label: "Margen", color: "#10b981" }] : []),
             ]}
-            ariaLabel={`Evolución mensual de ventas en ${shownYear}`}
+            ariaLabel={`Evolución mensual de ventas de ${period.baseLabel}`}
             onSelect={(index) => ctx.toggle("month", monthly.months[index]?.key ?? null)}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />
@@ -340,6 +353,11 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             </ul>
           )}
         </article>
+
+        <YearsPanels ctx={ctx} />
+
+        <VersusPanel ctx={ctx} className="panel table-panel sales-board-half" />
+        <DifferencePanel ctx={ctx} className="panel panel-padded sales-board-half" />
 
         <Panel title="Ranking de comerciales" subtitle="Venta y margen. Pulsa uno para filtrar todo el panel" className="panel panel-padded sales-board-half">
           <RankList

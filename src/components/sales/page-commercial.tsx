@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ClockIcon, ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { leadStatusLabels } from "@/lib/constants";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { channelLabel, euros, monthName, monthNames, UNASSIGNED_KEY } from "@/lib/sales-model";
+import { channelLabel, euros, monthLabel, monthWithYear, UNASSIGNED_KEY } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
@@ -46,21 +46,32 @@ function total<T>(rows: T[], field: keyof T): number {
 }
 
 export function CommercialPage({ ctx }: { ctx: SalesContext }) {
-  const { filters, shownYear } = ctx;
-  const yearFrom = `${shownYear}-01-01`;
-  const yearTo = `${shownYear}-12-31`;
+  const { filters, period } = ctx;
+  // El periodo entero: el mes elegido se filtra aquí, para poder pulsar otro en el gráfico.
+  const { from: yearFrom, to: yearTo } = period.base;
   const reload = ctx.reloadKey;
 
-  const offers = useSageQuery<OfferStat[]>(ctx.detail.offers ? JSON.stringify(["ofertas", shownYear, reload]) : null, async () =>
+  const offers = useSageQuery<OfferStat[]>(ctx.detail.offers ? JSON.stringify(["ofertas", yearFrom, yearTo, reload]) : null, async () =>
     await createClient().rpc("sage_offer_stats", { p_from: yearFrom, p_to: yearTo }));
-  const orders = useSageQuery<OrderStat[]>(ctx.detail.orders ? JSON.stringify(["pedidos", shownYear, reload]) : null, async () =>
+  const orders = useSageQuery<OrderStat[]>(ctx.detail.orders ? JSON.stringify(["pedidos", yearFrom, yearTo, reload]) : null, async () =>
     await createClient().rpc("sage_order_stats", { p_from: yearFrom, p_to: yearTo }));
-  const incidents = useSageQuery<IncidentStat[]>(ctx.detail.incidents ? JSON.stringify(["incidencias", shownYear, reload]) : null, async () =>
+  const incidents = useSageQuery<IncidentStat[]>(ctx.detail.incidents ? JSON.stringify(["incidencias", yearFrom, yearTo, reload]) : null, async () =>
     await createClient().rpc("sage_incident_stats", { p_from: yearFrom, p_to: yearTo }));
   // Lo de antes del detalle: totales de ofertas y pedidos por mes, sin serie.
-  const oldOrders = useSageQuery<OldOrderRow[]>(!ctx.detail.offers || !ctx.detail.orders ? JSON.stringify(["antiguo", shownYear, reload]) : null, async () =>
+  const oldOrders = useSageQuery<OldOrderRow[]>(!ctx.detail.offers || !ctx.detail.orders ? JSON.stringify(["antiguo", yearFrom, yearTo, reload]) : null, async () =>
     await createClient().rpc("sage_orders_summary", { p_from: yearFrom, p_to: yearTo }));
   const totals = useCustomerTotals(ctx);
+  // Desde cuándo se registran ofertas y pedidos en Sage (no desde 2022, como las ventas).
+  const firsts = useSageQuery<{ offer: string | null; order: string | null }>(JSON.stringify(["primeros", reload]), async () => {
+    const supabase = createClient();
+    const [offer, order] = await Promise.all([
+      supabase.from("sage_orders_daily").select("day").eq("kind", "oferta").order("day").limit(1),
+      supabase.from("sage_orders_daily").select("day").eq("kind", "pedido").order("day").limit(1),
+    ]);
+    const error = offer.error ?? order.error;
+    const first = (rows: { day: string }[] | null) => rows?.[0]?.day ?? null;
+    return { data: error ? null : { offer: first(offer.data), order: first(order.data) }, error };
+  });
   const leads = useSageQuery<Lead[]>(ctx.canSeeLeads ? JSON.stringify(["leads", ctx.period.from, ctx.period.to, reload]) : null, async () => {
     const supabase = createClient();
     const { data, error } = await fetchAllPages<Lead>((start, end) =>
@@ -79,10 +90,9 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
     return true;
   };
 
-  const lastMonthIndex = shownYear === ctx.today.getFullYear() ? ctx.today.getMonth() : 11;
-  const monthKeys = Array.from({ length: lastMonthIndex + 1 }, (_, index) => `${shownYear}-${String(index + 1).padStart(2, "0")}`);
+  const monthKeys = period.months;
   const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;
-  const periodName = filters.month ? monthName(filters.month) : String(shownYear);
+  const periodName = ctx.periodName;
 
   // ---- Ofertas ----
   const offerRows = (offers.data ?? []).filter((row) => keep(row));
@@ -158,12 +168,18 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
     if (row.kind === "oferta" && !ctx.detail.offers) add(row.month, "ofertas", Number(row.net_amount));
     if (row.kind === "pedido" && !ctx.detail.orders) add(row.month, "pedidos", Number(row.net_amount));
   }
-  const points = monthKeys.map((key, index) => ({
-    label: monthNames[index],
-    ofertas: Math.round(byMonth.get(key)?.ofertas ?? 0),
-    convertidas: Math.round(byMonth.get(key)?.convertidas ?? 0),
-    pedidos: Math.round(byMonth.get(key)?.pedidos ?? 0),
+  // Antes de que se usaran en Sage no hay ofertas ni pedidos: esos meses van en
+  // blanco (la línea se corta) en vez de en cero, que parecería que no se vendió.
+  const offerFrom = firsts.data?.offer?.slice(0, 7) ?? null;
+  const orderFrom = firsts.data?.order?.slice(0, 7) ?? null;
+  const since = (from: string | null, key: string, value: number) => (from !== null && key < from ? null : Math.round(value));
+  const points = monthKeys.map((key) => ({
+    label: monthLabel(key, period.multiYear),
+    ofertas: since(offerFrom, key, byMonth.get(key)?.ofertas ?? 0),
+    convertidas: since(offerFrom, key, byMonth.get(key)?.convertidas ?? 0),
+    pedidos: since(orderFrom, key, byMonth.get(key)?.pedidos ?? 0),
   }));
+  const beforeRecords = monthKeys.length > 0 && ((offerFrom !== null && monthKeys[0] < offerFrom) || (orderFrom !== null && monthKeys[0] < orderFrom));
 
   // ---- Abonos e incidencias ----
   const incidentRows = (incidents.data ?? []).filter((row) => keep(row));
@@ -257,7 +273,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
 
       <section className="sales-board">
         <Panel
-          title={`Ofertas y pedidos en ${shownYear}`}
+          title={`Ofertas y pedidos en ${period.baseLabel}`}
           subtitle="Importe por mes, sin IVA. Pulsa un mes para filtrar"
           className="panel chart-panel sales-board-wide"
         >
@@ -268,10 +284,17 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
               ...(ctx.detail.offers ? [{ key: "convertidas", label: "Convertidas", color: "#f59e0b" }] : []),
               { key: "pedidos", label: "Pedidos", color: "#10b981" },
             ]}
-            ariaLabel={`Ofertas y pedidos por mes en ${shownYear}`}
+            ariaLabel={`Ofertas y pedidos por mes en ${period.baseLabel}`}
             onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />
+          {beforeRecords ? (
+            <p className="sales-section-note">
+              En Sage hay {orderFrom ? `pedidos desde ${monthWithYear(orderFrom)}` : "pedidos"}
+              {offerFrom ? ` y ofertas desde ${monthWithYear(offerFrom)}` : ""}: antes no se registraban allí, así que esos meses salen
+              en blanco. No es que falten datos por traer.
+            </p>
+          ) : null}
         </Panel>
 
         <Panel title="Conversión por comercial" subtitle="Importe ofertado y qué parte pasa a pedido. Pulsa uno para filtrar" className="panel panel-padded sales-board-narrow">

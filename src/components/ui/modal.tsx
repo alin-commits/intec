@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 /** Lo que se puede enfocar con el tabulador dentro del diálogo. */
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function Modal({ open, title, eyebrow, children, onClose, scrollInside = false }: {
+export function Modal({ open, title, eyebrow, children, onClose, scrollInside = false, large = false }: {
   open: boolean;
   title: string;
   eyebrow?: string;
@@ -13,6 +13,8 @@ export function Modal({ open, title, eyebrow, children, onClose, scrollInside = 
   onClose: () => void;
   /** For long content: the title stays fixed and only the body scrolls, inside the card's rounded edges. */
   scrollInside?: boolean;
+  /** Más ancho, para lo que lleva gráficos y tablas lado a lado (la ficha de un cliente). */
+  large?: boolean;
 }) {
   // Cada diálogo necesita su propio id: si hay dos abiertos a la vez y comparten
   // uno, el lector de pantalla no sabe cuál está leyendo.
@@ -76,7 +78,7 @@ export function Modal({ open, title, eyebrow, children, onClose, scrollInside = 
       <section
         ref={cardRef}
         tabIndex={-1}
-        className={scrollInside ? "modal-card modal-card-wide modal-card-scroll-inside" : "modal-card modal-card-wide"}
+        className={`modal-card modal-card-wide${large ? " modal-card-large" : ""}${scrollInside ? " modal-card-scroll-inside" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

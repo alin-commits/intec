@@ -6,7 +6,7 @@ import { downloadCsv, type CsvColumn } from "@/lib/csv-export";
 import { numberFormatter } from "@/lib/format";
 import { channelLabel, euros } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
-import type { ListRequest, SalesContext } from "./sales-context";
+import { lostCustomers, type ListRequest, type SalesContext } from "./sales-context";
 import { DataTable, LoadFailed, shortDate, useSageQuery, type Column } from "./sales-ui";
 
 /*
@@ -52,7 +52,13 @@ type AnyRow = CustomerRow | OfferRow | OrderRow;
 
 const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-export function SalesListModal({ request, ctx, onClose }: { request: ListRequest | null; ctx: SalesContext; onClose: () => void }) {
+export function SalesListModal({ request, ctx, onClose, hidden = false }: {
+  request: ListRequest | null;
+  ctx: SalesContext;
+  onClose: () => void;
+  /** Mientras se ve la ficha de un cliente: la lista sigue viva (con su búsqueda) para volver a ella. */
+  hidden?: boolean;
+}) {
   const [search, setSearch] = useState("");
   const [lastRequest, setLastRequest] = useState<ListRequest | null>(request);
   // Una lista nueva empieza sin búsqueda.
@@ -70,7 +76,11 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
   const key = request && args ? JSON.stringify([fn, args, ctx.reloadKey]) : null;
   const result = useSageQuery<AnyRow[]>(key, async () => await createClient().rpc(fn, args ?? {}));
 
-  if (!request) return null;
+  if (!request || hidden) return null;
+  // Pulsar una fila abre la ficha de su cliente.
+  const openCustomer = (row: { company_code: number; customer_code: string | null; name?: string | null; customer_name?: string | null }) => {
+    if (row.customer_code) ctx.openCustomer({ company_code: row.company_code, customer_code: row.customer_code, name: row.name ?? row.customer_name ?? null });
+  };
 
   const rep = (company: number, code: number | null) => (code === null ? "—" : ctx.repOf(company, code).label);
   const company = (code: number) => ctx.companies.find((item) => item.code === code)?.name ?? String(code);
@@ -114,15 +124,15 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
         return (
           <span className="sales-contact">
             {row.contact_name ? <strong>{row.contact_name}</strong> : null}
-            {phones.map((value) => <a key={value} href={`tel:${value.replace(/\s+/g, "")}`}>{value}</a>)}
-            {email ? <a href={`mailto:${email}`}>{email}</a> : null}
+            {phones.map((value) => <a key={value} href={`tel:${value.replace(/\s+/g, "")}`} onClick={(event) => event.stopPropagation()}>{value}</a>)}
+            {email ? <a href={`mailto:${email}`} onClick={(event) => event.stopPropagation()}>{email}</a> : null}
             {!row.contact_name && phones.length === 0 && !email ? <span className="muted">Sin datos</span> : null}
           </span>
         );
       } },
       { key: "zona", header: "Zona", text: true, optional: true, render: (row) => [row.municipality, row.province].filter(Boolean).join(", ") || "—", sort: (row) => row.province ?? "" },
       { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => rep(row.company_code, row.rep_code), sort: (row) => rep(row.company_code, row.rep_code) },
-      { key: "compra", header: request.kind === "perdidos" ? "Compraba" : request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+      { key: "compra", header: request.kind === "perdidos" ? `En ${lostCustomers(ctx.period).previous}` : request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
       { key: "ultima", header: "Última", render: (row) => (
         <span className="sales-article">
           <strong>{shortDate(row.last_purchase)}</strong>
@@ -130,7 +140,7 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
         </span>
       ), sort: (row) => row.last_purchase ?? "" },
     ];
-    table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.customer_code}`} initialSort={{ key: "compra", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Nadie con estos filtros."} />;
+    table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.customer_code}`} onRowClick={openCustomer} initialSort={{ key: "compra", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Nadie con estos filtros."} />;
     const csvColumns: CsvColumn<CustomerRow>[] = [
       { header: "Sociedad", value: (row) => company(row.company_code) },
       { header: "Código", value: (row) => row.customer_code },
@@ -168,7 +178,7 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
         ? { key: "motivo", header: "Motivo", text: true, render: (row) => row.reason || "—", sort: (row) => row.reason }
         : { key: "pedido", header: "Pedido", render: (row) => (Number(row.ordered_amount) > 0 ? `${euros(Number(row.ordered_amount))} · ${shortDate(row.first_order_on)}` : <span className="muted">—</span>), sort: (row) => Number(row.ordered_amount) },
     ];
-    table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} initialSort={{ key: "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ninguna oferta con estos filtros."} />;
+    table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} onRowClick={openCustomer} initialSort={{ key: "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ninguna oferta con estos filtros."} />;
     csv = () => downloadCsv(filename, list, [
       { header: "Sociedad", value: (row) => company(row.company_code) },
       { header: "Serie", value: (row) => row.series },
@@ -199,7 +209,7 @@ export function SalesListModal({ request, ctx, onClose }: { request: ListRequest
       { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
       { key: "pendiente", header: "Pendiente", render: (row) => (Number(row.pending_amount) > 0 ? euros(Number(row.pending_amount)) : <span className="muted">—</span>), sort: (row) => Number(row.pending_amount) },
     ];
-    table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} initialSort={{ key: request.kind === "pendientes" ? "pendiente" : "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ningún pedido con estos filtros."} />;
+    table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} onRowClick={openCustomer} initialSort={{ key: request.kind === "pendientes" ? "pendiente" : "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ningún pedido con estos filtros."} />;
     csv = () => downloadCsv(filename, list, [
       { header: "Sociedad", value: (row) => company(row.company_code) },
       { header: "Serie", value: (row) => row.series },

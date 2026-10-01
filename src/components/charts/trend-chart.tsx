@@ -5,7 +5,8 @@ import { numberFormatter } from "@/lib/format";
 
 export type TrendSeries = { key: string; label: string; color: string };
 type TrendChartProps = {
-  data: Record<string, number | string>[];
+  /** Un valor null es un hueco: la línea se corta ahí en vez de caer a cero. */
+  data: Record<string, number | string | null>[];
   series: TrendSeries[];
   ariaLabel: string;
   /**
@@ -54,10 +55,24 @@ function yForValue(geometry: Geometry, value: number, min: number, max: number):
   return geometry.padding.top + geometry.chartHeight - ((value - min) / span) * geometry.chartHeight;
 }
 
-function pointsFor(geometry: Geometry, data: TrendChartProps["data"], key: string, min: number, max: number): string {
-  return data
-    .map((row, index) => `${xForIndex(geometry, index, data.length)},${yForValue(geometry, Number(row[key]) || 0, min, max)}`)
-    .join(" ");
+/** El valor de un punto, o null si es un hueco. */
+const valueAt = (row: TrendChartProps["data"][number], key: string): number | null => (row[key] === null ? null : Number(row[key]) || 0);
+
+/** Los tramos de línea de una serie: uno por cada racha de puntos sin huecos. */
+function segmentsFor(geometry: Geometry, data: TrendChartProps["data"], key: string, min: number, max: number): string[] {
+  const segments: string[] = [];
+  let current: string[] = [];
+  data.forEach((row, index) => {
+    const value = valueAt(row, key);
+    if (value === null) {
+      if (current.length > 0) segments.push(current.join(" "));
+      current = [];
+      return;
+    }
+    current.push(`${xForIndex(geometry, index, data.length)},${yForValue(geometry, value, min, max)}`);
+  });
+  if (current.length > 0) segments.push(current.join(" "));
+  return segments;
 }
 
 export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = null }: TrendChartProps) {
@@ -82,7 +97,10 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
 
   const geometry = geometryFor(narrow);
   const { width, height, padding, chartWidth } = geometry;
-  const values = data.flatMap((row) => series.map((item) => Number(row[item.key]) || 0));
+  const values = data.flatMap((row) => series.flatMap((item) => {
+    const value = valueAt(row, item.key);
+    return value === null ? [] : [value];
+  }));
   const max = Math.max(...values, 1);
   // El suelo es el cero salvo que haya negativos, que entonces baja hasta ellos.
   const min = Math.min(...values, 0);
@@ -152,23 +170,29 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
             className="chart-zero"
           />
         ) : null}
-        {series.map((item) => (
-          <polyline key={item.key} points={pointsFor(geometry, data, item.key, min, max)} className="chart-line" style={{ stroke: item.color, pointerEvents: "none" }} />
-        ))}
-        {series.map((item) => data.map((row, index) => (
-          <circle
-            key={`${item.key}-${index}`}
-            cx={xForIndex(geometry, index, data.length)}
-            cy={yForValue(geometry, Number(row[item.key]) || 0, min, max)}
-            r={hoverIndex === index || selectedIndex === index ? (narrow ? 4 : 5) : (narrow ? 3 : 4)}
-            fill={item.color}
-            stroke="white"
-            strokeWidth={2}
-            style={{ pointerEvents: "none" }}
-          />
+        {series.map((item) => segmentsFor(geometry, data, item.key, min, max).map((points, segment) => (
+          <polyline key={`${item.key}-${segment}`} points={points} className="chart-line" style={{ stroke: item.color, pointerEvents: "none" }} />
         )))}
+        {series.map((item) => data.map((row, index) => {
+          const value = valueAt(row, item.key);
+          if (value === null) return null;
+          return (
+            <circle
+              key={`${item.key}-${index}`}
+              cx={xForIndex(geometry, index, data.length)}
+              cy={yForValue(geometry, value, min, max)}
+              r={hoverIndex === index || selectedIndex === index ? (narrow ? 4 : 5) : (narrow ? 3 : 4)}
+              fill={item.color}
+              stroke="white"
+              strokeWidth={2}
+              style={{ pointerEvents: "none" }}
+            />
+          );
+        }))}
         {data.map((row, index) => {
           if (index % labelStep !== 0 && index !== data.length - 1) return null;
+          // La última siempre sale; la de antes, si le queda pegada, se pisarían.
+          if (index !== data.length - 1 && data.length - 1 - index < labelStep / 2) return null;
           const isFirst = index === 0;
           const isLast = index === data.length - 1;
           const anchor = isLast && !isFirst ? "end" : isFirst && !isLast ? "start" : "middle";
@@ -197,7 +221,7 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
                 <div key={item.key} className="chart-tooltip-row">
                   <i style={{ background: item.color }} />
                   <span>{item.label}</span>
-                  <strong>{numberFormatter.format(Number(hovered[item.key]) || 0)}</strong>
+                  <strong>{hovered[item.key] === null ? "—" : numberFormatter.format(Number(hovered[item.key]) || 0)}</strong>
                 </div>
               ))}
               {onSelect ? <em className="chart-tooltip-hint">{selectedIndex === hoverIndex ? "Pulsa para quitar el filtro" : "Pulsa para filtrar"}</em> : null}

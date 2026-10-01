@@ -11,12 +11,13 @@ import {
   sumRows,
   makeRepOf,
   noFilters,
-  periodOf,
-  previousYearMonth,
+  pairOf,
   repPairsFor,
   seriesFor,
   targetsFor,
   targetToDate,
+  yearlyView,
+  type PeriodView,
   type Rep,
   type SalesTarget,
   type SummaryRow,
@@ -34,20 +35,16 @@ const row = (month: string, company: number, series: string, rep: number | null,
   month, company_code: company, series, rep_code: rep, documents: 1, net_amount: net, cost_amount: cost, net_without_cost: 0,
 });
 
-test("periodOf: el año entero, un mes pasado y el mes en curso", () => {
-  const today = new Date(2026, 8, 29);
-  assert.deepEqual(periodOf(2025, null, today), { from: "2025-01-01", to: "2025-12-31", partial: false, previousFrom: "2024-01-01", previousTo: "2024-12-31" });
-  assert.deepEqual(periodOf(2026, "2026-08", today), { from: "2026-08-01", to: "2026-08-31", partial: false, previousFrom: "2025-08-01", previousTo: "2025-08-31" });
-  // El mes en curso acaba hoy y se compara con los mismos días del año anterior.
-  assert.deepEqual(periodOf(2026, "2026-09", today), { from: "2026-09-01", to: "2026-09-29", partial: true, previousFrom: "2025-09-01", previousTo: "2025-09-29" });
-  assert.equal(periodOf(2026, null, today).to, "2026-09-29");
-  // Un 29 de febrero se recorta al 28 del año anterior.
-  assert.equal(periodOf(2028, "2028-02", new Date(2028, 1, 29)).previousTo, "2027-02-28");
-});
+/** El año 2026 hasta septiembre, contra el mismo tramo de 2025. */
+const months2026 = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"];
+const yearView: PeriodView = { months: months2026, monthOffset: -12, comparable: true, versus: "el mismo tramo de 2025", basePartial: true, multiYear: false };
+const companies = [{ code: 1, name: "Intec", is_active: true }];
 
-test("previousYearMonth", () => {
-  assert.equal(previousYearMonth("2026-08"), "2025-08");
-  assert.equal(previousYearMonth(null), null);
+test("pairOf: la pareja de un mes en la comparación", () => {
+  assert.equal(pairOf("2026-08", -12), "2025-08");
+  assert.equal(pairOf("2026-02", -4), "2025-10");
+  assert.equal(pairOf("2026-08", null), null);
+  assert.equal(pairOf(null, -12), null);
 });
 
 test("repPairsFor junta las fichas de la misma persona en varias sociedades", () => {
@@ -81,10 +78,7 @@ test("computeSalesModel: el mes filtra los totales pero no el gráfico ni se fil
     row("2026-08", 1, "CRE", 7, 700),
   ];
   const previousRows = [row("2025-08", 1, "TK", 5, 500)];
-  const model = computeSalesModel({
-    rows, previousRows, filters: { ...noFilters, month: "2026-08" }, shownYear: 2026, companies: [{ code: 1, name: "Intec", is_active: true }],
-    repOf, comparisonIsPartial: true, today: new Date(2026, 8, 29),
-  });
+  const model = computeSalesModel({ rows, previousRows, filters: { ...noFilters, month: "2026-08" }, period: yearView, companies, repOf });
   assert.equal(model.current.net, 1000);
   assert.equal(model.previous.net, 500);
   // El gráfico enseña todos los meses para poder pulsar otro.
@@ -126,17 +120,68 @@ test("el panel señala al comercial que más rebaja y la subida del descuento", 
     discounted("2026-08", 7, 30000, 0.15),
   ];
   const previousRows = [discounted("2025-08", 5, 10000, 0.15), discounted("2025-08", 7, 30000, 0.15)];
-  const model = computeSalesModel({
-    rows, previousRows, filters: noFilters, shownYear: 2026, companies: [{ code: 1, name: "Intec", is_active: true }],
-    repOf, comparisonIsPartial: true, today: new Date(2026, 8, 29),
-  });
+  const model = computeSalesModel({ rows, previousRows, filters: noFilters, period: yearView, companies, repOf });
   assert.equal(Math.round(model.previousDiscount?.percent ?? 0), 15);
   assert.ok((model.currentDiscount?.percent ?? 0) > 17);
   assert.equal(model.hasCommissions, false, "sin comisiones en Sage no se enseña la columna");
   const texts = model.findings.map((finding) => finding.text);
   assert.ok(texts.some((text) => text.startsWith("Sergio Almodóvar Alcaraz rebaja un 30,0 %")), texts.join(" | "));
   assert.ok(texts.some((text) => text.startsWith("El descuento medio sube")), texts.join(" | "));
+  assert.ok(texts.some((text) => text.includes("del mismo tramo de 2025")), texts.join(" | "));
   assert.equal(texts.some((text) => text.startsWith("Ana Ruiz rebaja")), false, "Ana está en la media");
+});
+
+test("comparar con otras fechas: cada mes con su pareja y qué explica la diferencia", () => {
+  // Marzo-junio de 2026 contra noviembre de 2025-febrero de 2026 (el periodo anterior).
+  const period: PeriodView = {
+    months: ["2026-03", "2026-04", "2026-05", "2026-06"], monthOffset: -4, comparable: true,
+    versus: "noviembre de 2025–febrero de 2026", basePartial: false, multiYear: false,
+  };
+  const rows = [row("2026-03", 1, "TK", 5, 1000), row("2026-04", 1, "CRE", 7, 3000), row("2026-06", 1, "CRE", 7, 500)];
+  const previousRows = [row("2025-11", 1, "TK", 5, 2000), row("2025-12", 1, "CRE", 7, 1000)];
+  const model = computeSalesModel({ rows, previousRows, filters: noFilters, period, companies, repOf });
+  assert.equal(model.previous.net, 3000);
+  assert.deepEqual(model.monthly.months.map((month) => month.pair), ["2025-11", "2025-12", "2026-01", "2026-02"]);
+  assert.equal(model.monthly.months[0].beforeNet, 2000);
+  assert.equal(model.monthly.currentMonth, null, "un periodo cerrado no tiene mes en curso");
+  // Sergio baja 1.000 y Ana sube 2.500: la lista va de lo que más sube a lo que más baja.
+  assert.deepEqual(model.differences?.rep.map((item) => [item.label, item.change]), [["Ana Ruiz", 2500], ["Sergio Almodóvar Alcaraz", -1000]]);
+  assert.deepEqual(model.differences?.channel.map((item) => item.key), ["Crédito", "Tienda"]);
+  // Con un mes elegido se compara con su pareja.
+  const april = computeSalesModel({ rows, previousRows, filters: { ...noFilters, month: "2026-04" }, period, companies, repOf });
+  assert.equal(april.current.net, 3000);
+  assert.equal(april.previous.net, 1000);
+});
+
+test("sin una comparación válida no hay flechas, pero mes a mes sí se compara", () => {
+  const period: PeriodView = { ...yearView, comparable: false, versus: null };
+  const rows = [row("2026-08", 1, "TK", 5, 1000)];
+  const previousRows = [row("2025-08", 1, "TK", 5, 500)];
+  const model = computeSalesModel({ rows, previousRows, filters: noFilters, period, companies, repOf });
+  assert.equal(model.previous.net, 0);
+  assert.equal(model.differences, null);
+  assert.equal(model.monthly.months[7].beforeNet, 500);
+});
+
+test("año contra año: la variación solo cuenta los meses cerrados que tienen los dos años", () => {
+  const months = ["2025-11", "2025-12", "2026-01", "2026-02", "2026-03"];
+  const rows = [row("2025-11", 1, "TK", 5, 100), row("2025-12", 1, "TK", 5, 200), row("2026-01", 1, "TK", 5, 300), row("2026-03", 1, "TK", 5, 50)];
+  const view = yearlyView({ rows, filters: noFilters, repOf, months, basePartial: true });
+  assert.deepEqual(view.years, [2025, 2026]);
+  assert.equal(view.points[0].y2026, 300);
+  assert.equal(view.points[0].y2025, null, "enero de 2025 no está en el periodo: la línea se corta, no cae a cero");
+  assert.equal(view.points[10].y2025, 100);
+  assert.equal(view.table[0].change, null, "2025 no tiene nada antes con lo que compararse");
+  assert.equal(view.table[1].bucket.net, 350);
+  assert.equal(view.table[1].change, null, "2026 no tiene ningún mes en común con 2025");
+  assert.equal(view.table[1].complete, false);
+  assert.equal(view.series[1].color, "#4f46e5", "el año más reciente va en el color fuerte");
+
+  const twoYears = ["2024-01", "2024-02", "2025-01", "2025-02", "2025-03"];
+  const history = [row("2024-01", 1, "TK", 5, 100), row("2024-02", 1, "TK", 5, 100), row("2025-01", 1, "TK", 5, 150), row("2025-02", 1, "TK", 5, 150), row("2025-03", 1, "TK", 5, 999)];
+  const compared = yearlyView({ rows: history, filters: noFilters, repOf, months: twoYears, basePartial: true });
+  assert.equal(compared.table[1].change, 50, "enero y febrero contra enero y febrero; marzo va por la mitad");
+  assert.equal(compared.table[1].span, "ene–feb");
 });
 
 test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los días", () => {

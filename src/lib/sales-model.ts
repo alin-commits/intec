@@ -170,44 +170,44 @@ export const euros = (value: number) => `${numberFormatter.format(Math.round(val
 /** El ticket medio son dos o tres dígitos: ahí el céntimo sí dice algo. */
 export const ticketFormatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 
-/**
- * El mismo día del año anterior. Un 29 de febrero daría "2027-02-29", que no
- * existe: Postgres responde "date/time field value out of range" y el panel se
- * quedaría sin datos. Se recorta al último día que tenga ese mes.
- */
-export function sameDayPreviousYear(year: number, today: Date): string {
-  const month = today.getMonth();
-  const lastDay = new Date(year - 1, month + 1, 0).getDate();
-  const day = Math.min(today.getDate(), lastDay);
-  return `${year - 1}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
 const pad = (value: number) => String(value).padStart(2, "0");
-const dateKey = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+/** "2024-03" + n meses. */
+export function shiftMonth(month: string, count: number): string {
+  const [year, number] = month.split("-").map(Number);
+  const index = year * 12 + (number - 1) + count;
+  return `${Math.floor(index / 12)}-${pad((index % 12) + 1)}`;
+}
+/** La pareja de un mes en la comparación ("2026-08" → "2025-08"), o null si no se compara. */
+export const pairOf = (month: string | null, offset: number | null) => (month && offset !== null ? shiftMonth(month, offset) : null);
+/** "ago", o "ago 25" cuando el periodo abarca varios años. */
+export const monthLabel = (month: string, withYear: boolean) => {
+  const name = monthNames[Number(month.slice(5, 7)) - 1] ?? month;
+  return withYear ? `${name} ${month.slice(2, 4)}` : name;
+};
+/** "agosto de 2025", para las frases. */
+export const monthWithYear = (month: string) => `${monthName(month)} de ${month.slice(0, 4)}`;
+/** "de 2025", pero "del mismo tramo de 2025". */
+const ofPhrase = (versus: string) => (versus.startsWith("el ") ? `del ${versus.slice(3)}` : `de ${versus}`);
 
 /**
- * El periodo que se mira: el año entero, o un mes si se ha pulsado uno. Un
- * periodo en curso acaba hoy, y se compara con el mismo tramo del año anterior
- * (si no, en septiembre siempre parecería que se ha vendido un 30 % menos).
+ * Lo que el modelo necesita saber del periodo. Lo calcula resolvePeriod (de
+ * lib/sales-period), que aquí no se importa para que los tests lo carguen tal cual.
  */
-export function periodOf(year: number, month: string | null, today: Date): { from: string; to: string; partial: boolean; previousFrom: string; previousTo: string } {
-  const todayKey = dateKey(today);
-  let from = `${year}-01-01`;
-  let to = `${year}-12-31`;
-  if (month) {
-    const [y, m] = month.split("-").map(Number);
-    from = `${month}-01`;
-    to = `${month}-${pad(new Date(y, m, 0).getDate())}`;
-  }
-  const partial = to >= todayKey && from <= todayKey;
-  if (partial) to = todayKey;
-  const shift = (key: string) => {
-    const [y, m, d] = key.split("-").map(Number);
-    const lastDay = new Date(y - 1, m, 0).getDate();
-    return `${y - 1}-${pad(m)}-${pad(Math.min(d, lastDay))}`;
-  };
-  return { from, to, partial, previousFrom: shift(from), previousTo: shift(to) };
-}
+export type PeriodView = {
+  /** Los meses del periodo entero. */
+  months: string[];
+  /** Cuántos meses hay que mover un mes para dar con su pareja; null si no se compara. */
+  monthOffset: number | null;
+  /** Si el total se puede comparar (hay comparación y tiene datos). */
+  comparable: boolean;
+  /** Tras "que en": "2025", "el mismo tramo de 2025", "agosto de 2025"... */
+  versus: string | null;
+  /** Si el periodo entero acaba hoy: su último mes va por la mitad. */
+  basePartial: boolean;
+  /** Si los meses son de más de un año. */
+  multiYear: boolean;
+};
 
 /**
  * Con un "antes" negativo —un comercial que ya solo arrastra abonos, un canal
@@ -217,10 +217,13 @@ export function periodOf(year: number, month: string | null, today: Date): { fro
  * no comparar.
  */
 export const variation = (now: number, before: number) => (before > 0 ? ((now - before) / before) * 100 : null);
-export const delta = (value: number | null) =>
-  value === null
-    ? { delta: "Sin comparación", positive: true }
-    : { delta: `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} %`, positive: value >= 0 };
+/** Redondeado a una décima, y sin "-0,0": un -0,02 % no es una bajada que pintar en rojo. */
+export const tenths = (value: number) => Math.round(value * 10) / 10 || 0;
+export const delta = (value: number | null) => {
+  if (value === null) return { delta: "Sin comparación", positive: true };
+  const rounded = tenths(value);
+  return { delta: `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1).replace(".", ",")} %`, positive: rounded >= 0 };
+};
 
 /**
  * En Sage la misma persona está dada de alta varias veces: un código por
@@ -381,30 +384,31 @@ export function targetToDate(months: (number | null)[], year: number, today: Dat
   return counted.length > 0 ? { target, months: counted } : null;
 }
 
-/** El mismo mes del año anterior ("2026-08" → "2025-08"). */
-export const previousYearMonth = (month: string | null) => (month ? `${Number(month.slice(0, 4)) - 1}${month.slice(4)}` : null);
-
 export type SalesModel = ReturnType<typeof computeSalesModel>;
 
+/** Cuánto sube o baja un comercial, un canal o una sociedad de un periodo al otro. */
+export type Difference = { key: string; label: string; now: number; before: number; change: number; muted: boolean };
+
 /**
- * Todo lo que se pinta de las ventas a partir de las filas del año elegido y
- * del mismo tramo del anterior, con los filtros puestos.
+ * Todo lo que se pinta de las ventas a partir de las filas del periodo y de
+ * las del periodo con el que se compara, con los filtros puestos.
  */
 export function computeSalesModel(input: {
   rows: SummaryRow[];
   previousRows: SummaryRow[];
   filters: SalesFilters;
-  shownYear: number;
+  period: PeriodView;
   companies: Company[];
   repOf: (companyCode: number, repCode: number | null) => RepIdentity;
-  comparisonIsPartial: boolean;
-  today: Date;
 }) {
-  const { rows, previousRows, filters, shownYear, companies, repOf, comparisonIsPartial, today } = input;
-  const previousMonth = previousYearMonth(filters.month);
+  const { rows, previousRows, filters, period, companies, repOf } = input;
+  const pairMonth = pairOf(filters.month, period.monthOffset);
+  // Sin una comparación válida del total, el "antes" se queda vacío y las
+  // flechas dicen "Sin comparación". Mes a mes se sigue comparando lo que haya.
+  const comparedRows = period.comparable ? previousRows : [];
 
   const visible = filterRows(rows, filters, repOf);
-  const visibleBefore = filterRows(previousRows, filters, repOf, [], previousMonth);
+  const visibleBefore = filterRows(comparedRows, filters, repOf, [], pairMonth);
   const current = sumRows(visible);
   const previous = sumRows(visibleBefore);
   const currentMargin = bucketMargin(current);
@@ -413,13 +417,15 @@ export function computeSalesModel(input: {
   /**
    * El coste solo vale desde noviembre de 2025, así que en 2026 el margen cubre
    * doce meses y el de 2025 solo dos. Compararlos daría un +500 % con flecha
-   * verde. Solo se compara cuando los dos periodos cubren los mismos meses.
+   * verde. Solo se compara cuando los dos periodos cubren los mismos meses,
+   * cada uno con su pareja.
    */
   const trustedMonthsOf = (list: SummaryRow[]) =>
-    new Set(list.filter((row) => row.month >= COST_TRUSTED_FROM_MONTH).map((row) => row.month.slice(5)));
+    new Set(list.filter((row) => row.month >= COST_TRUSTED_FROM_MONTH).map((row) => row.month));
   const nowMonths = trustedMonthsOf(visible);
   const beforeMonths = trustedMonthsOf(visibleBefore);
-  const marginSpansMatch = nowMonths.size > 0 && nowMonths.size === beforeMonths.size && [...nowMonths].every((month) => beforeMonths.has(month));
+  const paired = new Set([...nowMonths].map((month) => pairOf(month, period.monthOffset)));
+  const marginSpansMatch = nowMonths.size > 0 && paired.size === beforeMonths.size && [...beforeMonths].every((month) => paired.has(month));
   const withoutCostShare = current.costNet > 0 ? (current.withoutCost / current.costNet) * 100 : 0;
   /** Venta del periodo que se queda fuera del margen por venir de las series viejas. */
   const netBeforeSeriesChange = current.net - current.costNet;
@@ -435,24 +441,25 @@ export function computeSalesModel(input: {
     return map;
   };
   const monthNow = byMonth(filterRows(rows, filters, repOf, ["month"]));
-  // El año anterior llega recortado al mismo día que hoy, así que su mes en
-  // curso mide lo mismo que el nuestro: septiembre a medias contra septiembre
-  // a medias.
+  // Comparando con el año anterior, este llega recortado al mismo día que hoy,
+  // así que su mes en curso mide lo mismo que el nuestro: septiembre a medias
+  // contra septiembre a medias.
   const monthBefore = byMonth(filterRows(previousRows, filters, repOf, ["month"]));
-  // Un año en curso se corta en el mes de hoy: si se pintan los doce, la
-  // línea cae a cero en octubre y parece que la empresa se ha hundido.
-  const lastMonth = shownYear === today.getFullYear() ? today.getMonth() : 11;
-  const months = Array.from({ length: lastMonth + 1 }, (_, index) => {
-    const suffix = String(index + 1).padStart(2, "0");
-    const key = `${shownYear}-${suffix}`;
+  // Los meses del periodo, que nunca pasan de hoy: si se pintaran los doce de
+  // un año en curso, la línea caería a cero en octubre y parecería que la
+  // empresa se ha hundido.
+  const months = period.months.map((key, index) => {
     const bucket = monthNow.get(key) ?? emptyBucket();
+    const pair = pairOf(key, period.monthOffset);
     return {
       index,
       key,
-      label: monthNames[index],
+      label: monthLabel(key, period.multiYear),
+      /** El mes con el que se compara. */
+      pair,
       bucket,
       margin: bucketMargin(bucket),
-      beforeNet: (monthBefore.get(`${shownYear - 1}-${suffix}`) ?? emptyBucket()).net,
+      beforeNet: pair ? (monthBefore.get(pair) ?? emptyBucket()).net : 0,
     };
   });
   let runNow = 0;
@@ -464,7 +471,7 @@ export function computeSalesModel(input: {
     runMargin += month.margin?.amount ?? 0;
     return { label: month.label, ventas: Math.round(runNow), anterior: Math.round(runBefore), margen: Math.round(runMargin) };
   });
-  const currentMonth = shownYear === today.getFullYear() ? months[months.length - 1] ?? null : null;
+  const currentMonth = period.basePartial ? months[months.length - 1] ?? null : null;
   const monthly = {
     months,
     currentMonth,
@@ -499,7 +506,7 @@ export function computeSalesModel(input: {
 
   // ---- Por comercial: sin el filtro de comercial ----
   const forReps = filterRows(rows, filters, repOf, ["rep"]);
-  const forRepsBefore = filterRows(previousRows, filters, repOf, ["rep"], previousMonth);
+  const forRepsBefore = filterRows(comparedRows, filters, repOf, ["rep"], pairMonth);
   const repMap = new Map<string, { name: string; assigned: boolean; isPerson: boolean; bucket: Bucket }>();
   for (const row of forReps) {
     const who = repOf(row.company_code, row.rep_code);
@@ -555,9 +562,7 @@ export function computeSalesModel(input: {
   // ---- Lo que hay que mirar ----
   const findings: Finding[] = [];
   if (repsTotal.net > 0) {
-    const desde = filters.month
-      ? `${monthName(filters.month)} de ${shownYear - 1}`
-      : comparisonIsPartial ? `el mismo tramo de ${shownYear - 1}` : String(shownYear - 1);
+    const desde = period.versus ?? "";
     // Solo se compara a quien ya vendía: el que empezó este año no "cae" ni "sube".
     const comparables = byRep
       .filter((rep) => rep.isPerson && rep.beforeNet > (filters.month ? 5000 : 50000))
@@ -623,19 +628,19 @@ export function computeSalesModel(input: {
     const nowDiscount = bucketDiscount(current);
     const beforeDiscount = bucketDiscount(previous);
     if (nowDiscount && beforeDiscount && nowDiscount.percent - beforeDiscount.percent >= 2) {
-      const desde = filters.month ? `${monthName(filters.month)} de ${shownYear - 1}` : String(shownYear - 1);
       findings.push({
         tone: "warn",
-        text: `El descuento medio sube al ${formatPercent(nowDiscount.percent)}, frente al ${formatPercent(beforeDiscount.percent)} de ${desde}: cada punto de descuento cuesta unos ${euros(current.gross / 100)}.`,
+        text: `El descuento medio sube al ${formatPercent(nowDiscount.percent)}, frente al ${formatPercent(beforeDiscount.percent)} ${ofPhrase(desde)}: cada punto de descuento cuesta unos ${euros(current.gross / 100)}.`,
       });
     }
     // Decir que agosto es el mes más flojo no es un hallazgo, lo es todos los
-    // años. Lo que importa es el mes que vende menos que ese mismo mes del año
-    // pasado. El mes en curso se deja fuera porque va por la mitad.
+    // años. Lo que importa es el mes que vende menos que su pareja (el mismo
+    // mes del año pasado, si se compara con él). El mes en curso se deja fuera
+    // porque va por la mitad.
     if (!filters.month) {
-      const ongoing = shownYear === today.getFullYear() ? today.getMonth() : 12;
+      const ongoing = period.basePartial ? months.length - 1 : months.length;
       months
-        .filter((month) => month.index < ongoing && month.beforeNet > 0 && month.bucket.net > 0)
+        .filter((month) => month.index < ongoing && month.pair !== null && month.beforeNet > 0 && month.bucket.net > 0)
         .map((month) => ({ month, change: ((month.bucket.net - month.beforeNet) / month.beforeNet) * 100 }))
         .filter((item) => item.change <= -15)
         .sort((a, b) => a.change - b.change)
@@ -643,10 +648,47 @@ export function computeSalesModel(input: {
         .forEach(({ month, change }) => findings.push({
           tone: "bad",
           filter: { month: month.key },
-          text: `En ${month.label} se vendió un ${formatPercent(Math.abs(change))} menos que en ${month.label} de ${shownYear - 1}: ${euros(month.bucket.net)} frente a ${euros(month.beforeNet)}.`,
+          text: `En ${monthWithYear(month.key)} se vendió un ${formatPercent(Math.abs(change))} menos que en ${monthWithYear(month.pair ?? month.key)}: ${euros(month.bucket.net)} frente a ${euros(month.beforeNet)}.`,
         }));
     }
   }
+
+  // ---- Qué explica la diferencia entre un periodo y el otro ----
+  const differencesOf = (
+    nowList: SummaryRow[],
+    beforeList: SummaryRow[],
+    who: (row: SummaryRow) => { key: string; label: string; muted?: boolean },
+  ): Difference[] => {
+    const map = new Map<string, Difference>();
+    const add = (row: SummaryRow, field: "now" | "before") => {
+      const item = who(row);
+      const entry = map.get(item.key) ?? { key: item.key, label: item.label, now: 0, before: 0, change: 0, muted: item.muted ?? false };
+      entry[field] += Number(row.net_amount);
+      map.set(item.key, entry);
+    };
+    for (const row of nowList) add(row, "now");
+    for (const row of beforeList) add(row, "before");
+    return [...map.values()].map((entry) => ({ ...entry, change: entry.now - entry.before })).sort((a, b) => b.change - a.change);
+  };
+  // Cada lista sin su propio filtro, como los rankings: pulsar uno filtra por él.
+  const differences = period.comparable
+    ? {
+        rep: differencesOf(forReps, forRepsBefore, (row) => {
+          const who = repOf(row.company_code, row.rep_code);
+          return { key: who.key, label: who.label, muted: !who.assigned || who.key === UNASSIGNED_KEY };
+        }),
+        channel: differencesOf(
+          filterRows(rows, filters, repOf, ["channel"]),
+          filterRows(comparedRows, filters, repOf, ["channel"], pairMonth),
+          (row) => ({ key: channelLabel(row.series), label: channelLabel(row.series) }),
+        ),
+        company: differencesOf(
+          filterRows(rows, filters, repOf, ["company"]),
+          filterRows(comparedRows, filters, repOf, ["company"], pairMonth),
+          (row) => ({ key: String(row.company_code), label: companies.find((company) => company.code === row.company_code)?.name ?? `Sociedad ${row.company_code}` }),
+        ),
+      }
+    : null;
 
   return {
     visible,
@@ -672,9 +714,71 @@ export function computeSalesModel(input: {
     byChannel,
     channelMargins,
     findings,
+    differences,
     available: {
       channels: new Set(rows.map((row) => channelLabel(row.series))),
       reps: new Set(rows.map((row) => repOf(row.company_code, row.rep_code).key)),
     },
+  };
+}
+
+/** Los colores de los años, del más reciente (el fuerte) hacia atrás. */
+export const yearColors = ["#4f46e5", "#0ea5e9", "#f59e0b", "#10b981", "#ec4899", "#94a3b8", "#a16207"];
+
+/**
+ * Un año contra otro: la venta de cada año mes a mes, para pintarlos uno
+ * encima de otro, y el total de cada año con su variación.
+ *
+ * La variación solo cuenta los meses cerrados que tienen los dos años: el mes
+ * en curso va por la mitad, y el primer año del histórico no está entero (2023
+ * contra agosto-diciembre de 2022 daría un +140 % que no es verdad). Cuando no
+ * son los doce meses se dice cuáles son.
+ */
+export function yearlyView(input: {
+  rows: SummaryRow[];
+  filters: SalesFilters;
+  repOf: (companyCode: number, repCode: number | null) => RepIdentity;
+  months: string[];
+  basePartial: boolean;
+}) {
+  const { rows, filters, repOf, months, basePartial } = input;
+  const byMonth = groupRows(filterRows(rows, filters, repOf, ["month"]), (row) => row.month);
+  const years = [...new Set(months.map((month) => Number(month.slice(0, 4))))].sort((a, b) => a - b);
+  const inPeriod = new Set(months);
+  const closed = new Set(basePartial ? months.slice(0, -1) : months);
+  // Un mes fuera del periodo no es un cero: la línea se corta en vez de caer.
+  const points = monthNames.map((label, index) => {
+    const point: Record<string, number | string | null> = { label };
+    for (const year of years) {
+      const key = `${year}-${pad(index + 1)}`;
+      point[`y${year}`] = inPeriod.has(key) ? Math.round(byMonth.get(key)?.net ?? 0) : null;
+    }
+    return point;
+  });
+  const table = years.map((year) => {
+    const own = months.filter((month) => month.startsWith(`${year}-`));
+    const bucket = own.reduce((total, month) => mergeBucket(total, byMonth.get(month) ?? emptyBucket()), emptyBucket());
+    const common = own.filter((month) => closed.has(month) && closed.has(shiftMonth(month, -12)));
+    const now = common.reduce((sum, month) => sum + (byMonth.get(month)?.net ?? 0), 0);
+    const before = common.reduce((sum, month) => sum + (byMonth.get(shiftMonth(month, -12))?.net ?? 0), 0);
+    const span = common.length === 0 || common.length === 12
+      ? null
+      : `${monthNames[Number(common[0].slice(5, 7)) - 1]}–${monthNames[Number(common[common.length - 1].slice(5, 7)) - 1]}`;
+    return {
+      year,
+      bucket,
+      /** Meses del año dentro del periodo, y si están todos cerrados. */
+      months: own.length,
+      complete: own.length === 12 && own.every((month) => closed.has(month)),
+      change: common.length > 0 ? variation(now, before) : null,
+      /** Los meses que entran en la variación, cuando no son los doce. */
+      span,
+    };
+  });
+  return {
+    years,
+    points,
+    table,
+    series: years.map((year, index) => ({ key: `y${year}`, label: String(year), color: yearColors[(years.length - 1 - index) % yearColors.length] })),
   };
 }

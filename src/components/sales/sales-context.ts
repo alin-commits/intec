@@ -1,4 +1,5 @@
 import type { Company, Rep, RepIdentity, SalesFilters, SalesModel, SalesTarget, SummaryRow } from "@/lib/sales-model";
+import type { PeriodChoice, SalesPeriod } from "@/lib/sales-period";
 
 /*
   Lo que la carcasa del cuadro de mando de ventas reparte a cada página: los
@@ -23,6 +24,21 @@ export const salesPages: { key: SalesPageKey; label: string; applies: SalesDimen
 ];
 
 export type CustomerKind = "activos" | "nuevos" | "recurrentes" | "recuperados" | "perdidos" | "sin_compra";
+
+/**
+ * Los perdidos son los habituales del año anterior que en el año en curso no
+ * han comprado nada; el año en curso es el del final del periodo que se mira.
+ */
+export function lostCustomers(period: SalesPeriod) {
+  const year = Number(period.to.slice(0, 4));
+  const previous = year - 1;
+  return {
+    year,
+    previous,
+    title: `Clientes de ${previous} que en ${year} no han comprado`,
+    description: `Clientes habituales de ${previous} (compraron en 2 días o más) que en ${year} todavía no han comprado nada. Son los primeros a los que llamar. Los de una sola compra no cuentan.`,
+  };
+}
 export type OfferKind = "todas" | "vivas" | "convertidas" | "rechazadas" | "caducadas";
 export type OrderKind = "todos" | "pendientes" | "tarde";
 
@@ -34,18 +50,24 @@ export type ListRequest =
 
 export type FamilyName = { company_code: number; code: string; name: string };
 
-/** El periodo que se mira y el mismo tramo del año anterior. */
-export type SalesPeriod = { from: string; to: string; partial: boolean; previousFrom: string; previousTo: string };
+/** Un cliente de Sage, para abrir su ficha. El nombre, si se sabe, sale mientras carga. */
+export type CustomerRef = { company_code: number; customer_code: string; name?: string | null };
 
 /** Qué detalle ha mandado ya el agente de Sage (hasta que lo mande, se avisa). */
 export type SageDetail = { customers: boolean; articles: boolean; offers: boolean; orders: boolean; incidents: boolean };
 
 export type SalesContext = {
-  /** El año elegido y el de las filas cargadas (mientras carga no coinciden). */
-  year: number;
-  shownYear: number;
   basis: "albaran" | "factura";
-  /** Los filtros que de verdad se aplican (sin los que no existen este año). */
+  /**
+   * El periodo de las filas cargadas y con qué se compara (mientras llega otro
+   * se sigue enseñando este), con el mes elegido ya aplicado.
+   */
+  period: SalesPeriod;
+  /** Cómo se llama lo que se mira en una frase: "2026", "agosto", "todos los años"... */
+  periodName: string;
+  /** Cambia el periodo (la página de Objetivos lleva a un año). */
+  choosePeriod: (choice: PeriodChoice) => void;
+  /** Los filtros que de verdad se aplican (sin los que no existen en el periodo). */
   filters: SalesFilters;
   setFilters: (patch: Partial<SalesFilters>) => void;
   /** Pone un filtro, o lo quita si ya estaba puesto con ese valor. */
@@ -59,19 +81,21 @@ export type SalesContext = {
   rows: SummaryRow[];
   previousRows: SummaryRow[];
   model: SalesModel;
-  period: SalesPeriod;
   /** Los filtros tal como los piden las funciones de la base de datos. */
   rpc: { p_company: number | null; p_reps: string[] | null; p_series: string[] | null; p_family: string | null };
   companyLabel: string;
+  /** "frente a 2025", "frente al mismo tramo de 2025", o por qué no se compara. */
   comparisonHelper: string;
+  /** Si hay con qué comparar el total del periodo. */
   comparisonAvailable: boolean;
-  comparisonIsPartial: boolean;
   reloadKey: number;
   today: Date;
   targets: SalesTarget[];
   reloadTargets: () => void;
   detail: SageDetail;
   openList: (request: ListRequest) => void;
+  /** Abre la ficha de un cliente: su evolución de compra, sus pedidos y ofertas. */
+  openCustomer: (customer: CustomerRef) => void;
   goTo: (page: SalesPageKey) => void;
   canSeeLeads: boolean;
 };

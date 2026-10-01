@@ -12,13 +12,16 @@ import {
   groupRows,
   mergeBucket,
   monthName,
-  previousYearMonth,
+  monthWithYear,
+  pairOf,
+  tenths,
   ticketFormatter,
   UNASSIGNED_KEY,
   variation,
   type Bucket,
   type SummaryRow,
 } from "@/lib/sales-model";
+import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
@@ -31,9 +34,12 @@ import { DataTable, LoadFailed, Panel, useSageQuery, type Column } from "./sales
 */
 
 const change = (now: number, before: number) => {
-  const value = variation(now, before);
-  if (value === null) return <span className="muted">—</span>;
-  return <span className={value >= 0 ? "sales-up" : "sales-down"}>{value >= 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %</span>;
+  const raw = variation(now, before);
+  if (raw === null) return <span className="muted">—</span>;
+  // Sin "-0,0 %" en rojo: lo que no se mueve ni una décima va sin color.
+  const value = tenths(raw);
+  if (value === 0) return <span>0,0 %</span>;
+  return <span className={value > 0 ? "sales-up" : "sales-down"}>{value > 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %</span>;
 };
 const marginCell = (bucket: Bucket, kind: "amount" | "percent") => {
   const margin = bucketMargin(bucket);
@@ -51,22 +57,28 @@ const discountSort = (bucket: Bucket) => bucketDiscount(bucket)?.percent ?? -Inf
 const commissionCell = (bucket: Bucket) => (bucket.commission ? euros(bucket.commission) : <span className="muted">—</span>);
 
 export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
-  const { model, filters, shownYear } = ctx;
-  const previousMonth = previousYearMonth(filters.month);
+  const { model, filters, period } = ctx;
+  const pairMonth = pairOf(filters.month, period.monthOffset);
+  /** Mes a mes se compara si hay algo cargado al lado, aunque el total no se pueda comparar. */
+  const monthCompared = period.baseCompare !== null;
 
-  // Canales con su venta del año anterior, para la columna de variación.
+  // Canales con su venta del periodo con el que se compara, para la columna de variación.
   const channelNow = model.byChannel.buckets;
-  const channelBefore = groupRows(filterRows(ctx.previousRows, filters, ctx.repOf, ["channel"], previousMonth), (row) => channelLabel(row.series));
+  const channelBefore = groupRows(filterRows(ctx.comparisonAvailable ? ctx.previousRows : [], filters, ctx.repOf, ["channel"], pairMonth), (row) => channelLabel(row.series));
   const channels = [...channelNow]
     .filter(([label]) => model.byChannel.real.has(label) || (channelNow.get(label)?.net ?? 0) !== 0)
     .map(([label, bucket]) => ({ label, bucket, before: channelBefore.get(label)?.net ?? 0 }));
+  const versusHeader = `vs ${period.compareShort ?? ""}`;
 
   type MonthRow = (typeof model.monthly.months)[number];
   const monthColumns: Column<MonthRow>[] = [
-    { key: "mes", header: "Mes", text: true, render: (row) => <span className="sales-capitalize">{monthName(row.key)}</span>, sort: (row) => row.key },
+    { key: "mes", header: "Mes", text: true, render: (row) => <span className="sales-capitalize">{period.multiYear ? monthWithYear(row.key) : monthName(row.key)}</span>, sort: (row) => row.key },
     { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
-    { key: "antes", header: String(shownYear - 1), optional: true, render: (row) => (row.beforeNet ? euros(row.beforeNet) : <span className="muted">—</span>), sort: (row) => row.beforeNet },
-    { key: "var", header: "Variación", render: (row) => change(row.bucket.net, row.beforeNet), sort: (row) => variation(row.bucket.net, row.beforeNet) ?? -Infinity },
+    ...(monthCompared ? [
+      // Cada fila lleva al lado su pareja: con un año contra el anterior, la columna es ese año.
+      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (row.beforeNet ? euros(row.beforeNet) : <span className="muted">—</span>), sort: (row: MonthRow) => row.beforeNet },
+      { key: "var", header: "Variación", render: (row: MonthRow) => change(row.bucket.net, row.beforeNet), sort: (row: MonthRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity },
+    ] : []),
     { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity },
     { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
@@ -78,7 +90,9 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const repColumns: Column<RepRow>[] = [
     { key: "nombre", header: "Comercial", text: true, render: (row) => <span className={row.key === UNASSIGNED_KEY ? "muted" : undefined}>{row.name}</span>, sort: (row) => row.name },
     { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
-    { key: "var", header: `vs ${shownYear - 1}`, render: (row) => change(row.bucket.net, row.beforeNet), sort: (row) => variation(row.bucket.net, row.beforeNet) ?? -Infinity },
+    ...(ctx.comparisonAvailable
+      ? [{ key: "var", header: versusHeader, render: (row: RepRow) => change(row.bucket.net, row.beforeNet), sort: (row: RepRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity }]
+      : []),
     { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity },
     { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
@@ -94,7 +108,9 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const channelColumns: Column<ChannelRow>[] = [
     { key: "canal", header: "Canal", text: true, render: (row) => row.label, sort: (row) => row.label },
     { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
-    { key: "var", header: `vs ${shownYear - 1}`, render: (row) => change(row.bucket.net, row.before), sort: (row) => variation(row.bucket.net, row.before) ?? -Infinity },
+    ...(ctx.comparisonAvailable
+      ? [{ key: "var", header: versusHeader, render: (row: ChannelRow) => change(row.bucket.net, row.before), sort: (row: ChannelRow) => variation(row.bucket.net, row.before) ?? -Infinity }]
+      : []),
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => bucketMargin(row.bucket)?.percent ?? -Infinity },
     { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
     { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
@@ -112,7 +128,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
       <section className="sales-board">
         <Panel
-          title={`Mes a mes en ${shownYear}`}
+          title={`Mes a mes en ${period.baseLabel}`}
           subtitle="Pulsa un mes para filtrar todo el panel; pulsa una cabecera para ordenar"
           className="panel table-panel sales-board-full"
         >
@@ -126,8 +142,12 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
               <tr>
                 <td className="is-text"><strong>Total</strong></td>
                 <td><strong>{euros(monthTotal.net)}</strong></td>
-                <td className="is-optional">{monthBefore ? euros(monthBefore) : "—"}</td>
-                <td>{change(monthTotal.net, monthBefore)}</td>
+                {monthCompared ? (
+                  <>
+                    <td className="is-optional">{monthBefore ? euros(monthBefore) : "—"}</td>
+                    <td>{change(monthTotal.net, monthBefore)}</td>
+                  </>
+                ) : null}
                 <td className="is-optional">{marginCell(monthTotal, "amount")}</td>
                 <td>{marginCell(monthTotal, "percent")}</td>
                 <td>{discountCell(monthTotal)}</td>
@@ -140,7 +160,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
         <Panel
           title="Comerciales"
-          subtitle={`Venta, margen, descuento (Dto., rebaja sobre tarifa) y ticket de cada uno${filters.month ? ` en ${monthName(filters.month)}` : ""}. Pulsa uno para filtrar`}
+          subtitle={`Venta, margen, descuento (Dto., rebaja sobre tarifa) y ticket de cada uno${filters.month ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
           className="panel table-panel sales-board-half"
         >
           <DataTable
@@ -156,7 +176,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
         <Panel
           title="Canales"
-          subtitle={`Venta y margen por canal${filters.month ? ` en ${monthName(filters.month)}` : ""}. Pulsa uno para filtrar`}
+          subtitle={`Venta y margen por canal${filters.month ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
           className="panel table-panel sales-board-half"
         >
           <DataTable
@@ -175,12 +195,15 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
 type DailyRow = Omit<SummaryRow, "month"> & { day: string };
 
-/** La venta de un mes día a día y por semanas, contra el mismo mes del año anterior. */
+/**
+ * La venta de un mes día a día y por semanas, contra su pareja en la
+ * comparación: el mismo mes del año anterior, o el mes que le toca en el otro
+ * periodo. Los días se emparejan por su posición: el primero con el primero.
+ */
 function DailyPanel({ ctx }: { ctx: SalesContext }) {
-  const { filters, shownYear } = ctx;
-  const month = filters.month as string;
-  const before = previousYearMonth(month) as string;
-  const key = JSON.stringify([ctx.basis, month, ctx.reloadKey]);
+  const { filters, period } = ctx;
+  const compare = period.compare;
+  const key = JSON.stringify([ctx.basis, period.from, period.to, compare, ctx.reloadKey]);
   const daily = useSageQuery<{ now: SummaryRow[]; before: SummaryRow[] }>(key, async () => {
     const supabase = createClient();
     const load = (from: string, to: string) =>
@@ -189,7 +212,10 @@ function DailyPanel({ ctx }: { ctx: SalesContext }) {
           .select("day, company_code, series, rep_code, documents, net_amount, cost_amount, net_without_cost")
           .eq("basis", ctx.basis).gte("day", from).lte("day", to)
           .order("id").range(start, end));
-    const [now, then] = await Promise.all([load(`${month}-01`, ctx.period.to), load(`${before}-01`, ctx.period.previousTo)]);
+    const [now, then] = await Promise.all([
+      load(period.from, period.to),
+      compare ? load(compare.from, compare.to) : Promise.resolve({ data: [] as DailyRow[], error: null }),
+    ]);
     const error = now.error ?? then.error;
     // El día hace de "mes" para poder usar los mismos filtros y sumas.
     const asRows = (list: DailyRow[]) => list.map(({ day, ...rest }) => ({ ...rest, month: day }));
@@ -199,26 +225,29 @@ function DailyPanel({ ctx }: { ctx: SalesContext }) {
   if (daily.failed) return <section className="panel panel-padded"><LoadFailed what="la venta día a día" /></section>;
   if (!daily.data) return <section className="panel panel-padded"><p className="muted">Cargando la venta día a día…</p></section>;
 
-  const nowByDay = groupRows(filterRows(daily.data.now, filters, ctx.repOf, ["month"]), (row) => Number(row.month.slice(8, 10)));
-  const beforeByDay = groupRows(filterRows(daily.data.before, filters, ctx.repOf, ["month"]), (row) => Number(row.month.slice(8, 10)));
-  const [year, monthNumber] = month.split("-").map(Number);
-  const lastDay = ctx.period.partial ? Number(ctx.period.to.slice(8, 10)) : new Date(year, monthNumber, 0).getDate();
-  const points = Array.from({ length: lastDay }, (_, index) => ({
-    label: String(index + 1),
+  const nowByDay = groupRows(filterRows(daily.data.now, filters, ctx.repOf, ["month"]), (row) => dayCount(period.from, row.month));
+  const beforeByDay = compare
+    ? groupRows(filterRows(daily.data.before, filters, ctx.repOf, ["month"]), (row) => dayCount(compare.from, row.month))
+    : new Map<number, Bucket>();
+  const length = dayCount(period.from, period.to);
+  const days = Array.from({ length }, (_, index) => addDays(period.from, index));
+  const points = days.map((day, index) => ({
+    label: String(Number(day.slice(8, 10))),
     ventas: Math.round(nowByDay.get(index + 1)?.net ?? 0),
     anterior: Math.round(beforeByDay.get(index + 1)?.net ?? 0),
   }));
 
   // Semanas de lunes a domingo dentro del mes.
   const weeks: { start: number; end: number; net: number; before: number }[] = [];
-  for (let day = 1; day <= lastDay; day += 1) {
-    const weekday = new Date(year, monthNumber - 1, day).getDay();
-    if (day === 1 || weekday === 1) weeks.push({ start: day, end: day, net: 0, before: 0 });
+  days.forEach((day, index) => {
+    const number = Number(day.slice(8, 10));
+    const weekday = new Date(`${day}T12:00:00`).getDay();
+    if (index === 0 || weekday === 1) weeks.push({ start: number, end: number, net: 0, before: 0 });
     const week = weeks[weeks.length - 1];
-    week.end = day;
-    week.net += nowByDay.get(day)?.net ?? 0;
-    week.before += beforeByDay.get(day)?.net ?? 0;
-  }
+    week.end = number;
+    week.net += nowByDay.get(index + 1)?.net ?? 0;
+    week.before += beforeByDay.get(index + 1)?.net ?? 0;
+  });
   const sellingDays = points.filter((point) => point.ventas !== 0).length;
   const total = points.reduce((sum, point) => sum + point.ventas, 0);
   const best = points.reduce((top, point) => (point.ventas > top.ventas ? point : top), points[0] ?? { label: "—", ventas: 0, anterior: 0 });
@@ -227,17 +256,17 @@ function DailyPanel({ ctx }: { ctx: SalesContext }) {
   return (
     <section className="sales-board">
       <Panel
-        title={`${monthName(month).replace(/^./, (letter) => letter.toUpperCase())} día a día`}
-        subtitle={`Con ${monthName(month)} de ${shownYear - 1} en gris${ctx.period.partial ? ", hasta hoy" : ""}`}
+        title={`${ctx.periodName.replace(/^./, (letter) => letter.toUpperCase())} día a día`}
+        subtitle={`${compare ? `Con ${period.compareShort} en gris` : "Sin comparar"}${period.partial ? ", hasta hoy" : ""}`}
         className="panel chart-panel sales-board-wide"
       >
         <TrendChart
           data={points}
           series={[
-            { key: "anterior", label: String(shownYear - 1), color: "#cbd5e1" },
+            ...(compare ? [{ key: "anterior", label: period.compareShort ?? "", color: "#cbd5e1" }] : []),
             { key: "ventas", label: "Ventas", color: "#4f46e5" },
           ]}
-          ariaLabel={`Venta diaria de ${monthName(month)} de ${shownYear}`}
+          ariaLabel={`Venta diaria de ${ctx.periodName}`}
         />
         <div className="sales-inline-stats">
           <span>Días con venta <strong>{sellingDays}</strong></span>
