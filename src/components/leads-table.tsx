@@ -7,7 +7,8 @@ import { LEADS_ROLES, LEAD_ASSIGN_ROLES, hasAnyRole, leadStatusLabels, leadTypeL
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
-import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
+import { currencyFormatter, formatDate, formatDateTime, formatPercent, numberFormatter } from "@/lib/format";
+import { leadRecord, leadRecordText } from "@/lib/lead-log";
 import { exportLeadReportPdf } from "@/lib/lead-report-pdf";
 import { inDateKeyRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -64,6 +65,7 @@ function isLeadTypeValue(value: unknown): value is LeadTypeValue {
 
 function mapLeadRow(row: Record<string, unknown>, asignados: Map<string, string[]>): Lead {
   const historyValue = Array.isArray(row.lead_status_history) ? row.lead_status_history : [];
+  const logValue = Array.isArray(row.lead_log) ? row.lead_log as Record<string, unknown>[] : [];
   return {
     id: String(row.id),
     createdAt: String(row.created_at),
@@ -90,8 +92,10 @@ function mapLeadRow(row: Record<string, unknown>, asignados: Map<string, string[
         previousStatus: history.previous_status ? history.previous_status as LeadStatus : null,
         newStatus: history.new_status as LeadStatus,
         changedAt: String(history.changed_at),
+        changedBy: history.changed_by ? String(history.changed_by) : null,
       };
     }).sort((a, b) => b.changedAt.localeCompare(a.changedAt)),
+    log: logValue.map((item) => ({ id: String(item.id), createdAt: String(item.created_at), kind: String(item.kind), text: String(item.text ?? "") })),
   };
 }
 
@@ -183,6 +187,14 @@ export function LeadsTable() {
 
   const teamById = useMemo(() => new Map(team.map((member) => [member.id, member.fullName])), [team]);
   const ownerName = (id: string) => teamById.get(id) ?? "Usuario inactivo";
+  const recordOf = (lead: Lead) => leadRecord({
+    createdAt: lead.createdAt,
+    source: lead.source,
+    statusLabel: (value) => leadStatusLabels[value as LeadStatus] ?? value,
+    log: lead.log ?? [],
+    history: (lead.statusHistory ?? []).map((change) => ({ ...change, changedByName: change.changedByName ?? (change.changedBy ? teamById.get(change.changedBy) ?? null : null) })),
+  });
+  const editingLead = editingId ? rows.find((lead) => lead.id === editingId) ?? null : null;
   const ownerNames = (lead: Lead) => {
     const owners = lead.assignees ?? [];
     return owners.length ? owners.map(ownerName).join(" · ") : "Sin asignar";
@@ -209,7 +221,7 @@ export function LeadsTable() {
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }, { data: asignadosData, error: asignadosError }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("campaigns").select("id, name, business_unit_id").neq("status", "archived").order("name"),
-      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at)").order("created_at", { ascending: false }).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at, changed_by), lead_log(id, created_at, kind, text)").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
       // En consulta aparte y no anidada en la de leads: si la migración de
       // responsables no está aplicada todavía, la página sigue funcionando.
@@ -365,6 +377,12 @@ export function LeadsTable() {
             const { error } = await supabase.from("lead_assignees").insert(anadidos.map((profileId) => ({ lead_id: leadId, profile_id: profileId })));
             if (error) throw error;
           }
+          // Lead nuevo sin nadie marcado: los comerciales de su campaña, si los
+          // tiene. Si falla, se queda sin responsable y el aviso va a administración.
+          if (!editingId && deseados.length === 0 && draft.campaignId) {
+            const { error } = await supabase.rpc("assign_lead_from_campaign", { p_lead: leadId });
+            if (error) console.error("No se pudo asignar el lead por su campaña:", error.message);
+          }
         }
         if (leadId) {
           // Lead nuevo: se avisa a quien lo lleve, o a administración si no lo
@@ -436,6 +454,7 @@ export function LeadsTable() {
       { header: "Responsables", value: (lead) => ownerNames(lead) },
       { header: "Valor (€)", value: (lead) => lead.saleValue ?? "" },
       { header: "Notas", value: (lead) => lead.notes ?? "" },
+      { header: "Registro", value: (lead) => leadRecordText(recordOf(lead), formatDateTime) },
     ]);
   }
 
@@ -598,13 +617,20 @@ export function LeadsTable() {
                 {!asignacionesOk
                   ? "Falta aplicar la migración de responsables en la base de datos."
                   : canAssign
-                    ? "Puedes marcar varios. Los que añadas recibirán un aviso por correo."
+                    ? `Puedes marcar varios. Los que añadas recibirán un aviso por correo.${editingId ? "" : " Si no marcas a nadie y su campaña tiene comerciales, se le asignan esos."}`
                     : "Quién lleva el lead lo decide administración."}
               </small>
             </div>
             <label className="form-field-wide"><span>Observaciones</span><textarea rows={4} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
-          {editingId && draft.statusHistory?.length ? <div className="history-panel"><h3>Historial de estados</h3><div className="history-list">{draft.statusHistory.map((event) => <div key={event.id}><span>{formatDate(event.changedAt)}</span><strong>{event.previousStatus ? `${leadStatusLabels[event.previousStatus]} → ` : ""}{leadStatusLabels[event.newStatus]}</strong></div>)}</div></div> : null}
+          {editingLead ? (
+            <div className="history-panel lead-record">
+              <h3>Registro <small>Se apunta solo y no se puede modificar</small></h3>
+              <ol className="lead-record-list">
+                {recordOf(editingLead).map((entry) => <li key={entry.id} className={`lead-record-${entry.kind}`}><span>{formatDateTime(entry.at)}</span><p>{entry.text}</p></li>)}
+              </ol>
+            </div>
+          ) : null}
           <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setEditorOpen(false)}>Cerrar</button>{canEdit ? <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Guardando…" : "Guardar lead"}</button> : null}</div>
         </form>
       </Modal>

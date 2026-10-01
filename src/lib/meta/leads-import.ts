@@ -41,6 +41,8 @@ async function pageTokenFor(page: Page, cache: PageTokens): Promise<string> {
 }
 
 const DAY_MS = 86_400_000;
+/** Las fechas de Meta llegan como "2026-09-30T14:05:00+0000": se pone el huso como "+00:00". */
+const metaTime = (value: string) => value.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
 const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : typeof cause === "object" && cause && "message" in cause ? String((cause as { message: unknown }).message) : "Error desconocido");
 
 export async function importMetaLead(admin: SupabaseClient, input: {
@@ -139,16 +141,25 @@ export async function importMetaLead(admin: SupabaseClient, input: {
     const same = (recent ?? []).find((row) =>
       (draft.email && String(row.email ?? "").trim().toLowerCase() === draft.email)
       || (phone && comparablePhone(row.phone as string | null) === phone));
+    const fromMeta = leadNotes(draft, { formName, adName: lead.adName, platform: lead.platform, createdTime: lead.createdTime });
+    const fresh = !lead.createdTime || Date.now() - new Date(metaTime(lead.createdTime)).getTime() < 2 * DAY_MS;
     if (same) {
       await admin.from("leads").update({
         meta_lead_id: lead.id,
         meta_campaign_id: lead.campaignId,
         ...(same.campaign_id ? {} : { campaign_id: metaCampaign?.campaign_id ?? null }),
       }).eq("id", same.id);
+      await admin.from("lead_log").insert({ lead_id: same.id, kind: "meta", text: `${fromMeta}\n(Ya estaba metido a mano: se unió a este.)` });
+      // Si nadie lo llevaba y su campaña tiene comerciales, se les asigna y se les avisa.
+      const { data: assigned } = await admin.rpc("assign_lead_from_campaign", { p_lead: same.id });
+      if (fresh && Array.isArray(assigned) && assigned.length > 0) {
+        await notifyNewLead(admin, { leadId: same.id as string, avisarA: assigned as string[], createdByName: "Meta Ads (formulario)", origin: input.origin }).catch(() => null);
+      }
       return log(true, "Ya estaba metido a mano: se ha unido al de Meta.", same.id as string);
     }
 
-    // 7. Se guarda como un lead más, sin responsable: administración lo reparte.
+    // 7. Se guarda como un lead más. Lo que llegó de Meta va a su registro, que
+    // nadie puede tocar; las observaciones quedan libres para el comercial.
     const { data: created, error } = await admin.from("leads").insert({
       business_unit_id: unit,
       campaign_id: metaCampaign?.campaign_id ?? null,
@@ -160,7 +171,7 @@ export async function importMetaLead(admin: SupabaseClient, input: {
       product_interest: draft.interest,
       status: "new",
       source: "META ADS",
-      notes: leadNotes(draft, { formName, adName: lead.adName, platform: lead.platform, createdTime: lead.createdTime }),
+      notes: null,
       meta_lead_id: lead.id,
       meta_campaign_id: lead.campaignId,
       created_by: null,
@@ -171,11 +182,21 @@ export async function importMetaLead(admin: SupabaseClient, input: {
       throw error;
     }
 
-    // 8. El aviso por correo, como con un lead de la web. Los que rescata la
-    // revisión con más de dos días no avisan: serían correos de algo viejo.
-    const fresh = !lead.createdTime || Date.now() - new Date(lead.createdTime.replace(/([+-]\d{2})(\d{2})$/, "$1:$2")).getTime() < 2 * DAY_MS;
-    if (fresh) await notifyNewLead(admin, { leadId: created.id as string, createdByName: "Meta Ads (formulario)", origin: input.origin }).catch(() => null);
-    return log(true, fresh ? "Lead creado y avisado." : "Lead creado (antiguo: sin aviso por correo).", created.id as string, true);
+    const leadId = created.id as string;
+    await admin.from("lead_log").insert({ lead_id: leadId, kind: "meta", text: fromMeta });
+
+    // 8. Sus responsables: los comerciales de su campaña, si los tiene (a todos
+    // o por turnos). Si no, se queda sin responsable y administración lo reparte.
+    const { data: assigned, error: assignError } = await admin.rpc("assign_lead_from_campaign", { p_lead: leadId });
+    const assignees = Array.isArray(assigned) ? assigned.length : 0;
+
+    // 9. El aviso por correo, como con un lead de la web: a sus responsables o,
+    // si no tiene, a administración. Los que rescata la revisión con más de dos
+    // días no avisan: serían correos de algo viejo.
+    if (fresh) await notifyNewLead(admin, { leadId, createdByName: "Meta Ads (formulario)", origin: input.origin }).catch(() => null);
+    const who = assignError ? ` No se pudo asignar: ${assignError.message}.`
+      : assignees > 0 ? ` Asignado por su campaña a ${assignees === 1 ? "1 comercial" : `${assignees} comerciales`}.` : "";
+    return log(true, (fresh ? "Lead creado y avisado." : "Lead creado (antiguo: sin aviso por correo).") + who, leadId, true);
   } catch (cause) {
     return log(false, errorText(cause));
   }

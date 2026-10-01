@@ -62,6 +62,7 @@ export type LeadStatusEvent = {
   previousStatus: LeadStatus | null;
   newStatus: LeadStatus;
   changedAt: string;
+  changedBy?: string | null;
   changedByName?: string | null;
 };
 
@@ -86,6 +87,8 @@ export type Lead = {
   /** Comerciales que llevan el lead. Vive en lead_assignees, lo pone administración. */
   assignees?: string[];
   statusHistory?: LeadStatusEvent[];
+  /** Su registro (lead_log): lo que llegó de Meta, cambios de estado y asignaciones. Nadie lo puede tocar. */
+  log?: { id: string; createdAt: string; kind: string; text: string }[];
 };
 
 export type Campaign = {
@@ -100,6 +103,8 @@ export type Campaign = {
   notes: string | null;
   directSalesCount: number;
   directSaleValue: number;
+  /** Cómo se reparten sus leads entre sus comerciales: a todos o por turnos. */
+  leadsAssignMode?: "todos" | "turnos";
   createdAt: string;
   updatedAt?: string;
 };

@@ -18,13 +18,21 @@ import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-
 import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
+import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-campaigns";
 
 type CampaignDraft = Omit<Campaign, "id" | "createdAt">;
-type LeadStub = { campaignId: string | null; status: LeadStatus; saleValue: number | null };
+type LeadStub = { campaignId: string | null; status: LeadStatus; saleValue: number | null; assigned?: boolean };
+type TeamMember = { id: string; fullName: string; roles: AppRole[] };
+
+const CLOSED_STATUSES: LeadStatus[] = ["won", "lost", "invalid"];
+
+/** Los leads abiertos de la campaña que no lleva nadie: los que se pueden repartir de golpe. */
+function backlogOf(campaignId: string, leads: LeadStub[]): number {
+  return leads.filter((lead) => lead.campaignId === campaignId && !lead.assigned && !CLOSED_STATUSES.includes(lead.status)).length;
+}
 type AdsStub = { campaignId: string | null; amountSpent: number; revenue: number; leads: number };
 
 function blankDraft(units: BusinessUnit[]): CampaignDraft {
@@ -39,6 +47,7 @@ function blankDraft(units: BusinessUnit[]): CampaignDraft {
     notes: "",
     directSalesCount: 0,
     directSaleValue: 0,
+    leadsAssignMode: "todos",
   };
 }
 
@@ -55,13 +64,15 @@ function mapCampaignRow(row: Record<string, unknown>): Campaign {
     notes: row.notes ? String(row.notes) : null,
     directSalesCount: Number(row.direct_sales_count ?? 0),
     directSaleValue: Number(row.direct_sale_value ?? 0),
+    leadsAssignMode: row.leads_assign_mode === "turnos" ? "turnos" : "todos",
     createdAt: String(row.created_at),
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
   };
 }
 
-function mapLeadStub(row: Record<string, unknown>): LeadStub {
+function mapLeadStub(row: Record<string, unknown>, assigned: Set<string>): LeadStub {
   return {
+    assigned: assigned.has(String(row.id)),
     campaignId: row.campaign_id ? String(row.campaign_id) : null,
     status: row.status as LeadStatus,
     saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
@@ -133,6 +144,11 @@ export function CampaignsManager() {
   const [pendingArchive, setPendingArchive] = useState<Campaign | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  /** Los comerciales de cada campaña, a quienes van sus leads solos. */
+  const [assigneesOf, setAssigneesOf] = useState<Map<string, string[]>>(() => new Map());
+  const [draftAssignees, setDraftAssignees] = useState<string[]>([]);
+  const [pendingBacklog, setPendingBacklog] = useState<Campaign | null>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -141,14 +157,17 @@ export function CampaignsManager() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData, error: adsError }, { data: authData }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData, error: adsError }, { data: authData }, { data: campaignAssignees }, { data: leadAssignees }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
-      supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, created_at, updated_at").order("created_at", { ascending: false }),
-      fetchAllPages((from, to) => supabase.from("leads").select("campaign_id, status, sale_value").order("id").range(from, to)),
+      supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, leads_assign_mode, created_at, updated_at").order("created_at", { ascending: false }),
+      fetchAllPages((from, to) => supabase.from("leads").select("id, campaign_id, status, sale_value").order("id").range(from, to)),
       // El gasto sale de lo que manda Meta, no de lo que alguien escribió a
       // mano: se cruza por la campaña de Meta que esté atada a esta.
       supabase.from("meta_campaigns").select("meta_id, campaign_id").not("campaign_id", "is", null),
       supabase.auth.getUser(),
+      supabase.from("campaign_assignees").select("campaign_id, profile_id").order("added_at"),
+      // Solo para saber qué leads no lleva nadie (los que se pueden repartir).
+      fetchAllPages<{ lead_id: string }>((from, to) => supabase.from("lead_assignees").select("lead_id").order("lead_id").order("profile_id").range(from, to)),
     ]);
 
     // El gasto por día se pagina: en un año son miles de filas y PostgREST
@@ -163,7 +182,11 @@ export function CampaignsManager() {
     }
     setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
     setCampaigns((campaignData ?? []).map((row) => mapCampaignRow(row as Record<string, unknown>)));
-    setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>)));
+    const assignedLeads = new Set((leadAssignees ?? []).map((row) => row.lead_id));
+    setLeads((leadData ?? []).map((row) => mapLeadStub(row as Record<string, unknown>, assignedLeads)));
+    const byCampaign = new Map<string, string[]>();
+    for (const row of campaignAssignees ?? []) byCampaign.set(row.campaign_id as string, [...(byCampaign.get(row.campaign_id as string) ?? []), row.profile_id as string]);
+    setAssigneesOf(byCampaign);
     if (adsError) setMessage(PARTIAL_LOAD_MESSAGE);
     // Una fila por campaña de la aplicación, sumando todas sus campañas de Meta.
     const atadaA = new Map((adsData ?? []).map((row) => [row.meta_id as string, row.campaign_id as string]));
@@ -181,7 +204,11 @@ export function CampaignsManager() {
     setAds([...porCampana.values()]);
     const user = authData.user;
     if (user) {
-      const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle();
+      const [{ data: profile }, { data: teamData }] = await Promise.all([
+        supabase.from("profiles").select("roles").eq("id", user.id).maybeSingle(),
+        supabase.rpc("list_team_members"),
+      ]);
+      setTeam(((teamData ?? []) as { id: string; full_name: string | null; roles: AppRole[] }[]).map((row) => ({ id: row.id, fullName: row.full_name || "Usuario", roles: row.roles })));
       setCanEdit(Boolean(profile && hasAnyRole(profile.roles, ["admin", "marketing"])));
       setAccess(profile && hasAnyRole(profile.roles, CAMPAIGNS_ROLES) ? "allowed" : "denied");
     } else {
@@ -217,9 +244,14 @@ export function CampaignsManager() {
     };
   }, [visibleCampaigns, leads, ads]);
 
+  const memberName = (id: string) => team.find((member) => member.id === id)?.fullName ?? "Usuario inactivo";
+  // Los leads solo los llevan comerciales; si alguien dejó de serlo sigue saliendo para poder quitarlo.
+  const assignOptions = team.filter((member) => member.roles.includes("commercial") || draftAssignees.includes(member.id));
+
   function openNew() {
     setEditingId(null);
     setDraft(blankDraft(units));
+    setDraftAssignees([]);
     setEditorOpen(true);
     setMessage(null);
   }
@@ -237,7 +269,9 @@ export function CampaignsManager() {
       notes: campaign.notes,
       directSalesCount: campaign.directSalesCount,
       directSaleValue: campaign.directSaleValue,
+      leadsAssignMode: campaign.leadsAssignMode ?? "todos",
     });
+    setDraftAssignees(assigneesOf.get(campaign.id) ?? []);
     setEditorOpen(true);
     setMessage(null);
   }
@@ -277,6 +311,7 @@ export function CampaignsManager() {
           notes: draft.notes?.trim() || null,
           direct_sales_count: draft.directSalesCount,
           direct_sale_value: draft.directSaleValue,
+          leads_assign_mode: draft.leadsAssignMode ?? "todos",
         };
         const supabase = createClient();
         const previousStatus = editingId ? campaigns.find((campaign) => campaign.id === editingId)?.status ?? null : null;
@@ -289,13 +324,55 @@ export function CampaignsManager() {
           if (error) throw error;
           savedId = data.id;
         }
+        // Sus comerciales: se quitan los desmarcados y se añaden los nuevos.
+        if (savedId) {
+          const before = assigneesOf.get(savedId) ?? [];
+          const removed = before.filter((id) => !draftAssignees.includes(id));
+          const added = draftAssignees.filter((id) => !before.includes(id));
+          if (removed.length) {
+            const { error } = await supabase.from("campaign_assignees").delete().eq("campaign_id", savedId).in("profile_id", removed);
+            if (error) throw error;
+          }
+          if (added.length) {
+            const { error } = await supabase.from("campaign_assignees").insert(added.map((profileId) => ({ campaign_id: savedId, profile_id: profileId })));
+            if (error) throw error;
+          }
+        }
         if (savedId && draft.status !== previousStatus && NOTIFIED_STATUSES.includes(draft.status)) notifyCampaignStatus(savedId);
         await loadRealData();
-        setMessage(editingId ? "Campaña actualizada correctamente." : "Campaña creada correctamente.");
+        const pending = savedId && draftAssignees.length ? backlogOf(savedId, leads) : 0;
+        setMessage(`${editingId ? "Campaña actualizada correctamente." : "Campaña creada correctamente."}${pending ? ` Tiene ${pending === 1 ? "1 lead abierto" : `${pending} leads abiertos`} sin responsable: puedes repartirlos desde su tarjeta.` : ""}`);
       }
       setEditorOpen(false);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo guardar la campaña. Comprueba que no exista ya una con ese nombre en esta unidad."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleDraftAssignee(id: string) {
+    setDraftAssignees((current) => current.includes(id) ? current.filter((other) => other !== id) : [...current, id]);
+  }
+
+  /** Reparte de golpe los leads abiertos sin responsable de la campaña, con su forma de repartir. */
+  async function confirmBacklog() {
+    if (!pendingBacklog) return;
+    setBusy(true);
+    try {
+      const { data, error } = await createClient().rpc("assign_campaign_backlog", { p_campaign: pendingBacklog.id });
+      if (error) throw error;
+      const rows = (data ?? []) as { lead_id: string; profile_ids: string[] }[];
+      const perPerson = new Map<string, number>();
+      for (const row of rows) for (const id of row.profile_ids) perPerson.set(id, (perPerson.get(id) ?? 0) + 1);
+      const detail = [...perPerson].map(([id, count]) => `${memberName(id)} ${count}`).join(" · ");
+      await loadRealData();
+      setMessage(rows.length
+        ? `${rows.length === 1 ? "Repartido 1 lead" : `Repartidos ${rows.length} leads`} de "${pendingBacklog.name}": ${detail}. Los verán en Leads, en "Mis leads"; por estos no se manda correo.`
+        : "No había leads que repartir.");
+      setPendingBacklog(null);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudieron repartir los leads."));
     } finally {
       setBusy(false);
     }
@@ -475,8 +552,18 @@ export function CampaignsManager() {
               {adsStats.count > 0 ? (
                 <p className="muted campaign-direct-sales-note">Meta Ads: gasto {currencyFormatter.format(adsStats.spend)} · {numberFormatter.format(adsStats.leads)} lead{adsStats.leads === 1 ? "" : "s"} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2).replace(".", ",")}x</p>
               ) : null}
+              {(assigneesOf.get(campaign.id) ?? []).length ? (
+                <p className="muted campaign-direct-sales-note">
+                  Sus leads van solos a {(assigneesOf.get(campaign.id) ?? []).map(memberName).join(", ")}{(assigneesOf.get(campaign.id) ?? []).length > 1 ? (campaign.leadsAssignMode === "turnos" ? " (por turnos)" : " (a todos)") : ""}.
+                </p>
+              ) : null}
               {canEdit ? (
                 <div className="modal-actions campaign-card-actions">
+                  {(assigneesOf.get(campaign.id) ?? []).length && backlogOf(campaign.id, leads) > 0 ? (
+                    <button type="button" className="button button-compact button-primary" onClick={() => setPendingBacklog(campaign)}>
+                      Repartir {backlogOf(campaign.id, leads)} sin responsable
+                    </button>
+                  ) : null}
                   <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(campaign)}>Editar</button>
                   {campaign.status !== "archived" ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingArchive(campaign)}>Archivar</button> : null}
                 </div>
@@ -498,7 +585,24 @@ export function CampaignsManager() {
         {pendingArchive ? <div className="confirmation-summary"><span>Campaña</span><strong>{pendingArchive.name}</strong><span>Efecto</span><strong>Deja de estar activa, pero se conserva junto a sus leads.</strong></div> : null}
       </ConfirmationDialog>
 
-      <Modal open={editorOpen} title={editingId ? "Editar campaña" : "Nueva campaña"} eyebrow="Gestión de captación" onClose={() => setEditorOpen(false)}>
+      <ConfirmationDialog
+        open={Boolean(pendingBacklog)}
+        title="¿Repartir los leads sin responsable?"
+        confirmLabel="Repartir"
+        busy={busy}
+        onCancel={() => setPendingBacklog(null)}
+        onConfirm={() => void confirmBacklog()}
+      >
+        {pendingBacklog ? (
+          <div className="confirmation-summary">
+            <span>Campaña</span><strong>{pendingBacklog.name}</strong>
+            <span>Leads</span><strong>{backlogOf(pendingBacklog.id, leads)} abiertos que no lleva nadie</strong>
+            <span>Para</span><strong>{(assigneesOf.get(pendingBacklog.id) ?? []).map(memberName).join(", ")}{(assigneesOf.get(pendingBacklog.id) ?? []).length > 1 ? (pendingBacklog.leadsAssignMode === "turnos" ? ", por turnos" : ", cada lead a todos") : ""}</strong>
+          </div>
+        ) : null}
+      </ConfirmationDialog>
+
+      <Modal open={editorOpen} title={editingId ? "Editar campaña" : "Nueva campaña"} eyebrow="Gestión de captación" scrollInside onClose={() => setEditorOpen(false)}>
         <form className="lead-editor-form" onSubmit={saveCampaign}>
           <div className="form-grid">
             <label><span>Unidad de negocio *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => updateDraft("businessUnitId", event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
@@ -510,6 +614,39 @@ export function CampaignsManager() {
             <label><span>Presupuesto</span><input type="number" min="0" step="0.01" value={draft.budget ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("budget", event.target.value ? Number(event.target.value) : null)} /></label>
             <label><span>Ventas directas (sin lead)</span><input type="number" min="0" step="1" value={draft.directSalesCount} readOnly={!canEdit} onChange={(event) => updateDraft("directSalesCount", Number(event.target.value) || 0)} /></label>
             <label><span>Valor de ventas directas</span><input type="number" min="0" step="0.01" value={draft.directSaleValue} readOnly={!canEdit} onChange={(event) => updateDraft("directSaleValue", Number(event.target.value) || 0)} /></label>
+            <div className="form-field-wide owner-picker">
+              <span>Comerciales de sus leads</span>
+              {assignOptions.length === 0 ? <p className="muted">No hay comerciales activos.</p> : (
+                <div className="role-chip-group">
+                  {assignOptions.map((member) => (
+                    <button
+                      key={member.id}
+                      type="button"
+                      className={draftAssignees.includes(member.id) ? "role-chip active" : "role-chip"}
+                      disabled={!canEdit}
+                      aria-pressed={draftAssignees.includes(member.id)}
+                      onClick={() => toggleDraftAssignee(member.id)}
+                    >
+                      {member.fullName}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <small className="muted">
+                {draftAssignees.length === 0
+                  ? "Sin ninguno, los leads que entren de esta campaña se quedan sin responsable y avisan a administración."
+                  : "Los leads que entren de esta campaña (los de Meta, solos) se les asignan y les llega el aviso por correo. Queda apuntado en el registro del lead."}
+              </small>
+            </div>
+            {draftAssignees.length > 1 ? (
+              <label className="form-field-wide">
+                <span>Cómo se reparten</span>
+                <select value={draft.leadsAssignMode ?? "todos"} disabled={!canEdit} onChange={(event) => updateDraft("leadsAssignMode", event.target.value === "turnos" ? "turnos" : "todos")}>
+                  <option value="todos">Cada lead, a todos ellos</option>
+                  <option value="turnos">Por turnos: cada lead a uno, al que menos lleve de esta campaña</option>
+                </select>
+              </label>
+            ) : null}
             <label className="form-field-wide"><span>Notas</span><textarea rows={4} value={draft.notes ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setEditorOpen(false)}>Cerrar</button>{canEdit ? <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Guardando…" : "Guardar campaña"}</button> : null}</div>

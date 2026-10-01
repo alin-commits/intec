@@ -13,6 +13,18 @@ export function formatPercent(value: number): string {
   return `${value.toFixed(1).replace(".", ",")} %`;
 }
 
+/** Día y hora de Madrid: "30/09/2026, 16:24". */
+export function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Madrid",
+  }).format(new Date(value));
+}
+
 export function formatDate(value: string): string {
   return new Intl.DateTimeFormat("es-ES", {
     day: "2-digit",
