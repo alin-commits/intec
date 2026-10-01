@@ -323,6 +323,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
               ...(monthly.marginComplete ? [{ key: "margen", label: "Margen", color: "#10b981" }] : []),
             ]}
             ariaLabel={`Evolución mensual de ventas de ${period.baseLabel}`}
+            valueFormatter={euros}
+            total={chartMode !== "acumulado"}
             onSelect={(index) => ctx.toggle("month", monthly.months[index]?.key ?? null)}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />

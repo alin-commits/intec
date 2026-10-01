@@ -119,6 +119,7 @@ export function TreasuryTab({ ctx }: { ctx: PaymentsContext }) {
               { key: "acumulado", label: "Acumulado", color: "#4f46e5" },
             ]}
             ariaLabel="Previsión de tesorería por semanas"
+            total={["cobros", "salidas"]}
             onSelect={(index) => setSelected((current) => (current === weeks[index]?.key ? null : weeks[index]?.key ?? null))}
             selectedIndex={selected ? weeks.findIndex((week) => week.key === selected) : null}
           />

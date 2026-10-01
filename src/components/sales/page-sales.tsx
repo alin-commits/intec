@@ -267,6 +267,7 @@ function DailyPanel({ ctx }: { ctx: SalesContext }) {
             { key: "ventas", label: "Ventas", color: "#4f46e5" },
           ]}
           ariaLabel={`Venta diaria de ${ctx.periodName}`}
+          valueFormatter={euros}
         />
         <div className="sales-inline-stats">
           <span>Días con venta <strong>{sellingDays}</strong></span>

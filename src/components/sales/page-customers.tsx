@@ -342,6 +342,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
                 ...(showNew ? [{ key: "nuevos", label: "Nuevos", color: "#10b981" }] : []),
               ]}
               ariaLabel={`Clientes por mes en ${period.baseLabel}`}
+              total={false}
               onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />

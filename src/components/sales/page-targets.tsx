@@ -189,6 +189,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
               { key: "ventas", label: "Ventas", color: "#4f46e5" },
             ]}
             ariaLabel={`Ventas acumuladas contra objetivo en ${shownYear}`}
+            total={false}
             onSelect={(index) => index <= lastMonthIndex && ctx.toggle("month", `${shownYear}-${String(index + 1).padStart(2, "0")}`)}
             selectedIndex={monthIndex}
           />

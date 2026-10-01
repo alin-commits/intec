@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { Modal } from "@/components/ui/modal";
 import { offerState, orderState, purchaseRhythm, type OfferState, type OrderState } from "@/lib/customer-sheet";
@@ -106,6 +106,11 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
   onBack?: () => void;
 }) {
   const [chart, setChart] = useState<"meses" | "anios">("meses");
+  /** En "mes a mes": todos los años seguidos o uno solo. */
+  const [chartYear, setChartYear] = useState("todos");
+  /** La familia que dibuja el gráfico; vacío, toda la compra. */
+  const [chartFamily, setChartFamily] = useState("");
+  const chartRef = useRef<HTMLElement>(null);
   const { period } = ctx;
   const company = customer.company_code;
   const code = customer.customer_code;
@@ -185,22 +190,50 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
   const margin = bucketMargin(now);
   const discount = bucketDiscount(now);
 
+  // ---- Las familias que ha comprado alguna vez, de más a menos ----
+  const familyOptions = (() => {
+    const totals = groupFamily(families.data ?? []);
+    return [...totals].map(([familyCode, net]) => ({ code: familyCode, name: ctx.familyName(familyCode), net })).sort((a, b) => b.net - a.net);
+  })();
+  // Si la familia elegida no es de este cliente (se abrió otro), se ve toda la compra.
+  const familyShown = familyOptions.some((item) => item.code === chartFamily) ? chartFamily : "";
+  const familyShownName = familyShown ? ctx.familyName(familyShown) : null;
+  const chooseFamily = (familyCode: string) => {
+    setChartFamily((current) => (current === familyCode ? "" : familyCode));
+    chartRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   // ---- La evolución: desde su primera compra que haya en Sage hasta hoy ----
   const chartView = (() => {
     if (rows.length === 0) return null;
     const first = rows.reduce((min, row) => (row.month < min ? row.month : min), rows[0].month);
     const months = monthsBetween(first, today);
-    const monthly = groupRows(rows, (row) => row.month.slice(0, 7));
-    const multiYear = months[0].slice(0, 4) !== months[months.length - 1].slice(0, 4);
-    const points = months.map((month) => ({ label: monthLabel(month, multiYear), compra: Math.round(monthly.get(month)?.net ?? 0) }));
-    const years = yearlyView({
-      rows: rows.map((row) => ({ ...row, month: row.month.slice(0, 7) })),
-      filters: noFilters,
-      repOf: ctx.repOf,
-      months,
-      basePartial: true,
-    });
-    return { points, years, months };
+    // Toda su compra, o solo la de una familia (que viene ya por meses).
+    const source: SummaryRow[] = familyShown
+      ? (families.data ?? []).filter((row) => row.family_code === familyShown).map((row) => ({
+          month: row.month.slice(0, 7),
+          company_code: company,
+          series: "",
+          rep_code: null,
+          documents: 0,
+          net_amount: Number(row.net_amount),
+          cost_amount: 0,
+          net_without_cost: 0,
+        }))
+      : rows.map((row) => ({ ...row, month: row.month.slice(0, 7) }));
+    const monthly = groupRows(source, (row) => row.month);
+    const yearOptions = [...new Set(months.map((month) => month.slice(0, 4)))].reverse();
+    const shownYear = chartYear !== "todos" && yearOptions.includes(chartYear) ? chartYear : null;
+    // Un año solo va de enero a diciembre; lo que aún no ha pasado, o es de
+    // antes de su primera compra, queda en blanco en vez de en cero.
+    const shownMonths = shownYear ? Array.from({ length: 12 }, (_, index) => `${shownYear}-${String(index + 1).padStart(2, "0")}`) : months;
+    const known = new Set(months);
+    const multiYear = !shownYear && months[0].slice(0, 4) !== months[months.length - 1].slice(0, 4);
+    const points = shownMonths.map((month) => ({ label: monthLabel(month, multiYear), compra: known.has(month) ? Math.round(monthly.get(month)?.net ?? 0) : null }));
+    const counted = shownMonths.filter((month) => known.has(month));
+    const shownTotal = counted.reduce((sum, month) => sum + (monthly.get(month)?.net ?? 0), 0);
+    const years = yearlyView({ rows: source, filters: noFilters, repOf: ctx.repOf, months, basePartial: true });
+    return { points, years, months, yearOptions, shownYear, shownTotal, shownMonths: counted.length };
   })();
 
   // ---- Familias del periodo, y las que compraba y ya no ----
@@ -353,22 +386,63 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
           </section>
         </div>
 
-        <section className="sales-sheet-section">
+        <section className="sales-sheet-section" ref={chartRef}>
           <div className="sales-sheet-heading">
             <div>
-              <h3>Evolución de compra</h3>
-              <p className="muted">{chart === "meses" ? "Lo que compra cada mes, desde su primera compra en Sage" : "Cada año en una línea, mes a mes"}</p>
+              <h3>Evolución de compra{familyShownName ? ` · ${familyShownName}` : ""}</h3>
+              <p className="muted">
+                {chart === "anios" ? "Cada año en una línea, mes a mes"
+                  : chartView?.shownYear ? `Lo que compra cada mes de ${chartView.shownYear}`
+                    : "Lo que compra cada mes, desde su primera compra en Sage"}
+                {familyShownName ? ", solo esta familia" : ""}
+              </p>
             </div>
-            <div className="sales-switch" role="group" aria-label="Cómo ver la evolución">
-              <button type="button" className={chart === "meses" ? "is-active" : undefined} onClick={() => setChart("meses")} aria-pressed={chart === "meses"}>Mes a mes</button>
-              <button type="button" className={chart === "anios" ? "is-active" : undefined} onClick={() => setChart("anios")} aria-pressed={chart === "anios"}>Año contra año</button>
+            <div className="sales-sheet-chart-controls">
+              <label className="sales-sheet-select">
+                <span>Familia</span>
+                <select value={familyShown} onChange={(event) => setChartFamily(event.target.value)} disabled={familyOptions.length === 0}>
+                  <option value="">Todas</option>
+                  {familyOptions.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
+                </select>
+              </label>
+              {chart === "meses" && chartView ? (
+                <label className="sales-sheet-select">
+                  <span>Año</span>
+                  <select value={chartView.shownYear ?? "todos"} onChange={(event) => setChartYear(event.target.value)}>
+                    <option value="todos">Todos seguidos</option>
+                    {chartView.yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <div className="sales-switch" role="group" aria-label="Cómo ver la evolución">
+                <button type="button" className={chart === "meses" ? "is-active" : undefined} onClick={() => setChart("meses")} aria-pressed={chart === "meses"}>Mes a mes</button>
+                <button type="button" className={chart === "anios" ? "is-active" : undefined} onClick={() => setChart("anios")} aria-pressed={chart === "anios"}>Año contra año</button>
+              </div>
             </div>
           </div>
           {loading ? <p className="muted">Cargando…</p> : !chartView ? <p className="muted">Este cliente no tiene compras en Sage.</p> : chart === "meses" ? (
-            <TrendChart data={chartView.points} series={[{ key: "compra", label: "Compra", color: "#4f46e5" }]} ariaLabel={`Compra mensual de ${title}`} />
+            <>
+              <TrendChart
+                data={chartView.points}
+                series={[{ key: "compra", label: familyShownName ?? "Compra", color: "#4f46e5" }]}
+                ariaLabel={`Compra mensual de ${title}${familyShownName ? ` en ${familyShownName}` : ""}${chartView.shownYear ? ` en ${chartView.shownYear}` : ""}`}
+                title={`${title} · compra ${chartView.shownYear ? `de ${chartView.shownYear}` : "mes a mes"}${familyShownName ? ` · ${familyShownName}` : ""}`}
+                valueFormatter={euros}
+              />
+              <p className="sales-sheet-chart-total">
+                {chartView.shownYear ? `En ${chartView.shownYear}` : "Desde su primera compra"}: <strong>{euros(chartView.shownTotal)}</strong>
+                {chartView.shownMonths > 0 ? ` · media de ${euros(chartView.shownTotal / chartView.shownMonths)} al mes` : ""}
+              </p>
+            </>
           ) : (
             <>
-              <TrendChart data={chartView.years.points} series={chartView.years.series} ariaLabel={`Compra de ${title}, un año contra otro`} />
+              <TrendChart
+                data={chartView.years.points}
+                series={chartView.years.series}
+                ariaLabel={`Compra de ${title}${familyShownName ? ` en ${familyShownName}` : ""}, un año contra otro`}
+                title={`${title} · año contra año${familyShownName ? ` · ${familyShownName}` : ""}`}
+                valueFormatter={euros}
+              />
               <ul className="sales-sheet-years">
                 {[...chartView.years.table].reverse().map((row) => (
                   <li key={row.year}>
@@ -386,7 +460,7 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
           <div className="sales-sheet-heading">
             <div>
               <h3>Qué compra en {ctx.periodName}</h3>
-              <p className="muted">Por familia, sin IVA</p>
+              <p className="muted">Por familia, sin IVA. Pulsa una para ver su evolución en el gráfico</p>
             </div>
           </div>
           {families.failed ? <LoadFailed what="las familias" /> : (
@@ -394,6 +468,8 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
               rows={familyView.list}
               columns={familyColumns}
               rowKey={(row) => row.code}
+              activeKey={familyShown || null}
+              onRowClick={(row) => chooseFamily(row.code)}
               initialSort={{ key: "compra", desc: true }}
               limit={8}
               empty={families.loading ? "Cargando…" : "No compró nada en este periodo."}

@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import { ChartDialog, ChartExpandButton } from "./chart-expand";
+
 export type DonutItem = { label: string; value: number; color: string };
 
 type DonutChartProps = {
@@ -16,14 +21,36 @@ type DonutChartProps = {
   onSelect?: (label: string) => void;
   /** La porción elegida: las demás se apagan un poco. */
   selectedLabel?: string | null;
+  /** El título del gráfico ampliado; si no, el de accesibilidad. */
+  title?: string;
+  /** `false` para no ofrecer la vista en grande. */
+  expandable?: boolean;
 };
+
+export function DonutChart(props: DonutChartProps) {
+  const { items, ariaLabel, title, expandable = true } = props;
+  const [expanded, setExpanded] = useState(false);
+  const chart = <DonutFigure {...props} big={false} />;
+  if (!expandable || !items.some((item) => item.value > 0)) return chart;
+  const name = title ?? ariaLabel;
+  return (
+    <div className="chart-expandable">
+      <ChartExpandButton label={name} onClick={() => setExpanded(true)} />
+      {chart}
+      <ChartDialog open={expanded} title={name} onClose={() => setExpanded(false)}>
+        {/* En grande, siempre con su lista (cifra y peso de cada parte) y sin filtrar. */}
+        <DonutFigure {...props} showLegend onSelect={undefined} big />
+      </ChartDialog>
+    </div>
+  );
+}
 
 const SIZE = 160;
 const STROKE = 26;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin datos en este periodo.", valueFormatter, showLegend = true, onSelect, selectedLabel = null }: DonutChartProps) {
+function DonutFigure({ items, centerLabel, ariaLabel, emptyMessage = "Sin datos en este periodo.", valueFormatter, showLegend = true, onSelect, selectedLabel = null, big }: DonutChartProps & { big: boolean }) {
   const visible = items.filter((item) => item.value > 0);
   const total = visible.reduce((sum, item) => sum + item.value, 0);
   const format = valueFormatter ?? ((value: number) => value.toLocaleString("es-ES"));
@@ -36,7 +63,7 @@ export function DonutChart({ items, centerLabel, ariaLabel, emptyMessage = "Sin 
   const dimmed = (label: string) => selectedLabel !== null && selectedLabel !== label;
 
   return (
-    <div className="donut-chart">
+    <div className={big ? "donut-chart is-big" : "donut-chart"}>
       <div className="donut-figure">
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={ariaLabel}>
           <circle cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} fill="none" stroke="#eef0f6" strokeWidth={STROKE} />

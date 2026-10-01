@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { numberFormatter } from "@/lib/format";
+import { ChartDialog, ChartExpandButton, compactNumber } from "./chart-expand";
 
 export type TrendSeries = { key: string; label: string; color: string };
 type TrendChartProps = {
@@ -16,6 +17,18 @@ type TrendChartProps = {
   onSelect?: (index: number) => void;
   /** El punto elegido, que se resalta. */
   selectedIndex?: number | null;
+  /** El título del gráfico ampliado; si no, el de accesibilidad. */
+  title?: string;
+  /** Cómo se escribe una cifra en el detalle y al pasar por encima (por defecto, 1.234). */
+  valueFormatter?: (value: number) => string;
+  /**
+   * Si tiene sentido sumar los puntos (ventas, consultas…). Un saldo, un
+   * acumulado o un recuento de clientes no se suman: ahí va `false` y el
+   * detalle ampliado no enseña el total. Con una lista, solo esas líneas.
+   */
+  total?: boolean | string[];
+  /** `false` para no ofrecer la vista en grande. */
+  expandable?: boolean;
 };
 
 /**
@@ -27,12 +40,15 @@ type TrendChartProps = {
  */
 const WIDE = { width: 720, height: 250, padding: { top: 18, right: 22, bottom: 38, left: 36 } };
 const NARROW = { width: 380, height: 260, padding: { top: 16, right: 12, bottom: 34, left: 40 } };
+/** En grande: más alto y con sitio a la izquierda para las cifras del eje. */
+const BIG_WIDE = { width: 1060, height: 430, padding: { top: 26, right: 28, bottom: 44, left: 66 } };
+const BIG_NARROW = { width: 380, height: 340, padding: { top: 18, right: 14, bottom: 36, left: 48 } };
 /** Por debajo de esto el lienzo ancho ya se estaría encogiendo demasiado. */
 const NARROW_UNDER = 520;
 
 type Geometry = typeof WIDE & { chartWidth: number; chartHeight: number };
-function geometryFor(narrow: boolean): Geometry {
-  const base = narrow ? NARROW : WIDE;
+function geometryFor(narrow: boolean, big: boolean): Geometry {
+  const base = big ? (narrow ? BIG_NARROW : BIG_WIDE) : narrow ? NARROW : WIDE;
   return {
     ...base,
     chartWidth: base.width - base.padding.left - base.padding.right,
@@ -75,11 +91,31 @@ function segmentsFor(geometry: Geometry, data: TrendChartProps["data"], key: str
   return segments;
 }
 
-export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = null }: TrendChartProps) {
+export function TrendChart(props: TrendChartProps) {
+  const { data, series, ariaLabel, title, valueFormatter, total = true, expandable = true } = props;
+  const [expanded, setExpanded] = useState(false);
+  const canvas = <TrendCanvas {...props} big={false} />;
+  if (!expandable || data.length === 0) return canvas;
+  const name = title ?? ariaLabel;
+  return (
+    <div className="chart-expandable">
+      <ChartExpandButton label={name} onClick={() => setExpanded(true)} />
+      {canvas}
+      <ChartDialog open={expanded} title={name} onClose={() => setExpanded(false)}>
+        {/* En grande no filtra: pulsar ahí cambiaría la página de detrás sin verlo. */}
+        <TrendCanvas {...props} onSelect={undefined} big />
+        <TrendDetails data={data} series={series} format={valueFormatter ?? ((value) => numberFormatter.format(value))} total={total} />
+      </ChartDialog>
+    </div>
+  );
+}
+
+function TrendCanvas({ data, series, ariaLabel, onSelect, selectedIndex = null, valueFormatter, big }: TrendChartProps & { big: boolean }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [narrow, setNarrow] = useState(false);
+  const format = valueFormatter ?? ((value: number) => numberFormatter.format(value));
 
   // El gráfico se mide a sí mismo en vez de preguntar por el ancho de la
   // ventana: así también acierta cuando está dentro de una columna estrecha de
@@ -95,7 +131,7 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
     return () => observer.disconnect();
   }, []);
 
-  const geometry = geometryFor(narrow);
+  const geometry = geometryFor(narrow, big);
   const { width, height, padding, chartWidth } = geometry;
   const values = data.flatMap((row) => series.flatMap((item) => {
     const value = valueAt(row, item.key);
@@ -105,8 +141,10 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
   // El suelo es el cero salvo que haya negativos, que entonces baja hasta ellos.
   const min = Math.min(...values, 0);
   const grid = [0, 0.25, 0.5, 0.75, 1];
-  // En estrecho caben menos fechas sin que se solapen unas con otras.
-  const labelStep = Math.max(1, Math.ceil(data.length / (narrow ? 4 : 8)));
+  // En estrecho caben menos fechas sin que se solapen unas con otras; en grande, más.
+  const labelStep = Math.max(1, Math.ceil(data.length / (big ? (narrow ? 5 : 14) : narrow ? 4 : 8)));
+  // En grande, con una sola línea y pocos puntos, cada punto lleva su cifra.
+  const pointLabels = big && !narrow && series.length === 1 && data.length <= 24;
 
   function indexAt(event: MouseEvent<SVGRectElement>): number | null {
     const svg = svgRef.current;
@@ -146,12 +184,17 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
   }
 
   return (
-    <div className="chart-wrap" ref={wrapRef} aria-label={ariaLabel}>
+    <div className={big ? "chart-wrap is-big" : "chart-wrap"} ref={wrapRef} aria-label={ariaLabel}>
       <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} role="img" className="chart-svg">
         {grid.map((ratio) => {
           const y = padding.top + geometry.chartHeight * ratio;
           return <line key={ratio} x1={padding.left} y1={y} x2={width - padding.right} y2={y} className="chart-grid" />;
         })}
+        {big ? grid.map((ratio) => (
+          <text key={`axis-${ratio}`} x={padding.left - 8} y={padding.top + geometry.chartHeight * ratio + 4} textAnchor="end" className="chart-axis-label">
+            {compactNumber(max - ratio * (max - min))}
+          </text>
+        )) : null}
         {selectedX !== null ? (
           <rect
             x={Math.max(padding.left, selectedX - step / 2)}
@@ -189,6 +232,15 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
             />
           );
         }))}
+        {pointLabels ? data.map((row, index) => {
+          const value = valueAt(row, series[0].key);
+          if (value === null) return null;
+          return (
+            <text key={`value-${index}`} x={xForIndex(geometry, index, data.length)} y={yForValue(geometry, value, min, max) - 11} textAnchor="middle" className="chart-point-label" style={{ pointerEvents: "none" }}>
+              {compactNumber(value)}
+            </text>
+          );
+        }) : null}
         {data.map((row, index) => {
           if (index % labelStep !== 0 && index !== data.length - 1) return null;
           // La última siempre sale; la de antes, si le queda pegada, se pisarían.
@@ -221,7 +273,7 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
                 <div key={item.key} className="chart-tooltip-row">
                   <i style={{ background: item.color }} />
                   <span>{item.label}</span>
-                  <strong>{hovered[item.key] === null ? "—" : numberFormatter.format(Number(hovered[item.key]) || 0)}</strong>
+                  <strong>{hovered[item.key] === null ? "—" : format(Number(hovered[item.key]) || 0)}</strong>
                 </div>
               ))}
               {onSelect ? <em className="chart-tooltip-hint">{selectedIndex === hoverIndex ? "Pulsa para quitar el filtro" : "Pulsa para filtrar"}</em> : null}
@@ -247,5 +299,66 @@ export function TrendChart({ data, series, ariaLabel, onSelect, selectedIndex = 
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Debajo del gráfico ampliado: total, media, máximo y mínimo de cada línea, y todas las cifras. */
+function TrendDetails({ data, series, format, total }: { data: TrendChartProps["data"]; series: TrendSeries[]; format: (value: number) => string; total: boolean | string[] }) {
+  const summable = (key: string) => total === true || (Array.isArray(total) && total.includes(key));
+  const anySummable = series.some((item) => summable(item.key));
+  const stats = series.flatMap((item) => {
+    const points = data.flatMap((row) => {
+      const value = valueAt(row, item.key);
+      return value === null ? [] : [{ label: String(row.label), value }];
+    });
+    if (points.length === 0) return [];
+    const sum = points.reduce((acc, point) => acc + point.value, 0);
+    const highest = points.reduce((best, point) => (point.value > best.value ? point : best));
+    const lowest = points.reduce((best, point) => (point.value < best.value ? point : best));
+    return [{ item, sum, average: sum / points.length, highest, lowest }];
+  });
+
+  return (
+    <>
+      <div className="chart-details-stats">
+        {stats.map(({ item, sum, average, highest, lowest }) => (
+          <div key={item.key} className="chart-details-card">
+            <strong><i style={{ background: item.color }} />{item.label}</strong>
+            <dl>
+              {summable(item.key) ? <><dt>Total</dt><dd>{format(sum)}</dd></> : null}
+              <dt>Media</dt><dd>{format(average)}</dd>
+              <dt>Máximo</dt><dd>{format(highest.value)} <small>{highest.label}</small></dd>
+              <dt>Mínimo</dt><dd>{format(lowest.value)} <small>{lowest.label}</small></dd>
+            </dl>
+          </div>
+        ))}
+      </div>
+      <div className="table-scroll chart-details-table">
+        <table>
+          <thead>
+            <tr><th>Periodo</th>{series.map((item) => <th key={item.key}>{item.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {data.map((row, index) => (
+              <tr key={index}>
+                <td>{String(row.label)}</td>
+                {series.map((item) => {
+                  const value = valueAt(row, item.key);
+                  return <td key={item.key}>{value === null ? "—" : format(value)}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+          {anySummable ? (
+            <tfoot>
+              <tr>
+                <th>Total</th>
+                {series.map((item) => <th key={item.key}>{summable(item.key) ? format(stats.find((stat) => stat.item.key === item.key)?.sum ?? 0) : "—"}</th>)}
+              </tr>
+            </tfoot>
+          ) : null}
+        </table>
+      </div>
+    </>
   );
 }

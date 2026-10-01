@@ -220,6 +220,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
                 { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ]}
               ariaLabel={`Venta mensual de la familia ${ctx.familyName(filters.family)}`}
+              valueFormatter={euros}
               onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />

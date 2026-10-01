@@ -17,9 +17,11 @@ type CollapsibleFiltersProps = {
   resultCount?: number;
   resultLabel?: string;
   defaultOpen?: boolean;
+  /** Lo que va siempre a la vista al final de la barra, como el orden de la lista. */
+  barEnd?: ReactNode;
 };
 
-export function CollapsibleFilters({ children, hasActiveFilters, onClear, resultCount, resultLabel, defaultOpen = false }: CollapsibleFiltersProps) {
+export function CollapsibleFilters({ children, hasActiveFilters, onClear, resultCount, resultLabel, defaultOpen = false, barEnd }: CollapsibleFiltersProps) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
@@ -32,6 +34,7 @@ export function CollapsibleFilters({ children, hasActiveFilters, onClear, result
         </button>
         {hasActiveFilters ? <button type="button" className="filters-clear-button" onClick={onClear}>Limpiar filtros</button> : null}
         {resultCount !== undefined ? <div className="filter-summary"><span>{resultLabel ?? "Resultados"}</span><strong>{resultCount}</strong></div> : null}
+        {barEnd ? <div className="filters-bar-end">{barEnd}</div> : null}
       </div>
       {open ? <div className="filters-collapsible-body">{children}</div> : null}
     </section>

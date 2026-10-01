@@ -285,6 +285,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
               { key: "pedidos", label: "Pedidos", color: "#10b981" },
             ]}
             ariaLabel={`Ofertas y pedidos por mes en ${period.baseLabel}`}
+            valueFormatter={euros}
             onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />

@@ -218,7 +218,7 @@ export function YearsPanels({ ctx }: { ctx: SalesContext }) {
         subtitle={`La venta de cada mes, una línea por año${ctx.filters.month ? " (sin el filtro de mes)" : ""}. Donde un año no tiene datos, su línea se corta`}
         className="panel chart-panel sales-board-half"
       >
-        <TrendChart data={view.points} series={view.series} ariaLabel="Venta mensual de cada año, uno encima de otro" />
+        <TrendChart data={view.points} series={view.series} ariaLabel="Venta mensual de cada año, uno encima de otro" valueFormatter={euros} />
       </Panel>
       <Panel
         title="Venta por año"

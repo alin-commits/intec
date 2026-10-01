@@ -891,7 +891,7 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
 
       <section className="panel chart-panel">
         <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Open rate</h2></div></div>
-        <BarChart items={openRateByUnit} ariaLabel="Open rate por marca" valueFormatter={(value) => formatPercent(value)} />
+        <BarChart items={openRateByUnit} ariaLabel="Open rate por marca" valueFormatter={(value) => formatPercent(value)} total={false} />
       </section>
 
       <CollapsibleFilters

@@ -29,6 +29,11 @@ type TeamMember = { id: string; fullName: string; roles: AppRole[] };
 
 const CLOSED_STATUSES: LeadStatus[] = ["won", "lost", "invalid"];
 
+/** La fecha de una campaña para ordenarlas: su inicio o, si no tiene, el día en que se creó. */
+function campaignDate(campaign: Campaign): string {
+  return campaign.startDate ?? dateKeyInMadrid(campaign.createdAt);
+}
+
 /** Los leads abiertos de la campaña que no lleva nadie: los que se pueden repartir de golpe. */
 function backlogOf(campaignId: string, leads: LeadStub[]): number {
   return leads.filter((lead) => lead.campaignId === campaignId && !lead.assigned && !CLOSED_STATUSES.includes(lead.status)).length;
@@ -149,6 +154,7 @@ export function CampaignsManager() {
   const [assigneesOf, setAssigneesOf] = useState<Map<string, string[]>>(() => new Map());
   const [draftAssignees, setDraftAssignees] = useState<string[]>([]);
   const [pendingBacklog, setPendingBacklog] = useState<Campaign | null>(null);
+  const [sort, setSort] = useState<"recent" | "oldest">("recent");
 
   useEffect(() => {
     if (!configured) return;
@@ -229,7 +235,11 @@ export function CampaignsManager() {
     const matchesFrom = !dateFrom || runsTo >= dateFrom;
     const matchesTo = !dateTo || runsFrom <= dateTo;
     return matchesQuery && (unitId === "all" || campaign.businessUnitId === unitId) && (status === "all" || campaign.status === status) && matchesFrom && matchesTo;
-  }), [campaigns, query, status, unitId, dateFrom, dateTo]);
+  }).sort((a, b) => {
+    // Por cuándo empezó; la que no tiene fecha de inicio, por cuándo se creó.
+    const byDate = campaignDate(a).localeCompare(campaignDate(b)) || a.createdAt.localeCompare(b.createdAt);
+    return sort === "recent" ? -byDate : byDate;
+  }), [campaigns, query, status, unitId, dateFrom, dateTo, sort]);
 
   const campaignSummary = useMemo(() => {
     const stats = visibleCampaigns.map((campaign) => statsFor(campaign, leads));
@@ -496,6 +506,12 @@ export function CampaignsManager() {
         onClear={() => { setQuery(""); setUnitId("all"); setStatus("all"); setDateFrom(""); setDateTo(""); }}
         resultCount={visibleCampaigns.length}
         resultLabel="Campañas"
+        barEnd={
+          <label className="filters-sort"><span>Ordenar</span><select value={sort} onChange={(event: ChangeEvent<HTMLSelectElement>) => setSort(event.target.value === "oldest" ? "oldest" : "recent")}>
+            <option value="recent">Más recientes primero</option>
+            <option value="oldest">Más antiguas primero</option>
+          </select></label>
+        }
       >
         <div className="filter-bar lead-filters">
           <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre de campaña" /></label>
