@@ -70,7 +70,21 @@ function mapSalesEntry(row: Record<string, unknown>): SalesEntry {
     value: Number(row.value ?? 0),
     createdBy: row.created_by ? String(row.created_by) : null,
     createdAt: String(row.created_at),
+    leadId: row.lead_id ? String(row.lead_id) : null,
+    notes: row.notes ? String(row.notes) : null,
   };
+}
+
+/** De dónde sale una venta, para la tabla y el CSV. */
+function saleOrigin(entry: SalesEntry): string {
+  if (entry.entryMode === "lead") return entry.notes ?? "Lead";
+  return entry.entryMode === "inquiry" ? "Consulta" : "Semanal";
+}
+
+/** El buscador de Leads abierto en el lead de un apunte ("Lead: Laura Pérez · Clima…"). */
+function leadLink(entry: SalesEntry): string {
+  const name = (entry.notes ?? "").replace(/^Lead:\s*/, "").split(" · ")[0] ?? "";
+  return `/leads?q=${encodeURIComponent(name)}`;
 }
 
 function blankWeeklyDraft(): Record<SaleType, { count: string; value: string }> {
@@ -192,7 +206,7 @@ export function InquiryRegister() {
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
         fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
-        fetchAllPages((from, to) => supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at, lead_id, notes").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
         supabase.auth.getUser(),
       ]);
       if (unitError || inquiryError || salesError) {
@@ -543,6 +557,8 @@ export function InquiryRegister() {
   }
 
   function canDeleteSale(entry: SalesEntry): boolean {
+    // La de un lead la lleva el lead: se quita cambiando su estado.
+    if (entry.leadId) return false;
     return isAdmin || (currentUserId !== null && entry.createdBy === currentUserId);
   }
 
@@ -924,7 +940,7 @@ export function InquiryRegister() {
       { header: "Fecha", value: (entry) => formatDate(entry.occurredOn) },
       { header: "Unidad", value: (entry) => units.find((unit) => unit.id === entry.businessUnitId)?.name ?? "" },
       { header: "Tipo", value: (entry) => saleTypeLabels[entry.saleType] },
-      { header: "Origen", value: (entry) => entry.entryMode === "inquiry" ? "Consulta" : "Semanal" },
+      { header: "Origen", value: (entry) => saleOrigin(entry) },
       { header: "Cantidad", value: (entry) => entry.count },
       { header: "Valor (€)", value: (entry) => entry.value },
     ]);
@@ -1103,7 +1119,7 @@ export function InquiryRegister() {
       </section>
 
       <section className="section-heading">
-        <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta se registra por consulta (al editarla) o de golpe por semana. La cantidad indica cuántas ventas componen el valor total.</p></div>
+        <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta se registra por consulta (al editarla) o de golpe por semana. La cantidad indica cuántas ventas componen el valor total. Las de los leads entran solas: oferta al marcar «Oferta enviada» y pedido al marcarlo «Ganado».</p></div>
       </section>
       <section className="kpi-grid">
         {saleTypeOrder.map((type) => (
@@ -1204,7 +1220,7 @@ export function InquiryRegister() {
         <div className="panel-heading">
           <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
           <div className="panel-heading-trailing">
-            <span className="muted">Incluye ventas por consulta y bloques semanales. Corrige un error editando la venta, o elimínala si no debía existir</span>
+            <span className="muted">Incluye ventas por consulta, bloques semanales y las de los leads. Corrige un error editando la venta, o elimínala si no debía existir; las de un lead se cambian desde el lead</span>
             <button type="button" className="button button-compact button-secondary" onClick={exportSalesCsv}>Exportar CSV</button>
           </div>
         </div>
@@ -1215,12 +1231,18 @@ export function InquiryRegister() {
               <td>{formatDate(entry.occurredOn)}</td>
               <td>{unit?.name ?? "—"}</td>
               <td><span className="badge">{saleTypeLabels[entry.saleType]}</span></td>
-              <td>{entry.entryMode === "inquiry" ? "Consulta" : "Semanal"}</td>
+              <td>{entry.leadId ? <span className="sale-origin-lead" title="Sale de un lead: cambia con su estado y su valor">{saleOrigin(entry)}</span> : saleOrigin(entry)}</td>
               <td>{numberFormatter.format(entry.count)}</td>
               <td>{currencyFormatter.format(entry.value)}</td>
               <td className="recent-inquiries-actions">
-                {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditSale(entry)}>Editar</button> : null}
-                {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
+                {entry.leadId ? (
+                  <a className="button button-compact button-secondary" href={leadLink(entry)}>Ver lead</a>
+                ) : (
+                  <>
+                    {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditSale(entry)}>Editar</button> : null}
+                    {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
+                  </>
+                )}
               </td>
             </tr>
           );

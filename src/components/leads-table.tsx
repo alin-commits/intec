@@ -25,6 +25,17 @@ import { ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/component
 import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-leads";
+/** Al pasar a estos estados se pide el importe: es el de su oferta o su venta en Consultas. */
+const VALUE_STATUSES: LeadStatus[] = ["offer_sent", "won"];
+
+/** Qué le pasa a su apunte de Consultas con el cambio, si ya tenía uno (lo hace la base). */
+function consultasNote(from: LeadStatus, to: LeadStatus): string | null {
+  if (!["offer_sent", "interested", "won"].includes(from)) return null;
+  if (to === "interested") return "Su oferta en Consultas pasa a seguimiento.";
+  if (to === "lost") return "Su apunte en Consultas pasa a perdido.";
+  if (to === "offer_sent" || to === "won") return null;
+  return "Su apunte en Consultas se quita: la oferta deja de estar en pie.";
+}
 
 type CampaignOption = { id: string; name: string; businessUnitId: string };
 type TeamMember = { id: string; fullName: string; roles: AppRole[] };
@@ -140,6 +151,8 @@ export function LeadsTable() {
   const [message, setMessage] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(true);
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
+  /** El importe que se pide al pasar a oferta o a ganado: es el de su apunte en Consultas. */
+  const [pendingValue, setPendingValue] = useState("");
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [pdfBusy, setPdfBusy] = useState(false);
   const [team, setTeam] = useState<TeamMember[]>([]);
@@ -401,20 +414,32 @@ export function LeadsTable() {
     }
   }
 
+  function askStatusChange(lead: Lead, status: LeadStatus) {
+    setPendingStatus({ lead, status });
+    setPendingValue(lead.saleValue === null ? "" : String(lead.saleValue));
+  }
+
   async function confirmStatusChange() {
     if (!pendingStatus) return;
+    const withValue = VALUE_STATUSES.includes(pendingStatus.status);
+    const saleValue = withValue ? (pendingValue.trim() === "" ? null : Number(pendingValue)) : pendingStatus.lead.saleValue;
+    if (saleValue !== null && (!Number.isFinite(saleValue) || saleValue < 0)) {
+      setMessage("El importe tiene que ser un número igual o mayor que cero.");
+      return;
+    }
     setBusy(true);
     try {
       if (!configured) {
         const next = rows.map((lead) => lead.id === pendingStatus.lead.id ? {
           ...lead,
           status: pendingStatus.status,
+          saleValue,
           updatedAt: new Date().toISOString(),
           statusHistory: [{ id: `H-${Date.now()}`, previousStatus: lead.status, newStatus: pendingStatus.status, changedAt: new Date().toISOString(), changedByName: "Alín" }, ...(lead.statusHistory ?? [])],
         } : lead);
         persistDemo(next);
       } else {
-        const { error } = await createClient().from("leads").update({ status: pendingStatus.status }).eq("id", pendingStatus.lead.id);
+        const { error } = await createClient().from("leads").update(withValue ? { status: pendingStatus.status, sale_value: saleValue } : { status: pendingStatus.status }).eq("id", pendingStatus.lead.id);
         if (error) throw error;
         await loadRealData();
       }
@@ -554,7 +579,7 @@ export function LeadsTable() {
                   <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
                   <td><strong>{lead.contactName || "Sin contacto"}</strong><small>{lead.clientCompanyName || "—"}</small></td>
                   <td>{lead.campaign || "General"}</td>
-                  <td>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => setPendingStatus({ lead, status: event.target.value as LeadStatus })}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
+                  <td>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
                   <td className={(lead.assignees ?? []).length ? undefined : "muted"}>{ownerNames(lead)}</td>
                   <td>{lead.productInterest || "—"}</td>
                   <td>{lead.saleValue ? currencyFormatter.format(lead.saleValue) : "—"}</td>
@@ -577,6 +602,21 @@ export function LeadsTable() {
         onConfirm={() => void confirmStatusChange()}
       >
         {pendingStatus ? <div className="confirmation-summary"><span>Lead</span><strong>{pendingStatus.lead.contactName || pendingStatus.lead.clientCompanyName}</strong><span>Cambio</span><strong>{leadStatusLabels[pendingStatus.lead.status]} → {leadStatusLabels[pendingStatus.status]}</strong></div> : null}
+        {pendingStatus && VALUE_STATUSES.includes(pendingStatus.status) ? (
+          <div className="confirmation-sale-form">
+            <label>
+              <span>{pendingStatus.status === "won" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
+              <input type="number" min="0" step="0.01" placeholder="0,00" value={pendingValue} onChange={(event) => setPendingValue(event.target.value)} />
+            </label>
+            <p className="muted">
+              {pendingStatus.status === "won"
+                ? "Pasa a Consultas como pedido (venta) y suma en su campaña y en el total de ventas, una sola vez."
+                : "Se apunta en Consultas → Ventas comerciales como oferta enviada."}
+            </p>
+          </div>
+        ) : pendingStatus && consultasNote(pendingStatus.lead.status, pendingStatus.status) ? (
+          <p className="muted">{consultasNote(pendingStatus.lead.status, pendingStatus.status)}</p>
+        ) : null}
       </ConfirmationDialog>
 
       <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" scrollInside onClose={() => setEditorOpen(false)}>
@@ -594,7 +634,7 @@ export function LeadsTable() {
 
             <label><span>Tipo</span><select value={draft.type} disabled={!canEdit} onChange={(event) => updateDraft("type", event.target.value)}>{Object.values(leadTypeLabels).map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
             <label><span>Fuente</span><input value={draft.source} readOnly={!canEdit} onChange={(event) => updateDraft("source", event.target.value)} /></label>
-            <label><span>Valor de venta</span><input type="number" min="0" step="0.01" value={draft.saleValue ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("saleValue", event.target.value ? Number(event.target.value) : null)} /></label>
+            <label><span>Valor de la oferta o venta</span><input type="number" min="0" step="0.01" value={draft.saleValue ?? ""} readOnly={!canEdit} onChange={(event) => updateDraft("saleValue", event.target.value ? Number(event.target.value) : null)} /></label>
             <div className="form-field-wide owner-picker">
               <span>Responsables</span>
               {ownerOptions.length === 0 ? <p className="muted">No hay comerciales activos a quien asignarlo.</p> : (

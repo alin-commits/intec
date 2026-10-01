@@ -92,7 +92,8 @@ function bucketChannels(rows: { businessUnitId: string; createdAt: string; chann
 
 const demoChannelStats = bucketChannels(demoInquiries.map((record) => ({ businessUnitId: record.businessUnitId, createdAt: record.createdAt, channel: record.inquiryType, count: record.count })));
 type SocialStub = { businessUnitId: string; periodMonth: string; newFollowers: number };
-type InquirySaleStub = { businessUnitId: string; month: string; value: number };
+/** `ownValue`: lo que no sale de un lead (los de un lead ya cuentan como leads ganados). */
+type InquirySaleStub = { businessUnitId: string; month: string; value: number; ownValue: number };
 type AdsStub = { businessUnitId: string; campaignId: string | null; month: string; amountSpent: number; leads: number; revenue: number };
 type MailingStub = { businessUnitId: string; month: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
 
@@ -203,7 +204,7 @@ export function DashboardClient() {
       ] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
         fetchAllPages((from, to) => supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, count").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("id").range(from, to)),
-        fetchAllPages((from, to) => supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode, sale_type").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode, sale_type, lead_id").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("lead_status_history").select("lead_id, new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).order("id").range(from, to)),
         supabase.from("campaigns").select("id, business_unit_id, name, status, start_date, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
@@ -248,16 +249,21 @@ export function DashboardClient() {
       // Las ventas de Consultas (sales_entries) son un embudo propio de esa página
       // (oferta/seguimiento/pedido/perdido) y no deben sumarse al "Valor ganado"
       // de Leads/Campañas, que solo cuenta leads realmente ganados. Solo los
-      // "pedido" (venta confirmada) cuentan como ingreso real de Consultas.
-      const inquirySaleBuckets = new Map<string, number>();
+      // "pedido" (venta confirmada) cuentan como ingreso real de Consultas. El
+      // pedido de un lead ganado sale aquí y en Leads: se aparta para que el
+      // total de ventas no lo cuente dos veces.
+      const inquirySaleBuckets = new Map<string, { value: number; ownValue: number }>();
       for (const row of salesData ?? []) {
         if (row.sale_type !== "pedido") continue;
         const key = `${row.business_unit_id}|${monthKeyOf(row.occurred_on)}`;
-        inquirySaleBuckets.set(key, (inquirySaleBuckets.get(key) ?? 0) + (row.value ?? 0));
+        const bucketed = inquirySaleBuckets.get(key) ?? { value: 0, ownValue: 0 };
+        bucketed.value += Number(row.value ?? 0);
+        if (!row.lead_id) bucketed.ownValue += Number(row.value ?? 0);
+        inquirySaleBuckets.set(key, bucketed);
       }
-      setInquirySales(Array.from(inquirySaleBuckets.entries()).map(([key, value]) => {
+      setInquirySales(Array.from(inquirySaleBuckets.entries()).map(([key, { value, ownValue }]) => {
         const [businessUnitId, month] = key.split("|");
-        return { businessUnitId, month, value };
+        return { businessUnitId, month, value, ownValue };
       }));
       for (const row of leadData ?? []) {
         bucket(row.business_unit_id, monthKeyOf(row.created_at)).leads += 1;
@@ -507,11 +513,20 @@ export function DashboardClient() {
       { key: "leads", label: "Leads ganados", value: current.saleValue, helper: "valor de los leads marcados como ganados" },
       { key: "ads", label: "Meta Ads", value: rrssAdsFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada campaña" },
       { key: "mailing", label: "Mailing", value: rrssMailingFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada envío" },
-      { key: "inquiries", label: "Consultas", value: filteredInquirySales.filter((item) => inPeriod(item.month)).reduce((sum, item) => sum + item.value, 0), helper: "solo los apuntes de tipo pedido" },
+      { key: "inquiries", label: "Consultas", value: filteredInquirySales.filter((item) => inPeriod(item.month)).reduce((sum, item) => sum + item.value, 0), helper: "los apuntes de tipo pedido, también los de leads ganados" },
       { key: "campaigns", label: "Campañas", value: campaignsInPeriod.reduce((sum, row) => sum + row.directSaleValue, 0), helper: "venta directa anotada en la campaña" },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- matchesUnit e inPeriod se rehacen en cada render
   }, [current.saleValue, rrssAdsFiltered, rrssMailingFiltered, filteredInquirySales, campaignRows, businessUnitId, viewMode, selectedMonth, selectedYear]);
+  /**
+   * El total de ventas, con cada venta una sola vez: los leads ganados, los
+   * pedidos de Consultas que no salen de un lead (los que sí, ya están en los
+   * leads) y la venta directa de las campañas. Meta Ads y Mailing son valor
+   * atribuido a esas mismas ventas: se ven, pero no se suman.
+   */
+  const salesTotal = (salesBySource.find((source) => source.key === "leads")?.value ?? 0)
+    + filteredInquirySales.filter((item) => inPeriod(item.month)).reduce((sum, item) => sum + item.ownValue, 0)
+    + (salesBySource.find((source) => source.key === "campaigns")?.value ?? 0);
 
   const rrssTrend = useMemo(() => {
     const byMonth = new Map<string, number>();
@@ -795,6 +810,10 @@ export function DashboardClient() {
           </div>
           <div className="sales-source-body">
             <ul className="stat-list sales-source-list">
+              <li className="sales-source-total">
+                <span>Total de ventas<small>cada venta una sola vez, aunque salga en varias líneas</small></span>
+                <strong>{currencyFormatter.format(salesTotal)}</strong>
+              </li>
               {salesBySource.map((source) => (
                 <li key={source.key}>
                   <span>{source.label}<small>{source.helper}</small></span>
@@ -803,10 +822,15 @@ export function DashboardClient() {
               ))}
             </ul>
             <aside className="sales-source-note">
-              <strong>Por qué están separadas</strong>
+              <strong>Cómo se cuenta el total</strong>
               <p>
-                Estas cifras <b>no se suman entre sí</b>. Una misma venta puede estar anotada en más de un sitio:
-                un lead ganado que vino de una campaña de Meta cuenta en las dos primeras líneas.
+                Una misma venta sale en más de una línea: un lead ganado cuenta en Leads, en su campaña y en los
+                pedidos de Consultas. El <b>total la cuenta una sola vez</b>: leads ganados, pedidos de Consultas
+                que no salen de un lead y venta directa de campañas.
+              </p>
+              <p>
+                Meta Ads y Mailing son el valor que se atribuye a esas mismas ventas para medir cada canal:
+                se ven aquí, pero no entran en el total.
               </p>
               <p>
                 Son importes que escribe el equipo a mano para medir qué canal funciona, <b>no facturación</b>.

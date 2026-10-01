@@ -1309,6 +1309,9 @@ tr:hover .vault-icon-button, .vault-icon-button:focus-visible { opacity: 1; }
 .sales-source-list small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 .sales-source-list strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sales-source-panel { grid-column: 1 / -1; }
+.sales-source-list li.sales-source-total { padding: 12px 14px; margin-bottom: 4px; border: 0; border-radius: 12px; background: var(--primary-soft); }
+.sales-source-list li.sales-source-total > span { font-weight: 750; color: var(--primary); }
+.sales-source-list li.sales-source-total strong { font-size: 18px; color: var(--primary); }
 .sales-source-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); gap: 26px; align-items: start; }
 .sales-source-note { padding: 16px 18px; border-radius: 12px; background: var(--surface-muted); }
 .sales-source-note strong { display: block; font-size: 13px; margin-bottom: 8px; }
@@ -1853,6 +1856,7 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .sales-sheet-heading h3 { margin: 0; font-size: 16px; }
 .sales-sheet-heading p { margin: 2px 0 0; font-size: 12.5px; }
 .sales-sheet-two { display: grid; gap: 22px; }
+.sale-origin-lead { color: var(--primary); font-weight: 650; }
 .sales-sheet-chart-controls { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .sales-sheet-select { display: grid; gap: 4px; min-width: 0; }
 .sales-sheet-select span { color: var(--muted); font-size: 11.5px; font-weight: 750; }

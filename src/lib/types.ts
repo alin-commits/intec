@@ -123,7 +123,8 @@ export type InquiryRecord = {
 };
 
 export type SaleType = "oferta" | "seguimiento" | "pedido" | "perdido";
-export type SaleEntryMode = "inquiry" | "weekly";
+/** "lead": el apunte de un lead en oferta o ganado; lo lleva el propio lead y aquí no se edita. */
+export type SaleEntryMode = "inquiry" | "weekly" | "lead";
 
 export type SalesEntry = {
   id: string;
@@ -137,6 +138,9 @@ export type SalesEntry = {
   value: number;
   createdBy: string | null;
   createdAt: string;
+  /** El lead del que sale, si sale de uno. */
+  leadId?: string | null;
+  notes?: string | null;
 };
 
 export type Profile = {
