@@ -31,7 +31,8 @@ export type PaymentsContext = {
   today: string;
 };
 
-type Tab = "remesas" | "tesoreria" | "bancos";
+export type PaymentsTab = "remesas" | "tesoreria" | "bancos";
+type Tab = PaymentsTab;
 const tabs: { key: Tab; label: string }[] = [
   { key: "remesas", label: "Remesas de confirming" },
   { key: "tesoreria", label: "Tesorería" },
@@ -43,9 +44,15 @@ const todayKey = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 };
 
-export function PaymentsView() {
+/**
+ * Con `tab`, la pestaña la elige quien la contiene (las páginas de
+ * Administración) y aquí no se pintan las pestañas propias.
+ */
+export function PaymentsView({ tab: forcedTab, onTab }: { tab?: PaymentsTab; onTab?: (tab: PaymentsTab) => void } = {}) {
   const [stage, setStage] = useState<"loading" | "denied" | "ready" | "failed">("loading");
-  const [tab, setTab] = useState<Tab>("remesas");
+  const [ownTab, setOwnTab] = useState<Tab>("remesas");
+  const tab = forcedTab ?? ownTab;
+  const setTab = (next: Tab) => (onTab ? onTab(next) : setOwnTab(next));
   const [userId, setUserId] = useState("");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [details, setDetails] = useState<Map<number, CompanyDetails>>(new Map());
@@ -140,13 +147,15 @@ export function PaymentsView() {
         </div>
       </section>
 
-      <div className="view-tabs" role="tablist" aria-label="Apartados de pagos">
-        {tabs.map((item) => (
-          <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={tab === item.key ? "view-tab active" : "view-tab"} onClick={() => setTab(item.key)}>
-            {item.label}
-          </button>
-        ))}
-      </div>
+      {forcedTab ? null : (
+        <div className="view-tabs" role="tablist" aria-label="Apartados de pagos">
+          {tabs.map((item) => (
+            <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={tab === item.key ? "view-tab active" : "view-tab"} onClick={() => setTab(item.key)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div role="tabpanel" key={reloadKey}>
         {tab === "remesas" ? <RemittancesTab ctx={context} onConfigure={() => setTab("bancos")} /> : null}

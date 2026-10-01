@@ -154,7 +154,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
       const renewingSoon = (subscriptions?.data ?? [])
         .map((row) => ({ id: row.id, date: nextRenewal({ id: row.id, name: row.name, amount: Number(row.amount), billingPeriod: row.billing_period as BillingPeriod, startDate: row.start_date, kind: "subscription", status: "active", category: "software", provider: null, cancelledOn: null, businessUnitId: null, paymentMethod: null, url: null, notes: null }, today) }))
         .filter((item): item is { id: string; date: string } => item.date !== null && daysBetween(today, item.date) <= RENEWAL_ALERT_DAYS);
-      if (renewingSoon.length) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon.length, href: "/gastos", icon: <WalletIcon />, urgent: false, signature: renewingSoon.map((item) => `${item.id}@${item.date}`).sort().join(",") });
+      if (renewingSoon.length) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon.length, href: "/marketing?p=gastos", icon: <WalletIcon />, urgent: false, signature: renewingSoon.map((item) => `${item.id}@${item.date}`).sort().join(",") });
       setAlerts(next);
       const rows = (received?.data ?? []) as { id: string; title: string; body: string; sender_name: string; created_at: string; announcement_recipients: { read_at: string | null }[] }[];
       setMessages(rows.map((row) => ({

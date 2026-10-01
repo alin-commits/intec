@@ -1,5 +1,6 @@
-import { RrssManager } from "@/components/rrss-manager";
+import { redirect } from "next/navigation";
 
+// RRSS es ya parte de Marketing: los enlaces antiguos llevan ahí.
 export default function RrssPage() {
-  return <RrssManager />;
+  redirect("/marketing?p=redes");
 }

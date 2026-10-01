@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, DocumentIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, RrssIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon, WalletIcon } from "@/components/icons";
+import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, EXPENSES_ROLES, LEADS_ROLES, PAYMENTS_ROLES, RRSS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -15,14 +15,13 @@ import type { AppRole } from "@/lib/types";
 const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
   { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
   { href: "/ventas", label: "Ventas", icon: EuroIcon, roles: SALES_ROLES },
+  // Lo del día y los pagos por confirming: un departamento, una entrada con pestañas.
   { href: "/administracion", label: "Administración", icon: InboxIcon, roles: PAYMENTS_ROLES },
-  { href: "/pagos", label: "Pagos", icon: DocumentIcon, roles: PAYMENTS_ROLES },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
-  { href: "/campanas", label: "Campañas", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
-  { href: "/rrss", label: "RRSS", icon: RrssIcon, roles: RRSS_ROLES },
-  { href: "/gastos", label: "Gastos", icon: WalletIcon, roles: EXPENSES_ROLES },
+  // Campañas, redes sociales, Meta Ads, mailing y gastos: un departamento, una entrada con pestañas.
+  { href: "/marketing", label: "Marketing", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
   { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
   { href: "/tarjetas", label: "Tarjetas", icon: TarjetasIcon, roles: CARDS_ROLES },
@@ -39,14 +38,11 @@ function nameFromEmail(email: string): string {
 const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
   "/ventas": "Ventas de Sage",
-  "/administracion": "Hoy en Administración",
-  "/pagos": "Pagos a proveedores",
+  "/administracion": "Administración",
   "/consultas": "Consultas",
   "/leads": "Leads",
   "/crm": "CRM",
-  "/campanas": "Campañas",
-  "/rrss": "RRSS y métricas de marketing",
-  "/gastos": "Gastos de marketing",
+  "/marketing": "Marketing",
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
   "/tarjetas": "Tarjetas de visita",

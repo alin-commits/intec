@@ -578,7 +578,7 @@ export function DashboardClient() {
     canSeeTickets && openTicketsCount !== null ? { key: "tickets", label: "Tickets abiertos", value: openTicketsCount, href: "/tickets", icon: <TicketsIcon />, alert: false } : null,
     canSeeTickets && staleTicketsCount !== null ? { key: "stale", label: "Tickets abiertos hace +3 días", value: staleTicketsCount, href: "/tickets", icon: <ClockIcon />, alert: staleTicketsCount > 0 } : null,
     hasAnyRole(operationalRoles, CRM_ROLES) && newCrmContactsCount !== null ? { key: "crm", label: "Contactos CRM nuevos (7 días)", value: newCrmContactsCount, href: "/crm", icon: <CrmIcon />, alert: false } : null,
-    { key: "campaigns", label: "Campañas activas", value: activeCampaignsCount, href: "/campanas", icon: <ConversionIcon />, alert: false },
+    { key: "campaigns", label: "Campañas activas", value: activeCampaignsCount, href: "/marketing?p=campanas", icon: <ConversionIcon />, alert: false },
   ].filter((item) => item !== null);
 
   const topCampaigns = [...campaignRows].sort((a, b) => Number(b.status === "active") - Number(a.status === "active")).slice(0, 5);
@@ -768,7 +768,7 @@ export function DashboardClient() {
         <article className="panel chart-panel">
           <div className="panel-heading">
             <div><h2>Nuevos seguidores en RRSS</h2><p className="panel-subtitle">{periodLabel}</p></div>
-            <a href="/rrss" className="text-link">Ver RRSS →</a>
+            <a href="/marketing?p=redes" className="text-link">Ver RRSS →</a>
           </div>
           <TrendChart
             data={rrssTrend}
@@ -843,7 +843,7 @@ export function DashboardClient() {
       <section className="panel table-panel">
         <div className="panel-heading">
           <div><h2>Campañas</h2><p className="panel-subtitle">Las activas primero</p></div>
-          <a href="/campanas" className="text-link">Ver todas →</a>
+          <a href="/marketing?p=campanas" className="text-link">Ver todas →</a>
         </div>
         <div className="table-scroll">
           <table>

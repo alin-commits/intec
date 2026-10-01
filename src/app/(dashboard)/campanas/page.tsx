@@ -1,5 +1,6 @@
-import { CampaignsManager } from "@/components/campaigns-manager";
+import { redirect } from "next/navigation";
 
+// Campañas es ya parte de Marketing: los enlaces antiguos llevan ahí.
 export default function CampaignsPage() {
-  return <CampaignsManager />;
+  redirect("/marketing?p=campanas");
 }

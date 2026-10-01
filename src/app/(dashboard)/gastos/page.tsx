@@ -1,5 +1,6 @@
-import { ExpensesManager } from "@/components/expenses-manager";
+import { redirect } from "next/navigation";
 
+// Gastos de marketing es ya una pestaña de Marketing: los enlaces antiguos llevan ahí.
 export default function ExpensesPage() {
-  return <ExpensesManager />;
+  redirect("/marketing?p=gastos");
 }

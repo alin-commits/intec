@@ -143,7 +143,7 @@ export function MarketingDashboardView() {
       <section className="panel table-panel">
         <div className="panel-heading">
           <div><span className="eyebrow">Campañas</span><h2>Resumen general</h2></div>
-          <a href="/campanas" className="text-link">Ver todas →</a>
+          <a href="/marketing?p=campanas" className="text-link">Ver todas →</a>
         </div>
         <div className="table-scroll">
           <table>
@@ -172,7 +172,7 @@ export function MarketingDashboardView() {
       <section className="panel table-panel">
         <div className="panel-heading">
           <div><span className="eyebrow">RRSS</span><h2>Redes sociales, Meta Ads y mailing</h2></div>
-          <a href="/rrss" className="text-link">Ver todas →</a>
+          <a href="/marketing?p=redes" className="text-link">Ver todas →</a>
         </div>
         <div className="table-scroll">
           <table>

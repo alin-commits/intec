@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       status: campaign.status,
       dates: datesLabel(campaign.start_date, campaign.end_date),
       channel: campaign.channel,
-      url: `${appOrigin(request)}/campanas`,
+      url: `${appOrigin(request)}/marketing?p=campanas`,
     }),
   });
   return sent ? NextResponse.json({ sent: emails.length }) : NextResponse.json({ error: "No se pudo enviar el aviso." }, { status: 502 });

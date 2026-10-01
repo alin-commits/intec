@@ -183,9 +183,16 @@ function initialDemoState<T>(configured: boolean, storageKey: string, fallback: 
   return saved ? (JSON.parse(saved) as T[]) : fallback;
 }
 
-export function RrssManager() {
+export type RrssTab = Tab;
+
+/**
+ * Con `tab`, la pestaña la elige quien la contiene (las páginas de Marketing)
+ * y aquí no se pintan las pestañas propias.
+ */
+export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
   const configured = isSupabaseConfigured();
-  const [tab, setTab] = useState<Tab>("social");
+  const [ownTab, setTab] = useState<Tab>("social");
+  const tab = forcedTab ?? ownTab;
   const [units, setUnits] = useState<BusinessUnit[]>(demoBusinessUnits.filter((unit) => unit.active));
   const [socialStats, setSocialStats] = useState<SocialMediaStat[]>(() => initialDemoState(configured, SOCIAL_STORAGE_KEY, demoSocialMediaStats));
   const [mailingCampaigns, setMailingCampaigns] = useState<MailingCampaign[]>(() => initialDemoState(configured, MAILING_STORAGE_KEY, demoMailingCampaigns));
@@ -285,11 +292,13 @@ export function RrssManager() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
-      <div className="view-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "social"} className={tab === "social" ? "view-tab active" : "view-tab"} onClick={() => setTab("social")}>Redes sociales</button>
-        <button type="button" role="tab" aria-selected={tab === "ads"} className={tab === "ads" ? "view-tab active" : "view-tab"} onClick={() => setTab("ads")}>Meta Ads</button>
-        <button type="button" role="tab" aria-selected={tab === "mailing"} className={tab === "mailing" ? "view-tab active" : "view-tab"} onClick={() => setTab("mailing")}>Mailing</button>
-      </div>
+      {forcedTab ? null : (
+        <div className="view-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === "social"} className={tab === "social" ? "view-tab active" : "view-tab"} onClick={() => setTab("social")}>Redes sociales</button>
+          <button type="button" role="tab" aria-selected={tab === "ads"} className={tab === "ads" ? "view-tab active" : "view-tab"} onClick={() => setTab("ads")}>Meta Ads</button>
+          <button type="button" role="tab" aria-selected={tab === "mailing"} className={tab === "mailing" ? "view-tab active" : "view-tab"} onClick={() => setTab("mailing")}>Mailing</button>
+        </div>
+      )}
 
       {tab === "social" ? (
         <SocialTab units={units} stats={socialStats} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistSocial} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
