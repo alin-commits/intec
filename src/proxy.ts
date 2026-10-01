@@ -31,7 +31,7 @@ export async function proxy(request: NextRequest) {
    * ruta exacta y no por prefijo, para que una ruta nueva bajo el mismo camino
    * no quede abierta sin querer.
    */
-  const machinePaths = ["/api/sage/ingest", "/api/sage/refresh/claim", "/api/sage/refresh/finish"];
+  const machinePaths = ["/api/sage/ingest", "/api/sage/refresh/claim", "/api/sage/refresh/finish", "/api/meta/leads"];
   const isLogin = request.nextUrl.pathname.startsWith("/login");
   const isPublicPath = request.nextUrl.pathname === "/"
     || machinePaths.includes(request.nextUrl.pathname)

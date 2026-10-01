@@ -50,7 +50,7 @@ export function tokenFor(tokenKey: string): string | null {
  * El token va en la cabecera y no en la dirección: en la dirección acabaría en
  * los registros del servidor y en cualquier traza de error.
  */
-async function getAll(path: string, params: Record<string, string>, token: string): Promise<Record<string, unknown>[]> {
+export async function getAll(path: string, params: Record<string, string>, token: string): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   let url: string | null = `${BASE}/${path}?${new URLSearchParams({ ...params, limit: "200" })}`;
   // Un tope duro de páginas: si algo va mal, mejor quedarse corto que dar
@@ -69,6 +69,14 @@ async function getAll(path: string, params: Record<string, string>, token: strin
     url = body.paging?.next ?? null;
   }
   return rows;
+}
+
+/** Un objeto suelto de Meta (una página, un lead…), o una llamada que cambia algo con `method: "POST"`. */
+export async function graphCall(path: string, params: Record<string, string>, token: string, method: "GET" | "POST" = "GET"): Promise<Record<string, unknown>> {
+  const response = await fetch(`${BASE}/${path}?${new URLSearchParams(params)}`, { method, headers: { Authorization: `Bearer ${token}` } });
+  const body = await response.json().catch(() => ({})) as Record<string, unknown> & { error?: { message?: string; code?: number } };
+  if (!response.ok || body.error) throw new MetaAdsError(body.error?.message ?? `Meta respondió ${response.status}`, body.error?.code);
+  return body;
 }
 
 const CAMPOS_CAMPANA = "id,name,objective,status,start_time,stop_time";

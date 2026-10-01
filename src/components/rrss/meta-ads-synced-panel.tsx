@@ -292,8 +292,10 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       // hace que la pestaña de Campañas vea este gasto.
       const actual = campanas.find((c) => c.meta_id === editando.id)?.campaign_id ?? "";
       if (enlace !== actual) {
+        // Lo que decide una persona manda: la sincronización de la mañana ya no
+        // vuelve a unir (ni a soltar) esta campaña por su cuenta.
         const { error: errorEnlace } = await supabase.from("meta_campaigns")
-          .update({ campaign_id: enlace || null, updated_at: new Date().toISOString() })
+          .update({ campaign_id: enlace || null, link_locked: true, linked_by: "persona", updated_at: new Date().toISOString() })
           .eq("meta_id", editando.id);
         if (errorEnlace) throw errorEnlace;
       }

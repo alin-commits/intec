@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
+import { appOrigin } from "@/lib/app-origin";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { fetchCampaigns, fetchCampaignsByIds, fetchDailyInsights, MetaAdsError, tokenFor, type MetaCampaign } from "@/lib/meta/ads-client";
+import { syncPagesAndLeads } from "@/lib/meta/leads-import";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Trae de Meta el gasto de cada campaña, un día por fila.
+ * Trae de Meta el gasto de cada campaña, un día por fila; después une cada
+ * campaña con la de la aplicación (o la crea) y revisa los formularios de
+ * clientes potenciales por si algún aviso de Meta se perdió.
  *
  * Se vuelve a pasar por los últimos días en cada ejecución, no solo por el de
  * ayer: Meta sigue ajustando sus cifras durante días, y un dato que se guardó
@@ -148,5 +152,24 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ desde, hasta, cuentas: resumen });
+  // Con las campañas al día, cada una se une a la de la aplicación (o se crea):
+  // así el gasto aparece en Campañas sin darla de alta a mano.
+  const { data: unidas, error: errorUnion } = await admin.rpc("meta_reconcile_campaigns");
+  const porAccion = new Map<string, number>();
+  for (const fila of (unidas ?? []) as { accion: string }[]) porAccion.set(fila.accion, (porAccion.get(fila.accion) ?? 0) + 1);
+  const campanas = errorUnion
+    ? `No se pudieron unir: ${errorUnion.message}`
+    : porAccion.size === 0 ? "Nada nuevo que unir" : [...porAccion].map(([accion, total]) => `${total} ${accion}`).join(", ");
+
+  // Y los formularios de clientes potenciales que no hayan entrado por su aviso.
+  let formularios: string[] = [];
+  if (!soloCuenta) {
+    try {
+      formularios = await syncPagesAndLeads(admin, appOrigin(request));
+    } catch (cause) {
+      formularios = [`No se pudieron revisar: ${cause instanceof Error ? cause.message : "error desconocido"}`];
+    }
+  }
+
+  return NextResponse.json({ desde, hasta, cuentas: resumen, campanas, formularios });
 }
