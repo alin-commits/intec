@@ -43,6 +43,8 @@ export type BusinessCard = {
   createdAt: string;
 };
 
+export type CrmStatus = "sin_contactar" | "contactado" | "oferta_enviada" | "interesado" | "ganado" | "perdido";
+
 export type CrmContact = {
   id: string;
   businessUnitId: string;
@@ -54,6 +56,10 @@ export type CrmContact = {
   notes: string | null;
   /** De dónde viene: un evento, una feria, la web, una recomendación… */
   origin?: string | null;
+  /** En qué punto está: sin contactar, contactado, oferta enviada… */
+  status?: CrmStatus;
+  /** Cuándo cambió de estado por última vez (lo apunta la base). */
+  statusChangedAt?: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

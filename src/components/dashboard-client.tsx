@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { MonthField } from "@/components/ui/date-field";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoCrmContacts, demoInquiries, demoLeads, monthlyStats as demoMonthlyStats } from "@/lib/demo-data";
@@ -147,6 +148,7 @@ function adsStatsFor(campaignId: string, ads: AdsStub[]) {
 }
 
 export function DashboardClient() {
+  const router = useRouter();
   const configured = isSupabaseConfigured();
   const currentMonthKey = monthKey();
   const [businessUnitId, setBusinessUnitId] = useState("all");
@@ -586,7 +588,10 @@ export function DashboardClient() {
   const channelItems: DonutItem[] = inquiryChannelOrder.map((channel) => ({ label: inquiryChannelLabels[channel], value: periodChannelCounts[channel], color: inquiryChannelColors[channel] }));
 
   const canSeeLeads = hasAnyRole(operationalRoles, LEADS_ROLES);
+  const canSeeInquiries = hasAnyRole(operationalRoles, CONSULTAS_ROLES);
   const canSeeTickets = hasAnyRole(operationalRoles, TICKET_VIEW_ROLES);
+  // Las tarjetas de arriba llevan a su página, solo si esa persona puede entrar en ella.
+  const goTo = (allowed: boolean, href: string) => (allowed ? () => router.push(href) : undefined);
   const activeCampaignsCount = campaignRows.filter((campaign) => campaign.status === "active" && matchesUnit(campaign.businessUnitId)).length;
   const pendingItems = [
     canSeeLeads ? { key: "leads", label: "Leads nuevos sin contactar", value: unitStatusCounts.new ?? 0, href: "/leads", icon: <LeadsIcon />, alert: false } : null,
@@ -692,8 +697,8 @@ export function DashboardClient() {
       ) : null}
 
       <section className="kpi-grid kpi-grid-main">
-        <KpiCard label="Consultas" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} icon={<ConsultasIcon />} tone="indigo" sparkline={sparkInquiries} {...deltaProps(totalDelta)} />
-        <KpiCard label="Leads" value={numberFormatter.format(current.leads)} helper={comparisonHelper} icon={<LeadsIcon />} tone="sky" sparkline={sparkLeads} {...deltaProps(leadsDelta)} />
+        <KpiCard label="Consultas" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} icon={<ConsultasIcon />} tone="indigo" sparkline={sparkInquiries} {...deltaProps(totalDelta)} onClick={goTo(canSeeInquiries, "/consultas")} actionLabel="Ver consultas" />
+        <KpiCard label="Leads" value={numberFormatter.format(current.leads)} helper={comparisonHelper} icon={<LeadsIcon />} tone="sky" sparkline={sparkLeads} {...deltaProps(leadsDelta)} onClick={goTo(canSeeLeads, "/leads")} actionLabel="Ver leads" />
         <KpiCard
           label="Conversión"
           value={formatPercent(conversion)}
@@ -703,8 +708,10 @@ export function DashboardClient() {
           icon={<ConversionIcon />}
           tone="emerald"
           sparkline={sparkConversion}
+          onClick={goTo(canSeeLeads, "/leads?status=won")}
+          actionLabel="Ver ganados"
         />
-        <KpiCard label="Valor ganado" value={currencyFormatter.format(current.saleValue)} helper={comparisonHelper} icon={<EuroIcon />} tone="amber" sparkline={sparkValue} {...deltaProps(saleValueDelta)} />
+        <KpiCard label="Valor ganado" value={currencyFormatter.format(current.saleValue)} helper={comparisonHelper} icon={<EuroIcon />} tone="amber" sparkline={sparkValue} {...deltaProps(saleValueDelta)} onClick={goTo(canSeeLeads, "/leads?status=won")} actionLabel="Ver ganados" />
       </section>
 
       <section className="dashboard-grid">

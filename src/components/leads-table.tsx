@@ -167,9 +167,11 @@ export function LeadsTable() {
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
   const urlOwner = searchParams.get("owner") ?? "";
-  const urlKey = `${urlQuery}|${urlOwner}`;
-  const [appliedUrlKey, setAppliedUrlKey] = useState("|");
-  if (urlKey !== "|" && urlKey !== appliedUrlKey) {
+  // Desde Inicio se llega con un estado ya elegido (las tarjetas de conversión y valor ganado).
+  const urlStatus = searchParams.get("status") ?? "";
+  const urlKey = `${urlQuery}|${urlOwner}|${urlStatus}`;
+  const [appliedUrlKey, setAppliedUrlKey] = useState("||");
+  if (urlKey !== "||" && urlKey !== appliedUrlKey) {
     setAppliedUrlKey(urlKey);
     setUnitId("all");
     if (urlQuery) setQuery(urlQuery);
@@ -177,6 +179,7 @@ export function LeadsTable() {
       setOwnerFilter("mine");
       setStatus("new");
     }
+    if (urlStatus in leadStatusLabels) setStatus(urlStatus);
   }
   // Nuevos leads solo ofrecen unidades marcadas visibleInLeads; al editar uno
   // existente se mantienen todas para no perder su marca si se ocultó después.

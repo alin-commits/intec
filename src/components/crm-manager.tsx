@@ -9,13 +9,13 @@ import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { BusinessUnit, CrmContact } from "@/lib/types";
+import type { BusinessUnit, CrmContact, CrmStatus } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { KpiCard } from "@/components/kpi-card";
-import { CrmIcon, PlusCircleIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
+import { CrmIcon, PlusCircleIcon, SearchIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 
 type ContactDraft = {
@@ -27,12 +27,41 @@ type ContactDraft = {
   companyEmail: string;
   notes: string;
   origin: string;
+  status: CrmStatus;
 };
+
+/** Los estados de un contacto, en el orden en que se avanza. El color es el de los leads equivalentes. */
+const CRM_STATUSES: { value: CrmStatus; label: string; badge: string }[] = [
+  { value: "sin_contactar", label: "Sin contactar", badge: "new" },
+  { value: "contactado", label: "Contactado", badge: "contacted" },
+  { value: "oferta_enviada", label: "Oferta enviada", badge: "offer_sent" },
+  { value: "interesado", label: "Interesado", badge: "interested" },
+  { value: "ganado", label: "Ganado", badge: "won" },
+  { value: "perdido", label: "Perdido", badge: "lost" },
+];
+const statusInfo = (status: CrmStatus | undefined) => CRM_STATUSES.find((item) => item.value === status) ?? CRM_STATUSES[0];
+const isCrmStatus = (value: unknown): value is CrmStatus => CRM_STATUSES.some((item) => item.value === value);
 
 /** Lo que se sugiere al escribir el origen; se suman los que ya se han usado. */
 const ORIGIN_SUGGESTIONS = ["Evento", "Feria", "Web", "Llamada", "Recomendación", "Redes sociales", "Visita comercial", "Campaña", "Consulta"];
 /** Para filtrar los contactos a los que no se les puso origen. */
 const NO_ORIGIN = "__sin_origen__";
+
+type SortKey = "name" | "company" | "unit" | "status" | "origin" | "phone" | "email" | "city" | "created";
+const SORT_COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Nombre" },
+  { key: "company", label: "Empresa" },
+  { key: "unit", label: "Unidad" },
+  { key: "status", label: "Estado" },
+  { key: "origin", label: "Origen" },
+  { key: "phone", label: "Teléfono" },
+  { key: "email", label: "Correo" },
+  { key: "city", label: "Población" },
+  { key: "created", label: "Creado" },
+];
+
+/** Sin tildes ni mayúsculas, para que "Peréz" encuentre "perez". */
+const plain = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 function blankDraft(units: BusinessUnit[]): ContactDraft {
   return {
@@ -44,6 +73,7 @@ function blankDraft(units: BusinessUnit[]): ContactDraft {
     companyEmail: "",
     notes: "",
     origin: "",
+    status: "sin_contactar",
   };
 }
 
@@ -58,6 +88,8 @@ function mapContactRow(row: Record<string, unknown>): CrmContact {
     companyEmail: row.company_email ? String(row.company_email) : null,
     notes: row.notes ? String(row.notes) : null,
     origin: row.origin ? String(row.origin) : null,
+    status: isCrmStatus(row.status) ? row.status : "sin_contactar",
+    statusChangedAt: row.status_changed_at ? String(row.status_changed_at) : null,
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -71,6 +103,9 @@ export function CrmManager() {
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
   const [originFilter, setOriginFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | CrmStatus>("all");
+  /** Por qué columna se ordena la tabla; al entrar, los más recientes primero. */
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "created", desc: true });
   const urlQuery = useSearchParams().get("q") ?? "";
   const [appliedUrlQuery, setAppliedUrlQuery] = useState("");
   if (urlQuery && urlQuery !== appliedUrlQuery) {
@@ -111,7 +146,7 @@ export function CrmManager() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: contactData, error: contactError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, origin, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, origin, status, status_changed_at, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
     ]);
     if (unitError || contactError) {
@@ -143,22 +178,60 @@ export function CrmManager() {
   }, [contacts]);
   const originSuggestions = [...usedOrigins, ...ORIGIN_SUGGESTIONS.filter((option) => !usedOrigins.some((used) => used.toLowerCase() === option.toLowerCase()))];
 
-  const visibleContacts = useMemo(() => contacts.filter((contact) => {
-    const matchesQuery = `${contact.fullName} ${contact.companyName ?? ""} ${contact.origin ?? ""}`.toLowerCase().includes(query.toLowerCase());
-    const origin = contact.origin?.trim() ?? "";
-    const matchesOrigin = originFilter === "all" || (originFilter === NO_ORIGIN ? origin === "" : origin === originFilter);
-    return matchesQuery && matchesOrigin && (unitFilter === "all" || contact.businessUnitId === unitFilter);
-  }), [contacts, query, unitFilter, originFilter]);
+  const unitName = (id: string) => units.find((unit) => unit.id === id)?.name ?? "";
+
+  // El buscador mira en todo: nombre, empresa, marca, origen, teléfono (con o
+  // sin espacios), correo, población y notas, sin importar tildes ni mayúsculas.
+  const visibleContacts = useMemo(() => {
+    const words = plain(query.trim()).split(/s+/).filter(Boolean);
+    const digits = query.replace(/D/g, "");
+    const filtered = contacts.filter((contact) => {
+      const haystack = plain([contact.fullName, contact.companyName, unitName(contact.businessUnitId), statusInfo(contact.status).label, contact.origin, contact.phone, contact.companyEmail, contact.city, contact.notes].filter(Boolean).join(" "));
+      const phoneDigits = (contact.phone ?? "").replace(/D/g, "");
+      const matchesQuery = words.every((word) => haystack.includes(word)) || (digits.length >= 4 && phoneDigits.includes(digits));
+      const origin = contact.origin?.trim() ?? "";
+      const matchesOrigin = originFilter === "all" || (originFilter === NO_ORIGIN ? origin === "" : origin === originFilter);
+      const matchesStatus = statusFilter === "all" || (contact.status ?? "sin_contactar") === statusFilter;
+      return matchesQuery && matchesOrigin && matchesStatus && (unitFilter === "all" || contact.businessUnitId === unitFilter);
+    });
+    const valueOf = (contact: CrmContact): string => {
+      switch (sort.key) {
+        case "name": return contact.fullName;
+        case "company": return contact.companyName ?? "";
+        case "unit": return unitName(contact.businessUnitId);
+        // Por el orden en que se avanza, no por orden alfabético.
+        case "status": return String(CRM_STATUSES.indexOf(statusInfo(contact.status)));
+        case "origin": return contact.origin ?? "";
+        case "phone": return contact.phone ?? "";
+        case "email": return contact.companyEmail ?? "";
+        case "city": return contact.city ?? "";
+        case "created": return contact.createdAt;
+      }
+    };
+    // Los que no tienen el dato van siempre al final, se ordene hacia arriba o hacia abajo.
+    return filtered.sort((a, b) => {
+      const left = valueOf(a).trim();
+      const right = valueOf(b).trim();
+      if (!left || !right) return left ? -1 : right ? 1 : 0;
+      const order = left.localeCompare(right, "es", { sensitivity: "base", numeric: true });
+      return sort.desc ? -order : order;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unitName solo depende de units
+  }, [contacts, query, unitFilter, originFilter, statusFilter, sort, units]);
+
+  function toggleSort(key: SortKey) {
+    // La fecha empieza por lo más reciente; el texto, de la A a la Z.
+    setSort((current) => ({ key, desc: current.key === key ? !current.desc : key === "created" }));
+  }
 
   const crmSummary = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const companies = new Set(visibleContacts.map((contact) => contact.companyName?.trim().toLowerCase()).filter(Boolean));
-    const unitIds = new Set(visibleContacts.map((contact) => contact.businessUnitId));
     return {
       total: visibleContacts.length,
       recent: visibleContacts.filter((contact) => contact.createdAt >= weekAgo).length,
       companies: companies.size,
-      units: unitIds.size,
+      pending: visibleContacts.filter((contact) => (contact.status ?? "sin_contactar") === "sin_contactar").length,
     };
   }, [visibleContacts]);
 
@@ -180,6 +253,7 @@ export function CrmManager() {
       companyEmail: contact.companyEmail ?? "",
       notes: contact.notes ?? "",
       origin: contact.origin ?? "",
+      status: contact.status ?? "sin_contactar",
     });
     setEditorOpen(true);
     setMessage(null);
@@ -210,6 +284,8 @@ export function CrmManager() {
           companyEmail: draft.companyEmail.trim() || null,
           notes: draft.notes.trim() || null,
           origin: draft.origin.trim() || null,
+          status: draft.status,
+          statusChangedAt: previous && previous.status === draft.status ? previous.statusChangedAt ?? null : new Date().toISOString(),
           createdBy: previous?.createdBy ?? "demo-admin",
           createdAt: previous?.createdAt ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -230,6 +306,7 @@ export function CrmManager() {
         company_email: draft.companyEmail.trim() || null,
         notes: draft.notes.trim() || null,
         origin: draft.origin.trim() || null,
+        status: draft.status,
       };
       const result = editingId
         ? await supabase.from("crm_contacts").update(payload).eq("id", editingId)
@@ -243,6 +320,21 @@ export function CrmManager() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Cambiar el estado desde la tabla, sin abrir la ficha. La fecha del cambio la pone la base. */
+  async function changeStatus(contact: CrmContact, status: CrmStatus) {
+    const previous = contact.status;
+    const changedAt = new Date().toISOString();
+    setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status, statusChangedAt: changedAt } : item));
+    if (!configured) return;
+    const { error } = await createClient().from("crm_contacts").update({ status }).eq("id", contact.id);
+    if (error) {
+      setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status: previous, statusChangedAt: contact.statusChangedAt } : item));
+      setMessage(reportSafeError(error, "No se pudo cambiar el estado."));
+      return;
+    }
+    setMessage(`${contact.fullName}: ${statusInfo(status).label}.`);
   }
 
   async function confirmDeleteContact() {
@@ -279,6 +371,8 @@ export function CrmManager() {
       { header: "Teléfono", value: (contact) => contact.phone ?? "" },
       { header: "Correo", value: (contact) => contact.companyEmail ?? "" },
       { header: "Población", value: (contact) => contact.city ?? "" },
+      { header: "Estado", value: (contact) => statusInfo(contact.status).label },
+      { header: "Estado desde", value: (contact) => (contact.statusChangedAt ? formatDate(contact.statusChangedAt) : "") },
       { header: "Origen", value: (contact) => contact.origin ?? "" },
       { header: "Notas", value: (contact) => contact.notes ?? "" },
       { header: "Creado", value: (contact) => formatDate(contact.createdAt) },
@@ -313,17 +407,22 @@ export function CrmManager() {
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || unitFilter !== "all" || originFilter !== "all"}
-        onClear={() => { setQuery(""); setUnitFilter("all"); setOriginFilter("all"); }}
+        hasActiveFilters={unitFilter !== "all" || originFilter !== "all" || statusFilter !== "all"}
+        onClear={() => { setUnitFilter("all"); setOriginFilter("all"); setStatusFilter("all"); }}
         resultCount={visibleContacts.length}
         resultLabel="Contactos"
       >
         <div className="filter-bar">
-          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa u origen" /></label>
           <label><span>Unidad</span>
             <select value={unitFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setUnitFilter(event.target.value)}>
               <option value="all">Todas</option>
               {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </label>
+          <label><span>Estado</span>
+            <select value={statusFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatusFilter(isCrmStatus(event.target.value) ? event.target.value : "all")}>
+              <option value="all">Todos</option>
+              {CRM_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </label>
           <label><span>Origen</span>
@@ -340,13 +439,45 @@ export function CrmManager() {
         <KpiCard label="Contactos" value={String(crmSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<CrmIcon />} tone="indigo" />
         <KpiCard label="Nuevos esta semana" value={String(crmSummary.recent)} delta="Sin comparación" helper="últimos 7 días" icon={<PlusCircleIcon />} tone="emerald" />
         <KpiCard label="Empresas" value={String(crmSummary.companies)} delta="Sin comparación" helper="distintas" icon={<UsuariosIcon />} tone="sky" />
-        <KpiCard label="Marcas" value={String(crmSummary.units)} delta="Sin comparación" helper="con contactos" icon={<UnidadesIcon />} tone="amber" />
+        <KpiCard
+          label="Sin contactar"
+          value={String(crmSummary.pending)}
+          delta="Sin comparación"
+          helper="pendientes de llamar"
+          icon={<UnidadesIcon />}
+          tone={crmSummary.pending > 0 ? "rose" : "amber"}
+          onClick={() => setStatusFilter((current) => (current === "sin_contactar" ? "all" : "sin_contactar"))}
+          actionLabel={statusFilter === "sin_contactar" ? "Ver todos" : "Ver solo esos"}
+          active={statusFilter === "sin_contactar"}
+        />
       </section>
 
       <section className="panel table-panel">
+        <label className="crm-search">
+          <span className="sr-only">Buscar contactos</span>
+          <SearchIcon />
+          <input
+            type="search"
+            value={query}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+            placeholder="Buscar por nombre, empresa, teléfono, correo, población, origen o notas"
+          />
+        </label>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Nombre</th><th>Empresa</th><th>Unidad</th><th>Origen</th><th>Teléfono</th><th>Correo</th><th>Población</th><th>Creado</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                {SORT_COLUMNS.map((column) => (
+                  <th key={column.key} aria-sort={sort.key === column.key ? (sort.desc ? "descending" : "ascending") : undefined}>
+                    <button type="button" className="sales-sort-button" onClick={() => toggleSort(column.key)}>
+                      {column.label}
+                      <span aria-hidden="true">{sort.key === column.key ? (sort.desc ? "↓" : "↑") : "↕"}</span>
+                    </button>
+                  </th>
+                ))}
+                <th></th>
+              </tr>
+            </thead>
             <tbody>
               {visibleContacts.map((contact) => {
                 const unit = units.find((item) => item.id === contact.businessUnitId);
@@ -355,6 +486,18 @@ export function CrmManager() {
                     <td><strong>{contact.fullName}</strong></td>
                     <td>{contact.companyName || "—"}</td>
                     <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
+                    <td onClick={(event) => event.stopPropagation()}>
+                      {canEdit ? (
+                        <select
+                          className={`table-select badge-select badge-${statusInfo(contact.status).badge}`}
+                          value={contact.status ?? "sin_contactar"}
+                          aria-label={`Estado de ${contact.fullName}`}
+                          onChange={(event) => { if (isCrmStatus(event.target.value)) void changeStatus(contact, event.target.value); }}
+                        >
+                          {CRM_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                        </select>
+                      ) : <span className={`badge badge-${statusInfo(contact.status).badge}`}>{statusInfo(contact.status).label}</span>}
+                    </td>
                     <td>{contact.origin ? <span className="badge">{contact.origin}</span> : <span className="muted">—</span>}</td>
                     <td>{contact.phone || "—"}</td>
                     <td>{contact.companyEmail || "—"}</td>
@@ -364,7 +507,7 @@ export function CrmManager() {
                   </tr>
                 );
               })}
-              {visibleContacts.length === 0 ? <tr><td colSpan={9} className="muted">Sin contactos que coincidan con los filtros.</td></tr> : null}
+              {visibleContacts.length === 0 ? <tr><td colSpan={10} className="muted">{query.trim() ? `Ningún contacto coincide con «${query.trim()}».` : "Sin contactos que coincidan con los filtros."}</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -383,6 +526,11 @@ export function CrmManager() {
             <label><span>Teléfono</span><input value={draft.phone} readOnly={!canEdit} onChange={(event) => updateDraft("phone", event.target.value)} /></label>
             <label><span>Correo</span><input type="email" value={draft.companyEmail} readOnly={!canEdit} onChange={(event) => updateDraft("companyEmail", event.target.value)} /></label>
             <label><span>Población</span><input value={draft.city} readOnly={!canEdit} onChange={(event) => updateDraft("city", event.target.value)} /></label>
+            <label><span>Estado</span>
+              <select value={draft.status} disabled={!canEdit} onChange={(event) => { if (isCrmStatus(event.target.value)) updateDraft("status", event.target.value); }}>
+                {CRM_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
             <label>
               <span>Origen</span>
               <input
@@ -416,6 +564,7 @@ export function CrmManager() {
               <div><span>Teléfono</span><strong>{viewingContact.phone || "—"}</strong></div>
               <div><span>Correo</span><strong>{viewingContact.companyEmail || "—"}</strong></div>
               <div><span>Población</span><strong>{viewingContact.city || "—"}</strong></div>
+              <div><span>Estado</span><strong>{statusInfo(viewingContact.status).label}{viewingContact.statusChangedAt ? ` · desde el ${formatDate(viewingContact.statusChangedAt)}` : ""}</strong></div>
               <div><span>Origen</span><strong>{viewingContact.origin || "—"}</strong></div>
               <div><span>Creado</span><strong>{formatDate(viewingContact.createdAt)}</strong></div>
             </div>
