@@ -26,7 +26,13 @@ type ContactDraft = {
   city: string;
   companyEmail: string;
   notes: string;
+  origin: string;
 };
+
+/** Lo que se sugiere al escribir el origen; se suman los que ya se han usado. */
+const ORIGIN_SUGGESTIONS = ["Evento", "Feria", "Web", "Llamada", "Recomendación", "Redes sociales", "Visita comercial", "Campaña", "Consulta"];
+/** Para filtrar los contactos a los que no se les puso origen. */
+const NO_ORIGIN = "__sin_origen__";
 
 function blankDraft(units: BusinessUnit[]): ContactDraft {
   return {
@@ -37,6 +43,7 @@ function blankDraft(units: BusinessUnit[]): ContactDraft {
     city: "",
     companyEmail: "",
     notes: "",
+    origin: "",
   };
 }
 
@@ -50,6 +57,7 @@ function mapContactRow(row: Record<string, unknown>): CrmContact {
     city: row.city ? String(row.city) : null,
     companyEmail: row.company_email ? String(row.company_email) : null,
     notes: row.notes ? String(row.notes) : null,
+    origin: row.origin ? String(row.origin) : null,
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -62,6 +70,7 @@ export function CrmManager() {
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("all");
+  const [originFilter, setOriginFilter] = useState("all");
   const urlQuery = useSearchParams().get("q") ?? "";
   const [appliedUrlQuery, setAppliedUrlQuery] = useState("");
   if (urlQuery && urlQuery !== appliedUrlQuery) {
@@ -102,7 +111,7 @@ export function CrmManager() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: contactData, error: contactError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, origin, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
     ]);
     if (unitError || contactError) {
@@ -123,10 +132,23 @@ export function CrmManager() {
     }
   }
 
+  /** Los orígenes que ya tienen los contactos, del más usado al menos, para filtrar y sugerir. */
+  const usedOrigins = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const contact of contacts) {
+      const origin = contact.origin?.trim();
+      if (origin) counts.set(origin, (counts.get(origin) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "es")).map(([origin]) => origin);
+  }, [contacts]);
+  const originSuggestions = [...usedOrigins, ...ORIGIN_SUGGESTIONS.filter((option) => !usedOrigins.some((used) => used.toLowerCase() === option.toLowerCase()))];
+
   const visibleContacts = useMemo(() => contacts.filter((contact) => {
-    const matchesQuery = `${contact.fullName} ${contact.companyName ?? ""}`.toLowerCase().includes(query.toLowerCase());
-    return matchesQuery && (unitFilter === "all" || contact.businessUnitId === unitFilter);
-  }), [contacts, query, unitFilter]);
+    const matchesQuery = `${contact.fullName} ${contact.companyName ?? ""} ${contact.origin ?? ""}`.toLowerCase().includes(query.toLowerCase());
+    const origin = contact.origin?.trim() ?? "";
+    const matchesOrigin = originFilter === "all" || (originFilter === NO_ORIGIN ? origin === "" : origin === originFilter);
+    return matchesQuery && matchesOrigin && (unitFilter === "all" || contact.businessUnitId === unitFilter);
+  }), [contacts, query, unitFilter, originFilter]);
 
   const crmSummary = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -157,6 +179,7 @@ export function CrmManager() {
       city: contact.city ?? "",
       companyEmail: contact.companyEmail ?? "",
       notes: contact.notes ?? "",
+      origin: contact.origin ?? "",
     });
     setEditorOpen(true);
     setMessage(null);
@@ -186,6 +209,7 @@ export function CrmManager() {
           city: draft.city.trim() || null,
           companyEmail: draft.companyEmail.trim() || null,
           notes: draft.notes.trim() || null,
+          origin: draft.origin.trim() || null,
           createdBy: previous?.createdBy ?? "demo-admin",
           createdAt: previous?.createdAt ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -205,6 +229,7 @@ export function CrmManager() {
         city: draft.city.trim() || null,
         company_email: draft.companyEmail.trim() || null,
         notes: draft.notes.trim() || null,
+        origin: draft.origin.trim() || null,
       };
       const result = editingId
         ? await supabase.from("crm_contacts").update(payload).eq("id", editingId)
@@ -254,6 +279,7 @@ export function CrmManager() {
       { header: "Teléfono", value: (contact) => contact.phone ?? "" },
       { header: "Correo", value: (contact) => contact.companyEmail ?? "" },
       { header: "Población", value: (contact) => contact.city ?? "" },
+      { header: "Origen", value: (contact) => contact.origin ?? "" },
       { header: "Notas", value: (contact) => contact.notes ?? "" },
       { header: "Creado", value: (contact) => formatDate(contact.createdAt) },
     ]);
@@ -287,17 +313,24 @@ export function CrmManager() {
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || unitFilter !== "all"}
-        onClear={() => { setQuery(""); setUnitFilter("all"); }}
+        hasActiveFilters={query !== "" || unitFilter !== "all" || originFilter !== "all"}
+        onClear={() => { setQuery(""); setUnitFilter("all"); setOriginFilter("all"); }}
         resultCount={visibleContacts.length}
         resultLabel="Contactos"
       >
         <div className="filter-bar">
-          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre o empresa" /></label>
+          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa u origen" /></label>
           <label><span>Unidad</span>
             <select value={unitFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setUnitFilter(event.target.value)}>
               <option value="all">Todas</option>
               {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+            </select>
+          </label>
+          <label><span>Origen</span>
+            <select value={originFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setOriginFilter(event.target.value)}>
+              <option value="all">Todos</option>
+              {usedOrigins.map((origin) => <option key={origin} value={origin}>{origin}</option>)}
+              <option value={NO_ORIGIN}>Sin origen</option>
             </select>
           </label>
         </div>
@@ -313,7 +346,7 @@ export function CrmManager() {
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Nombre</th><th>Empresa</th><th>Unidad</th><th>Teléfono</th><th>Correo</th><th>Población</th><th>Creado</th><th></th></tr></thead>
+            <thead><tr><th>Nombre</th><th>Empresa</th><th>Unidad</th><th>Origen</th><th>Teléfono</th><th>Correo</th><th>Población</th><th>Creado</th><th></th></tr></thead>
             <tbody>
               {visibleContacts.map((contact) => {
                 const unit = units.find((item) => item.id === contact.businessUnitId);
@@ -322,6 +355,7 @@ export function CrmManager() {
                     <td><strong>{contact.fullName}</strong></td>
                     <td>{contact.companyName || "—"}</td>
                     <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
+                    <td>{contact.origin ? <span className="badge">{contact.origin}</span> : <span className="muted">—</span>}</td>
                     <td>{contact.phone || "—"}</td>
                     <td>{contact.companyEmail || "—"}</td>
                     <td>{contact.city || "—"}</td>
@@ -330,7 +364,7 @@ export function CrmManager() {
                   </tr>
                 );
               })}
-              {visibleContacts.length === 0 ? <tr><td colSpan={8} className="muted">Sin contactos que coincidan con los filtros.</td></tr> : null}
+              {visibleContacts.length === 0 ? <tr><td colSpan={9} className="muted">Sin contactos que coincidan con los filtros.</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -349,6 +383,20 @@ export function CrmManager() {
             <label><span>Teléfono</span><input value={draft.phone} readOnly={!canEdit} onChange={(event) => updateDraft("phone", event.target.value)} /></label>
             <label><span>Correo</span><input type="email" value={draft.companyEmail} readOnly={!canEdit} onChange={(event) => updateDraft("companyEmail", event.target.value)} /></label>
             <label><span>Población</span><input value={draft.city} readOnly={!canEdit} onChange={(event) => updateDraft("city", event.target.value)} /></label>
+            <label>
+              <span>Origen</span>
+              <input
+                value={draft.origin}
+                readOnly={!canEdit}
+                list="crm-origin-options"
+                maxLength={120}
+                placeholder="Ej.: Feria Climatización 2026"
+                onChange={(event) => updateDraft("origin", event.target.value)}
+              />
+              <datalist id="crm-origin-options">
+                {originSuggestions.map((option) => <option key={option} value={option} />)}
+              </datalist>
+            </label>
             <label className="form-field-wide"><span>Notas</span><textarea rows={4} value={draft.notes} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           <div className="modal-actions">
@@ -368,6 +416,7 @@ export function CrmManager() {
               <div><span>Teléfono</span><strong>{viewingContact.phone || "—"}</strong></div>
               <div><span>Correo</span><strong>{viewingContact.companyEmail || "—"}</strong></div>
               <div><span>Población</span><strong>{viewingContact.city || "—"}</strong></div>
+              <div><span>Origen</span><strong>{viewingContact.origin || "—"}</strong></div>
               <div><span>Creado</span><strong>{formatDate(viewingContact.createdAt)}</strong></div>
             </div>
             <div className="ticket-details-section">

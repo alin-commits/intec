@@ -52,6 +52,8 @@ export type CrmContact = {
   city: string | null;
   companyEmail: string | null;
   notes: string | null;
+  /** De dónde viene: un evento, una feria, la web, una recomendación… */
+  origin?: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
