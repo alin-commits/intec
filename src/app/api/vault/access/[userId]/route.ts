@@ -48,9 +48,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ user
   // ---------- Type of user ----------
   const keptRoles = currentRoles.filter((role) => !(VAULT_MANAGED_ROLES as readonly string[]).includes(role));
   const nextRoles = [...keptRoles, ...body.roles] as AppRole[];
-  // La base de datos no admite un perfil sin ningún rol. Si alguien solo tenía
-  // "empleado" y se le quita, se queda como usuario normal de consulta.
-  if (nextRoles.length === 0) nextRoles.push("viewer");
+  // La base de datos no admite un perfil sin ningún rol. Antes, quitarle
+  // "empleado" a quien solo tenía ese rol lo dejaba en "solo lectura", que lee
+  // leads, consultas y ventas: quitar un rol daba más permisos. Ahora se avisa
+  // y, si esa persona ya no debe entrar, se la desactiva desde Usuarios.
+  if (nextRoles.length === 0) {
+    return vaultError("Esta persona se quedaría sin ningún rol. Si ya no debe entrar, desactívala en Usuarios.", 400);
+  }
   const rolesChanged =
     nextRoles.length !== currentRoles.length || nextRoles.some((role) => !currentRoles.includes(role));
 

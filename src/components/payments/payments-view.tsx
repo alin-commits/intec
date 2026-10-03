@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { hasAnyRole, PAYMENTS_ROLES } from "@/lib/constants";
+import { todayKey } from "@/lib/dates";
 import type { BankSetting } from "@/lib/payments";
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -39,10 +40,6 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "bancos", label: "Bancos y contratos" },
 ];
 
-const todayKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-};
 
 /**
  * Con `tab`, la pestaña la elige quien la contiene (las páginas de
@@ -61,7 +58,18 @@ export function PaymentsView({ tab: forcedTab, onTab }: { tab?: PaymentsTab; onT
   const [message, setMessage] = useState<string | null>(null);
   /** Sube al terminar una lectura de Sage pedida desde aquí: las pestañas se vuelven a cargar. */
   const [reloadKey, setReloadKey] = useState(0);
-  const [today] = useState(todayKey);
+  // Se vuelve a mirar al volver a la pestaña: si se deja abierta de un día para
+  // otro, el fichero del banco salía con la fecha de envío del día anterior.
+  const [today, setToday] = useState(todayKey);
+  useEffect(() => {
+    const update = () => setToday(todayKey());
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;

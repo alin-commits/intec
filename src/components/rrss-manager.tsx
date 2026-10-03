@@ -32,7 +32,7 @@ import { inDateKeyRange, monthKey, monthLabel, monthShortLabel, previousDateRang
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { PageLoader } from "@/components/ui/page-loader";
+import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import type {
   BusinessUnit,
   MailingCampaign,
@@ -198,14 +198,27 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
   const [mailingCampaigns, setMailingCampaigns] = useState<MailingCampaign[]>(() => initialDemoState(configured, MAILING_STORAGE_KEY, demoMailingCampaigns));
   const [canEdit, setCanEdit] = useState(true);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
 
   useEffect(() => {
     if (!configured) return;
-    void loadRealData();
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
   }, [configured]);
+
+  function firstLoad() {
+    setLoadFailed(false);
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
+  }
 
   async function loadRealData() {
     const supabase = createClient();
@@ -222,6 +235,7 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
     ]);
     if (unitError || socialError || mailingError) {
       setMessage(reportSafeError(unitError ?? socialError ?? mailingError, "No se pudieron cargar las métricas de marketing."));
+      setLoadFailed(true);
       return;
     }
     setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
@@ -269,7 +283,7 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
     }
   }
 
-  if (access === "checking") return <PageLoader label="Cargando las métricas…" />;
+  if (access === "checking") return loadFailed ? <PageLoadFailed message={message} onRetry={firstLoad} /> : <PageLoader label="Cargando las métricas…" />;
 
   if (access === "denied") {
     return (

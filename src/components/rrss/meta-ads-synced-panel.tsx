@@ -13,6 +13,7 @@ import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { currencyFormatter, numberFormatter, formatPercent } from "@/lib/format";
 import { generatePdfReport } from "@/lib/pdf-report";
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit } from "@/lib/types";
 
 /**
@@ -93,6 +94,10 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
   /** La tabla de campañas se pagina: con todo el histórico son más de treinta. */
   const [pagina, setPagina] = useState(0);
   const [ultima, setUltima] = useState<{ started_at: string } | null>(null);
+  /** Las cuentas cuya última sincronización falló, con el motivo: si caduca un token se ve aquí. */
+  const [fallosSync, setFallosSync] = useState<{ account: string; at: string; message: string }[]>([]);
+  /** Los últimos fallos al traer leads de los formularios (solo los ven administración y marketing). */
+  const [fallosLeads, setFallosLeads] = useState<{ at: string; message: string }[]>([]);
   const [estado, setEstado] = useState<"cargando" | "listo" | "vacio" | "error">("cargando");
   const [editando, setEditando] = useState<Fila | null>(null);
   const [borrador, setBorrador] = useState(vacio);
@@ -110,15 +115,18 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     const [cuentasRes, campanasRes, diasRes, extrasRes, sueltasRes, runRes, primeroRes, appRes] = await Promise.all([
       supabase.from("meta_ad_accounts").select("account_id, name, business_unit_id, is_active"),
       supabase.from("meta_campaigns").select("meta_id, account_id, name, status, objective, campaign_id"),
-      supabase.from("meta_insights_daily").select("meta_campaign_id, day, spend, impressions, clicks, leads")
-        .gte("day", desde).lte("day", hasta).order("day"),
+      // Por páginas: una fila por campaña y día pasa pronto de las 1000 que da la base de golpe.
+      fetchAllPages<Dia>((from, to) => supabase.from("meta_insights_daily").select("meta_campaign_id, day, spend, impressions, clicks, leads")
+        .gte("day", desde).lte("day", hasta).order("day").order("id").range(from, to)),
       supabase.from("meta_campaign_extras").select("meta_campaign_id, revenue, qualified_leads, followers_gained, notes"),
       // Lo que quedó escrito a mano y todavía no está colgado de ninguna campaña.
       supabase.from("meta_ads_entries").select("id, campaign_name, revenue, qualified_leads, followers_gained, notes").is("placed_into", null),
-      supabase.from("meta_sync_runs").select("started_at").order("started_at", { ascending: false }).limit(1),
+      supabase.from("meta_sync_runs").select("started_at, ok, message, account_id").order("started_at", { ascending: false }).limit(60),
       supabase.from("meta_insights_daily").select("day").order("day", { ascending: true }).limit(1),
       supabase.from("campaigns").select("id, name, business_unit_id").order("name"),
     ]);
+    const fallosLeadsRes = await supabase.from("meta_lead_events").select("received_at, message").eq("ok", false)
+      .gte("received_at", new Date(Date.now() - 7 * 86_400_000).toISOString()).order("received_at", { ascending: false }).limit(5);
     // Lo que Meta da es lo que sostiene la pestaña; si falla, no hay nada que
     // enseñar. Lo escrito a mano, en cambio, puede no estar todavía —entre que
     // se despliega el código y se ejecuta la migración pasan minutos— y no debe
@@ -134,7 +142,20 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     setExtras((extrasRes.data ?? []) as Extra[]);
     setSueltas((sueltasRes.data ?? []) as Suelta[]);
     setManualDisponible(!extrasRes.error);
-    setUltima(((runRes.data ?? [])[0] as { started_at: string }) ?? null);
+    // La última que salió bien, no la última que se intentó: si el token
+    // caduca, cada día se apunta un fallo y antes el panel seguía diciendo "hoy".
+    type Run = { started_at: string; ok: boolean; message: string | null; account_id: string | null };
+    const runs = (runRes.data ?? []) as Run[];
+    setUltima(runs.find((run) => run.ok) ?? null);
+    const ultimaPorCuenta = new Map<string, Run>();
+    for (const run of runs) if (!ultimaPorCuenta.has(run.account_id ?? "")) ultimaPorCuenta.set(run.account_id ?? "", run);
+    const nombreCuenta = new Map(((cuentasRes.data ?? []) as Cuenta[]).map((cuenta) => [cuenta.account_id, cuenta.name]));
+    setFallosSync([...ultimaPorCuenta.values()].filter((run) => !run.ok).map((run) => ({
+      account: run.account_id ? nombreCuenta.get(run.account_id) ?? run.account_id : "Todas las cuentas",
+      at: run.started_at,
+      message: (run.message ?? "sin detalle").slice(0, 220),
+    })));
+    setFallosLeads(fallosLeadsRes.error ? [] : (fallosLeadsRes.data ?? []).map((row) => ({ at: row.received_at as string, message: String(row.message ?? "").slice(0, 220) })));
     setPrimerDia(((primeroRes.data ?? [])[0] as { day: string } | undefined)?.day ?? null);
     setCampanasApp((appRes.data ?? []) as CampanaApp[]);
     setEstado((cuentasRes.data ?? []).length === 0 ? "vacio" : "listo");
@@ -457,6 +478,19 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         <ReportExportButtons onExportCsv={exportarCsv} onExportPdf={() => void exportarPdf()} pdfBusy={pdfBusy} />
       </div>
 
+      {fallosSync.length > 0 ? (
+        <div className="export-range-summary is-warning">
+          <strong>La última sincronización con Meta falló.</strong> Las cifras pueden estar paradas desde {ultima ? new Date(ultima.started_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }) : "hace tiempo"}.
+          {" "}Suele ser un token caducado o un permiso retirado en el portfolio.
+          <ul>{fallosSync.map((fallo) => <li key={fallo.account}>{fallo.account} ({new Date(fallo.at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}): {fallo.message}</li>)}</ul>
+        </div>
+      ) : null}
+      {fallosLeads.length > 0 ? (
+        <div className="export-range-summary is-warning">
+          <strong>Hay leads de formularios de Meta que no han podido entrar</strong> (últimos 7 días). Meta solo los guarda 90 días: conviene arreglarlo antes.
+          <ul>{fallosLeads.map((fallo, index) => <li key={index}>{new Date(fallo.at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}: {fallo.message}</li>)}</ul>
+        </div>
+      ) : null}
       {aviso ? <p className="export-range-summary is-warning">{aviso}</p> : null}
       {manualDisponible && !colocarDisponible ? (
         <p className="export-range-summary is-warning">

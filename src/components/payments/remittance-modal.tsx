@@ -6,6 +6,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { buildConfirmingFile, confirmingFileName, isValidIban, type ConfirmingPayment } from "@/lib/confirming";
 import { changedIbans, maskIban, type BankSetting } from "@/lib/payments";
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { DataTable, LoadFailed, useSageQuery, type Column } from "@/components/sales/sales-ui";
 import type { PaymentsContext } from "./payments-view";
 
@@ -32,6 +33,7 @@ type Item = {
   iban: string | null;
   remittance_number: number;
 };
+type HistoryRow = Pick<Item, "supplier_code" | "iban" | "remittance_number">;
 type Supplier = { code: string; name: string; nif: string | null; address: string | null; postal_code: string | null; city: string | null; province: string | null; phone: string | null; email: string | null };
 type PreviousFile = { id: string; file_name: string; generated_at: string; total: number; content: string; bank_name: string };
 
@@ -72,7 +74,7 @@ export function RemittanceModal({ remittance, ctx, setting, allRemittances, onCl
   }
 
   const key = remittance ? JSON.stringify([remittance.company_code, remittance.number, reloadKey]) : null;
-  const data = useSageQuery<{ items: Item[]; suppliers: Supplier[]; history: Item[]; files: PreviousFile[] }>(key, async () => {
+  const data = useSageQuery<{ items: Item[]; suppliers: Supplier[]; history: HistoryRow[]; historyDates: Map<number, string | null>; files: PreviousFile[] }>(key, async () => {
     if (!remittance) return { data: null, error: null };
     const supabase = createClient();
     const items = await supabase.from("sage_payment_remittance_items")
@@ -84,19 +86,35 @@ export function RemittanceModal({ remittance, ctx, setting, allRemittances, onCl
       codes.length
         ? supabase.from("sage_suppliers").select("code, name, nif, address, postal_code, city, province, phone, email").eq("company_code", remittance.company_code).in("code", codes)
         : Promise.resolve({ data: [], error: null }),
+      // Todo el historial de estos proveedores, por páginas: la base corta en
+      // 1000 filas sin avisar, y sin él el aviso de "IBAN cambiado" no salta.
       codes.length
-        ? supabase.from("sage_payment_remittance_items").select("supplier_code, iban, remittance_number").eq("company_code", remittance.company_code)
-          .in("supplier_code", codes).neq("remittance_number", remittance.number).limit(5000)
-        : Promise.resolve({ data: [], error: null }),
+        ? fetchAllPages<HistoryRow>((from, to) => supabase.from("sage_payment_remittance_items").select("supplier_code, iban, remittance_number").eq("company_code", remittance.company_code)
+          .in("supplier_code", codes).neq("remittance_number", remittance.number)
+          .order("remittance_number").order("supplier_code").order("movement_id").range(from, to))
+        : Promise.resolve({ data: [] as HistoryRow[], error: null }),
       supabase.from("payment_files").select("id, file_name, generated_at, total, content, bank_name")
         .eq("company_code", remittance.company_code).eq("remittance_number", remittance.number).order("generated_at", { ascending: false }),
     ]);
-    const error = suppliers.error ?? history.error ?? files.error;
+    // La fecha de cada remesa anterior, para saber cuál fue el último pago: la
+    // lista de remesas de la pestaña solo trae las más recientes.
+    const numbers = [...new Set((history.data ?? []).map((item) => Number(item.remittance_number)))];
+    const historyDates = new Map<number, string | null>();
+    let datesError: unknown = null;
+    for (let start = 0; start < numbers.length && !datesError; start += 200) {
+      const chunk = numbers.slice(start, start + 200);
+      const { data: rows, error: chunkError } = await supabase.from("sage_payment_remittances").select("number, remittance_date")
+        .eq("company_code", remittance.company_code).in("number", chunk);
+      if (chunkError) datesError = chunkError;
+      for (const row of rows ?? []) historyDates.set(Number(row.number), (row.remittance_date as string | null) ?? null);
+    }
+    const error = suppliers.error ?? history.error ?? files.error ?? datesError;
     return {
       data: error ? null : {
         items: (items.data ?? []) as Item[],
         suppliers: (suppliers.data ?? []) as Supplier[],
-        history: (history.data ?? []) as Item[],
+        history: history.data ?? [],
+        historyDates,
         files: (files.data ?? []) as PreviousFile[],
       },
       error,
@@ -104,7 +122,9 @@ export function RemittanceModal({ remittance, ctx, setting, allRemittances, onCl
   });
 
   if (!remittance) return null;
-  const loaded = data.data;
+  // Mientras llega la remesa nueva no se usan los datos de la anterior: con
+  // ellos se podía generar el fichero de esta remesa con los pagos de otra.
+  const loaded = data.loading ? null : data.data;
   const suppliers = new Map((loaded?.suppliers ?? []).map((supplier) => [supplier.code, supplier]));
   const details = ctx.details.get(remittance.company_code);
   const company = ctx.companies.find((item) => item.code === remittance.company_code);
@@ -112,6 +132,7 @@ export function RemittanceModal({ remittance, ctx, setting, allRemittances, onCl
 
   // IBAN distinto al del último pago anterior a este proveedor.
   const dates = new Map(allRemittances.filter((row) => row.company_code === remittance.company_code).map((row) => [row.number, row.remittance_date]));
+  for (const [number, day] of loaded?.historyDates ?? []) if (!dates.has(number)) dates.set(number, day);
   const changes = changedIbans(
     (loaded?.items ?? []).map((item) => ({ supplierCode: item.supplier_code, iban: item.iban, date: remittanceDate })),
     (loaded?.history ?? []).map((item) => ({ supplierCode: item.supplier_code, iban: item.iban, date: dates.get(item.remittance_number) ?? null })),
@@ -162,7 +183,7 @@ export function RemittanceModal({ remittance, ctx, setting, allRemittances, onCl
     : null;
 
   const previous = loaded?.files ?? [];
-  const blocked = !result || result.errors.length > 0 || (changes.size > 0 && !ibanChecked);
+  const blocked = !loaded || !result || result.errors.length > 0 || (changes.size > 0 && !ibanChecked);
 
   async function generate() {
     if (!result || !setting || !remittance) return;

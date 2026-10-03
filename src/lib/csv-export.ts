@@ -1,8 +1,20 @@
 export type CsvColumn<T> = { header: string; value: (row: T) => string | number | null | undefined };
 
 function escapeCsvValue(raw: string): string {
-  if (/[";\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
+  if (/[";\r\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
   return raw;
+}
+
+/**
+ * Un texto que empieza por = + - @ (o un tabulador o salto) Excel lo ejecuta
+ * como fórmula. Muchos vienen de fuera —un formulario de Meta, el de soporte—,
+ * así que se les pone delante un apóstrofo y Excel los deja como texto. De
+ * paso, un teléfono "+34612…" deja de convertirse en 3,46E+10. Una cifra
+ * suelta ("-12,5", "-3 %") se deja tal cual, que es número.
+ */
+export function neutralizeFormula(text: string): string {
+  if (/^-?\d+([.,]\d+)?\s*%?$/.test(text)) return text;
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
 }
 
 /**
@@ -13,7 +25,7 @@ function escapeCsvValue(raw: string): string {
 function csvCell(raw: string | number | null | undefined): string {
   if (raw === null || raw === undefined) return "";
   if (typeof raw === "number") return Number.isFinite(raw) ? String(raw).replace(".", ",") : "";
-  return raw;
+  return neutralizeFormula(raw);
 }
 
 function downloadCsvText(filename: string, csv: string) {

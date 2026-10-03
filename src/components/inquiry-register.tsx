@@ -22,7 +22,7 @@ import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
-import { PageLoader } from "@/components/ui/page-loader";
+import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 
 type ViewMode = "month" | "year";
 
@@ -161,6 +161,9 @@ export function InquiryRegister() {
   const [salesExpanded, setSalesExpanded] = useState(false);
   const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [pdfBusy, setPdfBusy] = useState(false);
 
   const registrationUnit = units.find((unit) => unit.id === registrationUnitId) ?? null;
@@ -201,7 +204,9 @@ export function InquiryRegister() {
     const fetchToYear = Math.max(selectedYear, selectedMonthYear) + 1;
     const fetchStart = yearRange(fetchFromYear).start;
     const fetchEnd = yearRange(fetchToYear).end;
-    void (async () => {
+    // Si se cambia de año antes de que llegue la respuesta, la vieja no pisa a la nueva.
+    let active = true;
+    (async () => {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
@@ -209,16 +214,20 @@ export function InquiryRegister() {
         fetchAllPages((from, to) => supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at, lead_id, notes").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
         supabase.auth.getUser(),
       ]);
+      if (!active) return;
       if (unitError || inquiryError || salesError) {
         setMessage(reportSafeError(unitError ?? inquiryError ?? salesError, "No se pudieron cargar las consultas."));
+        setLoadFailed(true);
         return;
       }
+      setLoadFailed(false);
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
       setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
       setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
         setCurrentUserId(authData.user.id);
         const { data: profile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+        if (!active) return;
         const roles = (profile?.roles ?? []) as AppRole[];
         setCanRegister(Boolean(profile && hasAnyRole(roles, ["admin", "commercial"])));
         setIsAdmin(roles.includes("admin"));
@@ -233,8 +242,13 @@ export function InquiryRegister() {
       } else {
         setAccess("denied");
       }
-    })();
-  }, [configured, selectedMonthYear, selectedYear]);
+    })().catch((cause: unknown) => {
+      if (!active) return;
+      setMessage(reportSafeError(cause, "No se pudieron cargar las consultas."));
+      setLoadFailed(true);
+    });
+    return () => { active = false; };
+  }, [configured, selectedMonthYear, selectedYear, reloadTick]);
 
   if (!saleUrlChecked && access === "allowed" && typeof window !== "undefined") {
     setSaleUrlChecked(true);
@@ -954,7 +968,7 @@ export function InquiryRegister() {
     }
   }
 
-  if (access === "checking") return <PageLoader label="Cargando las consultas…" />;
+  if (access === "checking") return loadFailed ? <PageLoadFailed message={message} onRetry={() => { setLoadFailed(false); setReloadTick((tick) => tick + 1); }} /> : <PageLoader label="Cargando las consultas…" />;
 
   if (access === "denied") {
     return (

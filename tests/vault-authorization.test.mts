@@ -59,3 +59,27 @@ test("an entry with no owner left is still governed by its visibility", () => {
   assert.ok(!canViewEntry(orphanPersonal, raul));
   assert.ok(!canViewEntry(orphanPersonal, alin));
 });
+
+test("restringir una carpeta madre restringe sus subcarpetas", async () => {
+  const { folderListAllows } = await import("../src/lib/vault/authorization.ts");
+  const folders = [
+    { id: "admin", parent_id: null },
+    { id: "bancos", parent_id: "admin" },
+    { id: "bancos-sabadell", parent_id: "bancos" },
+    { id: "marketing", parent_id: null },
+    { id: "rrss", parent_id: "marketing" },
+  ];
+  const lists = [
+    { category_id: "admin", user_id: "ana" },
+    { category_id: "admin", user_id: "luis" },
+    // Una subcarpeta con su propia lista manda sobre la de su madre.
+    { category_id: "bancos-sabadell", user_id: "ana" },
+  ];
+  assert.equal(folderListAllows("bancos", "luis", folders, lists), true);
+  assert.equal(folderListAllows("bancos", "pepe", folders, lists), false);
+  assert.equal(folderListAllows("bancos-sabadell", "luis", folders, lists), false);
+  assert.equal(folderListAllows("bancos-sabadell", "ana", folders, lists), true);
+  assert.equal(folderListAllows("rrss", "pepe", folders, lists), true);
+  // Un ciclo en las carpetas no lo cuelga.
+  assert.equal(folderListAllows("x", "pepe", [{ id: "x", parent_id: "y" }, { id: "y", parent_id: "x" }], []), true);
+});

@@ -5,7 +5,7 @@ import { isVaultConfigured } from "@/lib/security/vault-key";
 import { passwordStrength } from "@/lib/vault/password-generator";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { VaultActor, VaultEntryAccess } from "@/lib/vault/authorization";
+import { folderListAllows, type VaultActor, type VaultEntryAccess } from "@/lib/vault/authorization";
 import type { VaultAuditAction, VaultDeniedReason, VaultPermission, VaultVisibility } from "@/lib/vault/types";
 import type { AppRole } from "@/lib/types";
 
@@ -122,19 +122,28 @@ export async function loadEntryForActor(
   };
 }
 
-/** Folders with an access list are only reachable by the people on it (vault admins aside). */
+/**
+ * Folders with an access list are only reachable by the people on it (vault
+ * admins aside). La lista se hereda: restringir una carpeta madre restringe
+ * también sus subcarpetas. Decide la carpeta más cercana que tenga lista (la
+ * propia, o la primera de encima); antes solo se miraba la propia y las hijas
+ * de una madre restringida seguían abiertas a todo el mundo.
+ */
 export async function categoryAllowsUser(admin: SupabaseClient, categoryId: string | null, userId: string): Promise<boolean> {
   if (!categoryId) return true;
-  const { data, error } = await admin.from("vault_category_access").select("user_id").eq("category_id", categoryId);
+  const [{ data: folders, error: foldersError }, { data: lists, error: listsError }] = await Promise.all([
+    admin.from("vault_categories").select("id, parent_id"),
+    admin.from("vault_category_access").select("category_id, user_id"),
+  ]);
   // Si la consulta falla no se puede saber quién tiene acceso, y en la ruta que
   // descifra esta es la única comprobación de carpeta. Ante la duda, que no pase.
-  if (error) {
-    console.error("No se pudo comprobar el acceso a la carpeta:", error.message);
+  if (foldersError || listsError) {
+    console.error("No se pudo comprobar el acceso a la carpeta:", (foldersError ?? listsError)?.message);
     return false;
   }
-  if (!data || data.length === 0) return true;
-  return data.some((row) => row.user_id === userId);
+  return folderListAllows(categoryId, userId, folders ?? [], lists ?? []);
 }
+
 
 /** What is stored alongside a password so the health check can work without secrets. */
 export function passwordMetadata(plaintext: string, fingerprint: string): { password_fingerprint: string; password_strength: string } {

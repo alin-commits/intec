@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { latestSnapshot, type SnapshotRow } from "@/lib/sage-panel";
 import type { SalesContext } from "./sales-context";
 import { useSageQuery } from "./sales-ui";
@@ -8,6 +9,21 @@ import { useSageQuery } from "./sales-ui";
 /*
   Lo que varias páginas piden a la base de datos, con los filtros del panel.
 */
+
+/**
+ * Todas las filas de una función de la base. La base da como mucho 1000 de
+ * golpe y corta sin avisar, así que se piden por páginas, ordenadas por columnas
+ * que juntas no se repiten: si no, entre una página y otra se repiten o se
+ * pierden filas.
+ */
+export function rpcAllRows<T>(fn: string, args: Record<string, unknown>, orderBy: { column: string; ascending?: boolean }[]) {
+  const supabase = createClient();
+  return fetchAllPages<T>((from, to) => {
+    let query = supabase.rpc(fn, args);
+    for (const { column, ascending = true } of orderBy) query = query.order(column, { ascending });
+    return query.range(from, to);
+  });
+}
 
 export type CustomerCounts = {
   activos: number;

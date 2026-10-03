@@ -22,7 +22,7 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { KpiCard } from "@/components/kpi-card";
 import { ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/components/icons";
-import { PageLoader } from "@/components/ui/page-loader";
+import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-leads";
 /** Al pasar a estos estados se pide el importe: es el de su oferta o su venta en Consultas. */
@@ -154,6 +154,8 @@ export function LeadsTable() {
   /** El importe que se pide al pasar a oferta o a ganado: es el de su apunte en Consultas. */
   const [pendingValue, setPendingValue] = useState("");
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -183,7 +185,10 @@ export function LeadsTable() {
 
   useEffect(() => {
     if (!configured) return;
-    void loadRealData();
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
   }, [configured]);
 
   const filteredCampaigns = useMemo(() => campaignOptions.filter((campaign) => !draft.businessUnitId || campaign.businessUnitId === draft.businessUnitId), [campaignOptions, draft.businessUnitId]);
@@ -229,6 +234,14 @@ export function LeadsTable() {
     };
   }, [visibleRows]);
 
+  function firstLoad() {
+    setLoadFailed(false);
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
+  }
+
   async function loadRealData() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }, { data: asignadosData, error: asignadosError }] = await Promise.all([
@@ -242,6 +255,7 @@ export function LeadsTable() {
     ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
       return;
     }
     const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true }));
@@ -505,7 +519,7 @@ export function LeadsTable() {
     }
   }
 
-  if (access === "checking") return <PageLoader label="Cargando los leads…" />;
+  if (access === "checking") return loadFailed ? <PageLoadFailed message={message} onRetry={firstLoad} /> : <PageLoader label="Cargando los leads…" />;
 
   if (access === "denied") {
     return (

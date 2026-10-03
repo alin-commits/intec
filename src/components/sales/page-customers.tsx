@@ -9,7 +9,7 @@ import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
 import { discountPercent, euros, monthLabel, monthName, monthWithYear, pairOf, ticketFormatter, variation, delta } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
-import { snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
+import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
 import { DataTable, LoadFailed, Panel, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
 import type { CustomerRow } from "./sales-list-modal";
 
@@ -184,7 +184,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   });
   const listArgs = { p_kind: "activos", p_from: period.from, p_to: period.to, ...ctx.rpc };
   const top = useSageQuery<CustomerRow[]>(ctx.detail.customers ? JSON.stringify(["clientes-top", listArgs, reload]) : null, async () =>
-    await createClient().rpc("sage_customer_list", listArgs));
+    await rpcAllRows<CustomerRow>("sage_customer_list", listArgs, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]));
 
   const monthKeys = period.months;
   const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;

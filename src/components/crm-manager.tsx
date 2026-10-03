@@ -16,7 +16,7 @@ import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { KpiCard } from "@/components/kpi-card";
 import { CrmIcon, PlusCircleIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
-import { PageLoader } from "@/components/ui/page-loader";
+import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 
 type ContactDraft = {
   businessUnitId: string;
@@ -76,14 +76,27 @@ export function CrmManager() {
   const [message, setMessage] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(!configured);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<CrmContact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [viewingContact, setViewingContact] = useState<CrmContact | null>(null);
 
   useEffect(() => {
     if (!configured) return;
-    void loadRealData();
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
   }, [configured]);
+
+  function firstLoad() {
+    setLoadFailed(false);
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
+  }
 
   async function loadRealData() {
     const supabase = createClient();
@@ -94,6 +107,7 @@ export function CrmManager() {
     ]);
     if (unitError || contactError) {
       setMessage(reportSafeError(unitError ?? contactError, "No se pudieron cargar los contactos."));
+      setLoadFailed(true);
       return;
     }
     const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true }));
@@ -245,7 +259,7 @@ export function CrmManager() {
     ]);
   }
 
-  if (access === "checking") return <PageLoader label="Cargando los contactos…" />;
+  if (access === "checking") return loadFailed ? <PageLoadFailed message={message} onRetry={firstLoad} /> : <PageLoader label="Cargando los contactos…" />;
 
   if (access === "denied") {
     return (

@@ -12,6 +12,22 @@ export function Spinner({ label }: { label?: string }) {
   return <span className="spinner" role={label ? "status" : undefined} aria-label={label} aria-hidden={label ? undefined : true} />;
 }
 
+/**
+ * Cuando la primera carga de una página falla. Antes la página se quedaba
+ * girando para siempre y el aviso del error no llegaba a verse.
+ */
+export function PageLoadFailed({ message, onRetry }: { message: string | null; onRetry: () => void }) {
+  return (
+    <div className="page-stack">
+      <section className="panel panel-padded" role="alert">
+        <h2>No se pudo cargar esta página</h2>
+        <p>{message ?? "Ha fallado la conexión con la base de datos."} Si vuelve a pasar, avisa a administración.</p>
+        <button type="button" className="button button-primary" onClick={onRetry}>Reintentar</button>
+      </section>
+    </div>
+  );
+}
+
 export function PageLoader({ label = "Cargando…" }: { label?: string }) {
   return (
     <div className="page-stack">

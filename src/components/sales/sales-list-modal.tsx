@@ -8,6 +8,7 @@ import { channelLabel, euros } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { lostCustomers, type ListRequest, type SalesContext } from "./sales-context";
 import { DataTable, LoadFailed, shortDate, useSageQuery, type Column } from "./sales-ui";
+import { rpcAllRows } from "./sales-queries";
 
 /*
   La lista que hay detrás de una cifra: los clientes nuevos, los que han
@@ -74,7 +75,11 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
     : request ? { ...base, p_kind: request.kind } : null;
   const fn = request?.type === "clientes" ? "sage_customer_list" : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
   const key = request && args ? JSON.stringify([fn, args, ctx.reloadKey]) : null;
-  const result = useSageQuery<AnyRow[]>(key, async () => await createClient().rpc(fn, args ?? {}));
+  // Las ofertas y los pedidos ya vienen limitados a 500 a propósito; los clientes
+  // pueden ser miles y se piden todos, por páginas, para que cuadre con la cifra.
+  const result = useSageQuery<AnyRow[]>(key, async () => fn === "sage_customer_list"
+    ? await rpcAllRows<AnyRow>(fn, args ?? {}, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }])
+    : await createClient().rpc(fn, args ?? {}));
 
   if (!request || hidden) return null;
   // Pulsar una fila abre la ficha de su cliente.

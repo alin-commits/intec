@@ -19,7 +19,7 @@ import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
-import { PageLoader } from "@/components/ui/page-loader";
+import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-campaigns";
 
@@ -148,6 +148,8 @@ export function CampaignsManager() {
   const [canEdit, setCanEdit] = useState(true);
   const [pendingArchive, setPendingArchive] = useState<Campaign | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [team, setTeam] = useState<TeamMember[]>([]);
   /** Los comerciales de cada campaña, a quienes van sus leads solos. */
@@ -158,8 +160,19 @@ export function CampaignsManager() {
 
   useEffect(() => {
     if (!configured) return;
-    void loadRealData();
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
   }, [configured]);
+
+  function firstLoad() {
+    setLoadFailed(false);
+    loadRealData().catch((cause: unknown) => {
+      setMessage(reportSafeError(cause, "No se pudieron cargar los datos."));
+      setLoadFailed(true);
+    });
+  }
 
   async function loadRealData() {
     const supabase = createClient();
@@ -184,6 +197,7 @@ export function CampaignsManager() {
     ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar las campañas."));
+      setLoadFailed(true);
       return;
     }
     setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
@@ -474,7 +488,7 @@ export function CampaignsManager() {
     }
   }
 
-  if (access === "checking") return <PageLoader label="Cargando las campañas…" />;
+  if (access === "checking") return loadFailed ? <PageLoadFailed message={message} onRetry={firstLoad} /> : <PageLoader label="Cargando las campañas…" />;
 
   if (access === "denied") {
     return (

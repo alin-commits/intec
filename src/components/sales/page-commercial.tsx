@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
 import type { SalesContext } from "./sales-context";
-import { snapshotTotal, useCustomerTotals } from "./sales-queries";
+import { rpcAllRows, snapshotTotal, useCustomerTotals } from "./sales-queries";
 import { days, LoadFailed, Panel, PendingDetail, RankList, share, useSageQuery } from "./sales-ui";
 
 /*
@@ -52,14 +52,14 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
   const reload = ctx.reloadKey;
 
   const offers = useSageQuery<OfferStat[]>(ctx.detail.offers ? JSON.stringify(["ofertas", yearFrom, yearTo, reload]) : null, async () =>
-    await createClient().rpc("sage_offer_stats", { p_from: yearFrom, p_to: yearTo }));
+    await rpcAllRows<OfferStat>("sage_offer_stats", { p_from: yearFrom, p_to: yearTo }, ["month", "company_code", "series", "rep_code", "reject_reason"].map((column) => ({ column }))));
   const orders = useSageQuery<OrderStat[]>(ctx.detail.orders ? JSON.stringify(["pedidos", yearFrom, yearTo, reload]) : null, async () =>
-    await createClient().rpc("sage_order_stats", { p_from: yearFrom, p_to: yearTo }));
+    await rpcAllRows<OrderStat>("sage_order_stats", { p_from: yearFrom, p_to: yearTo }, ["month", "company_code", "series", "rep_code", "from_offer"].map((column) => ({ column }))));
   const incidents = useSageQuery<IncidentStat[]>(ctx.detail.incidents ? JSON.stringify(["incidencias", yearFrom, yearTo, reload]) : null, async () =>
-    await createClient().rpc("sage_incident_stats", { p_from: yearFrom, p_to: yearTo }));
+    await rpcAllRows<IncidentStat>("sage_incident_stats", { p_from: yearFrom, p_to: yearTo }, ["month", "company_code", "kind", "reason", "series", "rep_code"].map((column) => ({ column }))));
   // Lo de antes del detalle: totales de ofertas y pedidos por mes, sin serie.
   const oldOrders = useSageQuery<OldOrderRow[]>(!ctx.detail.offers || !ctx.detail.orders ? JSON.stringify(["antiguo", yearFrom, yearTo, reload]) : null, async () =>
-    await createClient().rpc("sage_orders_summary", { p_from: yearFrom, p_to: yearTo }));
+    await rpcAllRows<OldOrderRow>("sage_orders_summary", { p_from: yearFrom, p_to: yearTo }, ["month", "company_code", "kind", "rep_code"].map((column) => ({ column }))));
   const totals = useCustomerTotals(ctx);
   // Desde cuándo se registran ofertas y pedidos en Sage (no desde 2022, como las ventas).
   const firsts = useSageQuery<{ offer: string | null; order: string | null }>(JSON.stringify(["primeros", reload]), async () => {

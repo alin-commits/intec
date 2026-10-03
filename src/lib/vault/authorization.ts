@@ -68,3 +68,26 @@ export function canGrantTo(entry: VaultEntryAccess, actor: VaultActor, targetUse
   if (targetUserId === actor.userId) return false;
   return canManagePermissions(entry, actor, grant);
 }
+
+/**
+ * Si una persona llega a una carpeta con lista de acceso. La lista se hereda:
+ * decide la carpeta más cercana que tenga lista (la propia o la primera de
+ * encima), así que restringir una carpeta madre restringe sus subcarpetas.
+ */
+export function folderListAllows(
+  categoryId: string,
+  userId: string,
+  folders: { id: unknown; parent_id: unknown }[],
+  lists: { category_id: unknown; user_id: unknown }[],
+): boolean {
+  const parentOf = new Map(folders.map((folder) => [String(folder.id), folder.parent_id ? String(folder.parent_id) : null]));
+  const usersOf = new Map<string, string[]>();
+  for (const row of lists) usersOf.set(String(row.category_id), [...(usersOf.get(String(row.category_id)) ?? []), String(row.user_id)]);
+  const seen = new Set<string>();
+  for (let current: string | null = categoryId; current && !seen.has(current); current = parentOf.get(current) ?? null) {
+    seen.add(current);
+    const users = usersOf.get(current);
+    if (users && users.length > 0) return users.includes(userId);
+  }
+  return true;
+}

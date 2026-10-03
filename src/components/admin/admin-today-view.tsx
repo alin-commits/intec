@@ -27,6 +27,7 @@ import {
 } from "@/lib/admin-today";
 import { hasAnyRole, PAYMENTS_ROLES } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv-export";
+import { shiftDateKey, todayKey } from "@/lib/dates";
 import { currencyFormatter, numberFormatter } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -60,22 +61,31 @@ type Data = {
   balances: BankBalance[];
   companies: Company[];
   reps: Rep[];
+  /** De qué día es la última foto de cobros y pagos que mandó el agente de Sage. */
+  takenOn: string | null;
 };
 
 const money = (value: number) => currencyFormatter.format(value);
 const muted = (text = "—") => <span className="muted">{text}</span>;
 const count = (value: number, one: string, many: string) => `${numberFormatter.format(value)} ${value === 1 ? one : many}`;
-const todayKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-};
 const weekday = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
 const telephone = (value: string | null) => (value ? <a href={`tel:${value.replace(/\s+/g, "")}`} onClick={(event) => event.stopPropagation()}>{value}</a> : null);
 
 export function AdminTodayView() {
   const [stage, setStage] = useState<"loading" | "denied" | "ready" | "failed">("loading");
   const [data, setData] = useState<Data | null>(null);
-  const [today] = useState(todayKey);
+  // El día de hoy en Madrid, y se vuelve a mirar al volver a la pestaña: si se
+  // deja abierta de un día para otro, lo vencido se contaba con el día anterior.
+  const [today, setToday] = useState(todayKey);
+  useEffect(() => {
+    const update = () => setToday(todayKey());
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+    };
+  }, []);
   const [reloadKey, setReloadKey] = useState(0);
   const [tab, setTab] = useState<Tab>("cobros");
   const [chase, setChase] = useState<ChaseFilter>("vencidos");
@@ -94,15 +104,18 @@ export function AdminTodayView() {
         return;
       }
       const supabase = createClient();
-      // Las funciones devuelven como mucho mil filas por vez: se piden por páginas.
-      const [receivables, payables, uninvoiced, accounts, balances, companies, reps] = await Promise.all([
-        fetchAllPages<Receivable>((from, to) => supabase.rpc("admin_receivables").order("due_date").range(from, to)),
-        fetchAllPages<Payable>((from, to) => supabase.rpc("admin_payables").order("due_date").range(from, to)),
-        fetchAllPages<UninvoicedNote>((from, to) => supabase.rpc("admin_uninvoiced").order("note_date").range(from, to)),
+      // Las funciones devuelven como mucho mil filas por vez: se piden por páginas,
+      // ordenadas por columnas que juntas no se repiten. Con solo la fecha, los
+      // recibos que vencen el mismo día se repetían o se perdían entre páginas.
+      const [receivables, payables, uninvoiced, accounts, balances, companies, reps, snapshot] = await Promise.all([
+        fetchAllPages<Receivable>((from, to) => supabase.rpc("admin_receivables").order("due_date").order("company_code").order("customer_code").order("invoice_number").order("invoice_date").order("amount").order("pending").range(from, to)),
+        fetchAllPages<Payable>((from, to) => supabase.rpc("admin_payables").order("due_date").order("company_code").order("supplier_code").order("invoice_number").order("invoice_date").order("amount").order("pending").range(from, to)),
+        fetchAllPages<UninvoicedNote>((from, to) => supabase.rpc("admin_uninvoiced").order("note_date").order("company_code").order("year").order("series").order("number").range(from, to)),
         supabase.from("sage_bank_accounts").select("company_code, account_code, bank_code, bank_name, description, iban, credit_limit, credit_used"),
-        fetchAllPages<BankBalance>((from, to) => supabase.from("sage_bank_balances").select("company_code, account_code, day, balance, movement").order("day").range(from, to)),
+        fetchAllPages<BankBalance>((from, to) => supabase.from("sage_bank_balances").select("company_code, account_code, day, balance, movement").order("day").order("company_code").order("account_code").range(from, to)),
         supabase.from("sage_companies").select("code, name").order("code"),
         supabase.from("sage_reps").select("company_code, code, name"),
+        supabase.from("sage_open_items").select("taken_on").order("taken_on", { ascending: false }).limit(1),
       ]);
       if (!active) return;
       const failure = receivables.error ?? payables.error ?? uninvoiced.error ?? accounts.error ?? balances.error ?? companies.error ?? reps.error;
@@ -119,6 +132,7 @@ export function AdminTodayView() {
         balances: balances.data,
         companies: (companies.data ?? []) as Company[],
         reps: (reps.data ?? []) as Rep[],
+        takenOn: ((snapshot.data ?? [])[0] as { taken_on: string } | undefined)?.taken_on ?? null,
       });
       setStage("ready");
     })();
@@ -291,6 +305,12 @@ export function AdminTodayView() {
             Lo que hay que atender hoy: a quién reclamar, qué se debe a proveedores, qué se ha servido sin facturar y cómo
             están los bancos. Sale de Sage; pulsa una tarjeta para ir a su lista.
           </p>
+          {data?.takenOn ? (
+            <p className={data.takenOn < shiftDateKey(today, -1) ? "admin-snapshot-date is-stale" : "admin-snapshot-date"}>
+              Cobros y pagos según Sage del {new Date(`${data.takenOn}T12:00:00`).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}.
+              {data.takenOn < shiftDateKey(today, -1) ? " Son datos atrasados: el agente de Sage no ha mandado la foto de hoy, y puede haber recibos que ya se han cobrado." : ""}
+            </p>
+          ) : null}
         </div>
         <div className="panel-heading-trailing">
           <SageRefreshButton onUpdated={() => setReloadKey((key) => key + 1)} />
