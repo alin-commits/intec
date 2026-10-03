@@ -48,15 +48,11 @@ const ORIGIN_SUGGESTIONS = ["Evento", "Feria", "Web", "Llamada", "Recomendación
 const NO_ORIGIN = "__sin_origen__";
 
 type SortKey = "name" | "company" | "unit" | "status" | "origin" | "phone" | "email" | "city" | "created";
+/** En la lista solo lo esencial; el resto está en la ficha que se abre al pulsar. */
 const SORT_COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "name", label: "Nombre" },
-  { key: "company", label: "Empresa" },
-  { key: "unit", label: "Unidad" },
+  { key: "name", label: "Contacto" },
   { key: "status", label: "Estado" },
   { key: "origin", label: "Origen" },
-  { key: "phone", label: "Teléfono" },
-  { key: "email", label: "Correo" },
-  { key: "city", label: "Población" },
   { key: "created", label: "Creado" },
 ];
 
@@ -464,7 +460,7 @@ export function CrmManager() {
           />
         </label>
         <div className="table-scroll">
-          <table>
+          <table className="crm-table">
             <thead>
               <tr>
                 {SORT_COLUMNS.map((column) => (
@@ -475,7 +471,6 @@ export function CrmManager() {
                     </button>
                   </th>
                 ))}
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -483,9 +478,10 @@ export function CrmManager() {
                 const unit = units.find((item) => item.id === contact.businessUnitId);
                 return (
                   <tr key={contact.id} className="table-row-clickable" onClick={() => setViewingContact(contact)}>
-                    <td><strong>{contact.fullName}</strong></td>
-                    <td>{contact.companyName || "—"}</td>
-                    <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
+                    <td>
+                      <strong>{contact.fullName}</strong>
+                      <small className="crm-contact-meta"><i style={{ background: unit?.accent }} />{[contact.companyName, unit?.name].filter(Boolean).join(" · ") || "—"}</small>
+                    </td>
                     <td onClick={(event) => event.stopPropagation()}>
                       {canEdit ? (
                         <select
@@ -499,15 +495,11 @@ export function CrmManager() {
                       ) : <span className={`badge badge-${statusInfo(contact.status).badge}`}>{statusInfo(contact.status).label}</span>}
                     </td>
                     <td>{contact.origin ? <span className="badge">{contact.origin}</span> : <span className="muted">—</span>}</td>
-                    <td>{contact.phone || "—"}</td>
-                    <td>{contact.companyEmail || "—"}</td>
-                    <td>{contact.city || "—"}</td>
                     <td>{formatDate(contact.createdAt)}</td>
-                    <td>{canEdit ? <button type="button" className="button button-compact button-secondary" onClick={(event) => { event.stopPropagation(); openEdit(contact); }}>Editar</button> : null}</td>
                   </tr>
                 );
               })}
-              {visibleContacts.length === 0 ? <tr><td colSpan={10} className="muted">{query.trim() ? `Ningún contacto coincide con «${query.trim()}».` : "Sin contactos que coincidan con los filtros."}</td></tr> : null}
+              {visibleContacts.length === 0 ? <tr><td colSpan={4} className="muted">{query.trim() ? `Ningún contacto coincide con «${query.trim()}».` : "Sin contactos que coincidan con los filtros."}</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -561,8 +553,8 @@ export function CrmManager() {
             <div className="ticket-details-grid">
               <div><span>Empresa</span><strong>{viewingContact.companyName || "—"}</strong></div>
               <div><span>Unidad</span><strong>{units.find((unit) => unit.id === viewingContact.businessUnitId)?.name ?? "—"}</strong></div>
-              <div><span>Teléfono</span><strong>{viewingContact.phone || "—"}</strong></div>
-              <div><span>Correo</span><strong>{viewingContact.companyEmail || "—"}</strong></div>
+              <div><span>Teléfono</span><strong>{viewingContact.phone ? <a href={`tel:${viewingContact.phone.replace(/s+/g, "")}`}>{viewingContact.phone}</a> : "—"}</strong></div>
+              <div><span>Correo</span><strong>{viewingContact.companyEmail ? <a href={`mailto:${viewingContact.companyEmail}`}>{viewingContact.companyEmail}</a> : "—"}</strong></div>
               <div><span>Población</span><strong>{viewingContact.city || "—"}</strong></div>
               <div><span>Estado</span><strong>{statusInfo(viewingContact.status).label}{viewingContact.statusChangedAt ? ` · desde el ${formatDate(viewingContact.statusChangedAt)}` : ""}</strong></div>
               <div><span>Origen</span><strong>{viewingContact.origin || "—"}</strong></div>
