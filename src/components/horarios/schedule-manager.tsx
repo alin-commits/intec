@@ -112,6 +112,8 @@ export function ScheduleManager() {
   const [editing, setEditing] = useState<{ member: Member; day: string; current: DayCell } | null>(null);
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  /** true mientras no se hayan aplicado las migraciones del cuadrante. */
+  const [faltaMigracion, setFaltaMigracion] = useState(false);
 
   const semanas = useMemo(() => weeksOfMonth(month), [month]);
   const dias = useMemo(() => weekDays(weekStart), [weekStart]);
@@ -149,7 +151,16 @@ export function ScheduleManager() {
       supabase.from("staff_week_notes").select("week_start, note").gte("week_start", desde).lte("week_start", hasta),
     ]);
     const fallo = dep.error ?? mem.error ?? tpl.error ?? exc.error ?? fes.error ?? not_.error;
-    if (fallo) { setMessage(reportSafeError(fallo, "No se pudo cargar el cuadrante.")); return; }
+    if (fallo) {
+      // Entre que se despliega el código y se ejecuta la migración pasan
+      // minutos, y "no se pudo cargar" suena a roto cuando lo que falta es un
+      // paso. Si las tablas no están todavía, se dice.
+      const codigo = (fallo as { code?: string }).code ?? "";
+      setFaltaMigracion(codigo === "PGRST205" || codigo === "42P01");
+      if (codigo !== "PGRST205" && codigo !== "42P01") setMessage(reportSafeError(fallo, "No se pudo cargar el cuadrante."));
+      return;
+    }
+    setFaltaMigracion(false);
 
     const slot = (a: string | null, b: string | null) => (a && b ? { start: a, end: b } : null);
     const shiftOf = (r: Record<string, string | null>): DayShift => ({
@@ -325,7 +336,15 @@ export function ScheduleManager() {
         </div>
       </section>
 
-      {sinPlantilla ? (
+      {faltaMigracion ? (
+        <section className="panel panel-padded">
+          <h3>Falta aplicar la migración del cuadrante</h3>
+          <p className="muted">
+            Las tablas de horarios todavía no existen en la base de datos. En cuanto se ejecute
+            <strong> 202610050001_horarios.sql</strong>, esta pestaña empieza a funcionar.
+          </p>
+        </section>
+      ) : sinPlantilla ? (
         <section className="panel panel-padded">
           <h3>Todavía no hay nadie en el cuadrante</h3>
           <p className="muted">En cuanto se cargue la plantilla y su turno habitual, aquí sale el cuadrante de cada semana.</p>
