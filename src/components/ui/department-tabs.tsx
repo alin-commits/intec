@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { hasAnyRole } from "@/lib/constants";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -27,6 +27,7 @@ export function DepartmentTabs({ pages, initial, label }: { pages: DepartmentPag
   const configured = isSupabaseConfigured();
   const [roles, setRoles] = useState<AppRole[] | null>(configured ? null : ["admin"]);
   const [current, setCurrent] = useState<string | null>(initial);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -37,6 +38,12 @@ export function DepartmentTabs({ pages, initial, label }: { pages: DepartmentPag
     );
     return () => { active = false; };
   }, [configured]);
+
+  // Si la pestaña abierta queda fuera de la barra (pantalla estrecha, o se
+  // entra con ?p=gastos), la barra se mueve para que se vea.
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [current, roles]);
 
   if (roles === null) return <PageLoader />;
   const visible = pages.filter((page) => !page.roles || hasAnyRole(roles, page.roles));
@@ -71,6 +78,7 @@ export function DepartmentTabs({ pages, initial, label }: { pages: DepartmentPag
               type="button"
               role="tab"
               aria-selected={page.key === active.key}
+              ref={page.key === active.key ? activeTabRef : undefined}
               className={page.key === active.key ? "view-tab active" : "view-tab"}
               onClick={() => go(page.key)}
             >

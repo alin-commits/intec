@@ -6,7 +6,7 @@ import { CRM_EDIT_ROLES, CRM_ROLES, hasAnyRole } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoCrmContacts } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
-import { formatDate } from "@/lib/format";
+import { displayName, formatDate, formatDateTime } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit, CrmContact, CrmStatus } from "@/lib/types";
@@ -55,6 +55,11 @@ const SORT_COLUMNS: { key: SortKey; label: string }[] = [
   { key: "origin", label: "Origen" },
   { key: "created", label: "Creado" },
 ];
+
+/** Una línea del historial de un contacto (crm_contact_log), que se apunta sola. */
+type CrmLogRow = { id: number; created_at: string; actor_name: string | null; kind: string; text: string };
+/** El color de cada tipo de línea, el mismo que en el registro de los leads. */
+const LOG_KIND_CLASS: Record<string, string> = { alta: "lead-record-meta", estado: "lead-record-estado", origen: "lead-record-asignacion", datos: "" };
 
 /** Sin tildes ni mayúsculas, para que "Peréz" encuentre "perez". */
 const plain = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -121,6 +126,8 @@ export function CrmManager() {
   const [pendingDelete, setPendingDelete] = useState<CrmContact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [viewingContact, setViewingContact] = useState<CrmContact | null>(null);
+  /** El historial del contacto abierto: null mientras carga. */
+  const [history, setHistory] = useState<{ contactId: string; rows: CrmLogRow[] | null; failed: boolean } | null>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -318,6 +325,20 @@ export function CrmManager() {
     }
   }
 
+  /** Abre la ficha de un contacto y trae su historial. */
+  function openDetail(contact: CrmContact) {
+    setViewingContact(contact);
+    if (!configured) {
+      setHistory({ contactId: contact.id, rows: [], failed: false });
+      return;
+    }
+    setHistory({ contactId: contact.id, rows: null, failed: false });
+    void createClient().from("crm_contact_log").select("id, created_at, actor_name, kind, text").eq("contact_id", contact.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .then(({ data, error }) => {
+        setHistory((current) => (current?.contactId === contact.id ? { contactId: contact.id, rows: error ? [] : (data ?? []) as CrmLogRow[], failed: Boolean(error) } : current));
+      });
+  }
+
   /** Cambiar el estado desde la tabla, sin abrir la ficha. La fecha del cambio la pone la base. */
   async function changeStatus(contact: CrmContact, status: CrmStatus) {
     const previous = contact.status;
@@ -477,7 +498,7 @@ export function CrmManager() {
               {visibleContacts.map((contact) => {
                 const unit = units.find((item) => item.id === contact.businessUnitId);
                 return (
-                  <tr key={contact.id} className="table-row-clickable" onClick={() => setViewingContact(contact)}>
+                  <tr key={contact.id} className="table-row-clickable" onClick={() => openDetail(contact)}>
                     <td>
                       <strong>{contact.fullName}</strong>
                       <small className="crm-contact-meta"><i style={{ background: unit?.accent }} />{[contact.companyName, unit?.name].filter(Boolean).join(" · ") || "—"}</small>
@@ -547,7 +568,7 @@ export function CrmManager() {
         </form>
       </Modal>
 
-      <Modal open={Boolean(viewingContact)} title={viewingContact?.fullName ?? "Contacto"} eyebrow="CRM" onClose={() => setViewingContact(null)}>
+      <Modal open={Boolean(viewingContact)} title={viewingContact?.fullName ?? "Contacto"} eyebrow="CRM" scrollInside onClose={() => setViewingContact(null)}>
         {viewingContact ? (
           <div className="ticket-details">
             <div className="ticket-details-grid">
@@ -563,6 +584,21 @@ export function CrmManager() {
             <div className="ticket-details-section">
               <h3>Notas</h3>
               <p>{viewingContact.notes || "Sin notas."}</p>
+            </div>
+            <div className="ticket-details-section">
+              <h3>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
+              {!history || history.rows === null ? <p className="muted">Cargando…</p>
+                : history.failed ? <p className="muted">El historial todavía no está disponible.</p>
+                  : history.rows.length === 0 ? <p className="muted">Todavía no hay nada apuntado.</p> : (
+                    <ol className="lead-record-list crm-history">
+                      {history.rows.map((row) => (
+                        <li key={row.id} className={LOG_KIND_CLASS[row.kind] ?? ""}>
+                          <span>{formatDateTime(row.created_at)}</span>
+                          <p>{row.text}{row.actor_name ? ` · ${displayName(row.actor_name)}` : ""}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
             </div>
             <div className="modal-actions">
               <button type="button" className="button button-secondary" onClick={() => setViewingContact(null)}>Cerrar</button>

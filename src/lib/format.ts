@@ -9,6 +9,16 @@ export const currencyFormatter = new Intl.NumberFormat("es-ES", {
 
 export const numberFormatter = new Intl.NumberFormat("es-ES");
 
+/**
+ * El nombre que se enseña de una persona. Hay perfiles cuyo nombre es su correo
+ * ("alin@suministrointec.com"): de esos se enseña la parte de delante, "Alin".
+ */
+export function displayName(name: string): string {
+  if (!name.includes("@")) return name;
+  const local = name.split("@")[0] ?? name;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
 export function formatPercent(value: number): string {
   return `${value.toFixed(1).replace(".", ",")} %`;
 }

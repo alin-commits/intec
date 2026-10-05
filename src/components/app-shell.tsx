@@ -6,6 +6,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
+import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
+import { displayName } from "@/lib/format";
 import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -29,11 +31,6 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon },
   { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
 ];
-
-function nameFromEmail(email: string): string {
-  const local = email.split("@")[0] ?? email;
-  return local.charAt(0).toUpperCase() + local.slice(1);
-}
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
@@ -74,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     async function loadProfile() {
       const current = await loadCurrentProfile();
       if (!current || !active) return;
-      setProfile({ fullName: current.fullName.includes("@") ? nameFromEmail(current.fullName) : current.fullName, roles: current.roles });
+      setProfile({ fullName: displayName(current.fullName), roles: current.roles });
       const supabase = createClient();
       const { data: assignedCard } = await supabase.from("business_cards").select("id").eq("assigned_user_id", current.id).limit(1).maybeSingle();
       if (!active) return;
@@ -113,6 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
+      <TabBarsWheel />
       {mobileNavOpen ? <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} /> : null}
       <aside className={mobileNavOpen ? "sidebar mobile-open" : "sidebar"}>
         <div className="sidebar-top">

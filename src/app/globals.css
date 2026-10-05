@@ -261,8 +261,15 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .channel-dot-whatsapp { background: #15803d; }
 .channel-dot-portal_rrss { background: #c2410c; }
 .lead-filters { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.view-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); }
-.view-tab { padding: 10px 16px; border: none; background: none; color: var(--muted); font-weight: 700; font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+/* Si las pestañas no caben se desplazan de lado. La raya de abajo va por dentro
+   (sombra) para que el desplazamiento no corte la de la pestaña activa. En el
+   ordenador se ve una barra fina para que se note que hay más; con el dedo, no. */
+.view-tabs { display: flex; gap: 6px; box-shadow: inset 0 -1px 0 var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.view-tab { flex-shrink: 0; white-space: nowrap; padding: 10px 16px; border: none; background: none; color: var(--muted); font-weight: 700; font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; }
+@media (hover: none) {
+  .view-tabs { scrollbar-width: none; }
+  .view-tabs::-webkit-scrollbar { display: none; }
+}
 .view-tab:hover { color: var(--text); }
 .view-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
 .units-grid { display: grid; grid-template-columns: repeat(3, minmax(230px, 1fr)); gap: 18px; }
@@ -1032,9 +1039,6 @@ tr.row-muted td { opacity: .6; }
   /* Section headers and their action buttons */
   .section-heading { gap: 14px; }
   .section-heading .panel-heading-trailing, .panel-heading .panel-heading-trailing { justify-content: flex-start; width: 100%; gap: 8px; }
-  .view-tabs { overflow-x: auto; scrollbar-width: none; }
-  .view-tabs::-webkit-scrollbar { display: none; }
-  .view-tab { flex-shrink: 0; white-space: nowrap; }
   .period-bar label { min-width: 0; flex: 1 1 140px; }
 
   /* Brand choosers: 2 per row instead of one huge tile each */
@@ -1914,3 +1918,4 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .crm-contact-meta i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .ticket-details-grid a { color: var(--primary); text-decoration: none; }
 .ticket-details-grid a:hover { text-decoration: underline; }
+.crm-history { max-height: 260px; overflow-y: auto; padding-right: 4px; }
