@@ -18,7 +18,6 @@ import {
   type SalesFilters,
   type SalesTarget,
   type SummaryRow,
-  type SyncRun,
 } from "@/lib/sales-model";
 import {
   against,
@@ -36,6 +35,7 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { SageRefreshButton } from "@/components/sage-refresh-button";
+import { SageFreshness } from "@/components/sage-freshness";
 import { chipNote, SalesFilterBar, type ActiveChip } from "./sales-filter-bar";
 import { salesPages, type CustomerRef, type FamilyName, type ListRequest, type SageDetail, type SalesContext, type SalesPageKey } from "./sales-context";
 import { SalesListModal } from "./sales-list-modal";
@@ -102,7 +102,6 @@ export function SalesDashboard() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
   const [families, setFamilies] = useState<FamilyName[]>([]);
-  const [lastRun, setLastRun] = useState<SyncRun | null>(null);
   const [busy, setBusy] = useState(false);
   /** A qué periodo pertenecen las filas de ahora: mientras llega otro se sigue pintando este. */
   const [loaded, setLoaded] = useState<{ choice: PeriodChoice; compare: CompareChoice } | null>(null);
@@ -165,7 +164,6 @@ export function SalesDashboard() {
         setCompanies((companyRows.data ?? []) as Company[]);
         setReps((repRows.data ?? []) as Rep[]);
         setFamilies((familyRows.data ?? []) as FamilyName[]);
-        setLastRun(((runRows.data ?? [])[0] as SyncRun) ?? null);
         const has = (result: { data: unknown[] | null; error: unknown }) => !result.error && (result.data ?? []).length > 0;
         setDetail({ customers: has(customers), articles: has(articles), offers: has(offers), orders: has(orders), incidents: has(incidents) });
         setCanSeeLeads(hasAnyRole(profile.roles, LEADS_ROLES));
@@ -200,15 +198,13 @@ export function SalesDashboard() {
           supabase.rpc("sage_sales_summary", { p_from: range.from, p_to: range.to, p_basis: basis })
             .order("month").order("company_code").order("series").order("rep_code")
             .range(start, end));
-        const [current, before, runRows] = await Promise.all([
+        const [current, before] = await Promise.all([
           load(base),
           baseCompare ? load(baseCompare) : Promise.resolve({ data: [] as SummaryRow[], error: null }),
-          supabase.from("sage_sync_runs").select("started_at, ok, covered_from, covered_to").eq("ok", true).order("started_at", { ascending: false }).limit(1),
         ]);
         const failure = current.error ?? before.error;
         if (failure) throw failure;
         if (!active) return;
-        if (!runRows.error) setLastRun(((runRows.data ?? [])[0] as SyncRun) ?? null);
         setRows(current.data);
         setPreviousRows(before.data);
         setLoaded({ choice, compare: compareChoice });
@@ -478,6 +474,8 @@ export function SalesDashboard() {
         </div>
       </section>
 
+      <SageFreshness provisionalDays={shownBase.basePartial ? PROVISIONAL_DAYS : undefined} />
+
       <div className="view-tabs sales-tabs" role="tablist" aria-label="Páginas del cuadro de mando de ventas">
         {salesPages.map((item) => (
           <button
@@ -547,16 +545,6 @@ export function SalesDashboard() {
         {page === "clientes" ? <CustomersPage ctx={context} /> : null}
         {page === "objetivos" ? <TargetsPage ctx={context} /> : null}
       </div>
-
-      <section className="panel sales-footnote">
-        <p className="muted">
-          {lastRun
-            ? `Última lectura de Sage: ${new Date(lastRun.started_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}.`
-            : "Todavía no consta ninguna lectura de Sage."}
-          {shownBase.basePartial ? ` Los últimos ${PROVISIONAL_DAYS} días son provisionales: se siguen corrigiendo albaranes y facturando, así que esas cifras aún se mueven.` : ""}
-          {" "}Si un número no cuadra con Sage, manda Sage.
-        </p>
-      </section>
 
       <SalesListModal request={listRequest} ctx={context} onClose={() => setListRequest(null)} hidden={customer !== null} />
       {customer ? (

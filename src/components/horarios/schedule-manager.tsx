@@ -100,6 +100,10 @@ export function ScheduleManager() {
   const [personalOpen, setPersonalOpen] = useState(false);
   const [nuevo, setNuevo] = useState({ nombre: "", departamento: "" });
   const [borrando, setBorrando] = useState<Member | null>(null);
+  /** Lo que había antes de la última pintada, para poder volver atrás. */
+  const [deshacer, setDeshacer] = useState<{ celdas: string[]; previas: ScheduleException[] } | null>(null);
+  const [filtroDepartamento, setFiltroDepartamento] = useState("all");
+  const [busqueda, setBusqueda] = useState("");
 
   const dias = useMemo(() => monthWeekdays(month), [month]);
 
@@ -168,6 +172,15 @@ export function ScheduleManager() {
       || a.display_name.localeCompare(b.display_name));
   }, [members, departments]);
 
+  /* El filtro es solo para mirar: el PDF y los totales siguen siendo de toda
+     la plantilla, que es el documento que se cuelga en la pared. */
+  const visibles = useMemo(() => {
+    const texto = busqueda.trim().toLowerCase();
+    return ordenados.filter((m) =>
+      (filtroDepartamento === "all" || m.department_id === filtroDepartamento)
+      && (texto === "" || m.display_name.toLowerCase().includes(texto)));
+  }, [ordenados, filtroDepartamento, busqueda]);
+
   const filas = useMemo(
     () => buildWeek({ days: dias, memberIds: ordenados.map((m) => m.id), templates, exceptions, holidays }),
     [dias, ordenados, templates, exceptions, holidays],
@@ -208,6 +221,7 @@ export function ScheduleManager() {
     acumulado.current = new Set();
     setPintadas(new Set());
     if (celdas.length === 0) return;
+    const previas = exceptions.filter((e) => celdas.includes(`${e.memberId}|${e.day}`));
     setBusy(true);
     try {
       const supabase = createClient();
@@ -232,6 +246,7 @@ export function ScheduleManager() {
         if (error) throw error;
       }
       await load(month);
+      setDeshacer({ celdas, previas });
       setMessage(celdas.length === 1 ? "Día marcado." : `${celdas.length} días marcados.`);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo guardar lo marcado."));
@@ -240,6 +255,40 @@ export function ScheduleManager() {
     }
   }
   guardar.current = () => void terminarPintada();
+
+  /** Vuelve a dejar los días de la última pintada como estaban. */
+  async function volverAtras() {
+    if (!deshacer) return;
+    setBusy(true);
+    try {
+      const supabase = createClient();
+      for (const celda of deshacer.celdas) {
+        const [memberId, day] = celda.split("|");
+        const { error } = await supabase.from("staff_exceptions").delete().eq("member_id", memberId).eq("day", day);
+        if (error) throw error;
+      }
+      if (deshacer.previas.length) {
+        const { error } = await supabase.from("staff_exceptions").insert(deshacer.previas.map((e) => ({
+          member_id: e.memberId,
+          day: e.day,
+          kind: e.kind,
+          morning_start: e.shift?.morning?.start ?? null,
+          morning_end: e.shift?.morning?.end ?? null,
+          afternoon_start: e.shift?.afternoon?.start ?? null,
+          afternoon_end: e.shift?.afternoon?.end ?? null,
+          note: e.note ?? null,
+        })));
+        if (error) throw error;
+      }
+      setDeshacer(null);
+      await load(month);
+      setMessage("Cambio deshecho.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo deshacer."));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function toggleFestivo(day: string) {
     if (!canEdit) return;
@@ -389,7 +438,28 @@ export function ScheduleManager() {
       ) : (
         <>
           <section className="panel panel-padded horario-barra">
-            <label className="horario-mes"><span>Mes</span><MonthField value={month} onChange={(value) => setMonth(value || todayMonth())} /></label>
+            <div className="horario-filtros">
+              <label><span>Mes</span><MonthField value={month} onChange={(value) => setMonth(value || todayMonth())} /></label>
+              <label><span>Departamento</span>
+                <select value={filtroDepartamento} onChange={(e) => setFiltroDepartamento(e.target.value)}>
+                  <option value="all">Todos</option>
+                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </label>
+              <label><span>Buscar persona</span>
+                <input value={busqueda} placeholder="Nombre" onChange={(e) => setBusqueda(e.target.value)} />
+              </label>
+              {busqueda || filtroDepartamento !== "all" ? (
+                <button type="button" className="button button-compact button-secondary" onClick={() => { setBusqueda(""); setFiltroDepartamento("all"); }}>
+                  Ver a todos
+                </button>
+              ) : null}
+              {canEdit && deshacer ? (
+                <button type="button" className="button button-compact button-secondary horario-deshacer" disabled={busy} onClick={() => void volverAtras()}>
+                  ↩ Deshacer {deshacer.celdas.length === 1 ? "el último cambio" : `los últimos ${deshacer.celdas.length} días`}
+                </button>
+              ) : null}
+            </div>
             {canEdit ? (
               <div className="horario-pinceles">
                 <span>Marcar pintando</span>
@@ -463,10 +533,10 @@ export function ScheduleManager() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ordenados.map((member, index) => {
+                    {visibles.map((member, index) => {
                       const fila = filaDe.get(member.id);
                       const departamento = departments.find((d) => d.id === member.department_id);
-                      const nuevoGrupo = index === 0 || ordenados[index - 1].department_id !== member.department_id;
+                      const nuevoGrupo = index === 0 || visibles[index - 1].department_id !== member.department_id;
                       return (
                         <tr key={member.id} className={nuevoGrupo ? "horario-grupo" : undefined}>
                           <th scope="row" className="horario-nombre">
@@ -496,6 +566,12 @@ export function ScheduleManager() {
                   </tbody>
                 </table>
               </div>
+
+              {visibles.length !== ordenados.length ? (
+                <p className="muted horario-filtrado">
+                  Se ven {visibles.length} de {ordenados.length} personas. El PDF sigue saliendo con toda la plantilla.
+                </p>
+              ) : null}
 
               <div className="horario-leyenda">
                 <span><i className="hc" /> Turno de trabajo</span>

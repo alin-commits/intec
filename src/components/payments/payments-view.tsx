@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { hasAnyRole, PAYMENTS_ROLES } from "@/lib/constants";
 import { todayKey } from "@/lib/dates";
 import type { BankSetting } from "@/lib/payments";
+import { SageFreshness } from "@/components/sage-freshness";
 import { createClient } from "@/lib/supabase/client";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { Toast } from "@/components/ui/toast";
@@ -154,6 +155,8 @@ export function PaymentsView({ tab: forcedTab, onTab }: { tab?: PaymentsTab; onT
           <SageRefreshButton onUpdated={() => { setReloadKey((key) => key + 1); setSettingsKey((key) => key + 1); }} />
         </div>
       </section>
+
+      <SageFreshness />
 
       {forcedTab ? null : (
         <div className="view-tabs" role="tablist" aria-label="Apartados de pagos">

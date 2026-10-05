@@ -600,16 +600,16 @@ export function LeadsTable() {
             <tbody>{visibleRows.map((lead) => {
               const unit = units.find((item) => item.id === lead.businessUnitId);
               return (
-                <tr key={lead.id}>
+                <tr key={lead.id} className="table-row-clickable" onClick={() => openEdit(lead)}>
                   <td>{formatDate(lead.createdAt)}</td>
                   <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
                   <td><strong>{lead.contactName || "Sin contacto"}</strong><small>{lead.clientCompanyName || "—"}</small></td>
                   <td>{lead.campaign || "General"}</td>
-                  <td>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
+                  <td onClick={(event) => event.stopPropagation()}>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
                   <td className={(lead.assignees ?? []).length ? undefined : "muted"}>{ownerNames(lead)}</td>
                   <td>{lead.productInterest || "—"}</td>
                   <td>{lead.saleValue ? currencyFormatter.format(lead.saleValue) : "—"}</td>
-                  <td><button type="button" className="button button-compact button-secondary" onClick={() => openEdit(lead)}>{canEdit ? "Editar" : "Ver"}</button></td>
+                  <td onClick={(event) => event.stopPropagation()}><button type="button" className="button button-compact button-secondary" onClick={() => openEdit(lead)}>{canEdit ? "Editar" : "Ver"}</button></td>
                 </tr>
               );
             })}

@@ -29,6 +29,7 @@ import { hasAnyRole, PAYMENTS_ROLES } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv-export";
 import { shiftDateKey, todayKey } from "@/lib/dates";
 import { currencyFormatter, numberFormatter } from "@/lib/format";
+import { SageFreshness } from "@/components/sage-freshness";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -316,6 +317,8 @@ export function AdminTodayView() {
           <SageRefreshButton onUpdated={() => setReloadKey((key) => key + 1)} />
         </div>
       </section>
+
+      <SageFreshness />
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
