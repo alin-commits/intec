@@ -18,7 +18,7 @@
 export type Slot = { start: string; end: string };
 export type DayShift = { morning: Slot | null; afternoon: Slot | null };
 
-export type ExceptionKind = "vacaciones" | "baja" | "permiso" | "tarde_libre" | "horario" | "no_trabaja";
+export type ExceptionKind = "vacaciones" | "baja" | "permiso" | "no_justificada" | "tarde_libre" | "horario" | "no_trabaja";
 
 export type ShiftTemplate = { memberId: string; weekday: number; shift: DayShift };
 export type ScheduleException = { memberId: string; day: string; kind: ExceptionKind; shift?: DayShift; note?: string | null };
@@ -31,7 +31,7 @@ export type DayCell =
   | { kind: "libre" }
   | { kind: "trabaja"; shift: DayShift; tardeLibre: boolean; note?: string | null };
 
-const AUSENCIAS: Record<string, string> = { vacaciones: "VACACIONES", baja: "BAJA", permiso: "PERMISO" };
+const AUSENCIAS: Record<string, string> = { vacaciones: "VACACIONES", baja: "BAJA", permiso: "PERMISO", no_justificada: "SIN JUSTIFICAR" };
 
 /** Lunes = 1 … domingo = 7, que es como se numeran los turnos habituales. */
 export function weekdayOf(day: string): number {
@@ -96,6 +96,20 @@ export function cellHours(cell: DayCell): number {
   if (cell.kind !== "trabaja") return 0;
   const tramo = (slot: Slot | null) => (slot ? Math.max(0, minutes(slot.end) - minutes(slot.start)) : 0);
   return (tramo(cell.shift.morning) + tramo(cell.shift.afternoon)) / 60;
+}
+
+/**
+ * Las horas que una persona deja de hacer ese día respecto a su turno de
+ * siempre. Es lo que el cuadrante de papel no dice y hace falta para cuadrar a
+ * fin de mes: no es lo mismo faltar un día entero que irse dos horas antes.
+ *
+ * Un festivo no cuenta: ese día no trabaja nadie y no hay nada que recuperar.
+ */
+export function missingHours(cell: DayCell, template: DayShift | null): number {
+  if (cell.kind === "festivo" || !template) return 0;
+  const previstas = cellHours({ kind: "trabaja", shift: template, tardeLibre: false });
+  const hechas = cellHours(cell);
+  return Math.max(0, Math.round((previstas - hechas) * 100) / 100);
 }
 
 export type MemberRow = { memberId: string; cells: Record<string, DayCell>; hours: number; tardeLibreDay: string | null };

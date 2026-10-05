@@ -1990,3 +1990,15 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .horario-filtros input, .horario-filtros select { min-height: 40px; border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; font: inherit; background: white; }
 .horario-deshacer { border-color: var(--primary); color: var(--primary); }
 .horario-filtrado { margin: 10px 4px 0; font-size: 12px; }
+.horario-pendientes { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--primary); border-radius: 10px; background: var(--primary-soft); }
+.horario-pendientes strong { color: var(--primary); font-size: 12.5px; }
+.horario-pinceles .role-chip.active.p-festivo { background: #e5e7eb; border-color: #4b5563; color: #1f2937; }
+.horario-nombre-boton { display: block; width: 100%; border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.horario-nombre-boton:hover { color: var(--primary); }
+.hc.is-pintando { box-shadow: inset 0 0 0 2px var(--primary); }
+.horario-resumenes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; padding: 16px 4px 0; }
+.horario-resumenes h4 { margin: 0 0 8px; font-size: 13px; }
+.horario-resumenes ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 230px; overflow-y: auto; }
+.horario-resumenes li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted); font-size: 12px; }
+.horario-resumenes li small { color: var(--muted); font-weight: 700; }
+.horario-resumenes li strong { white-space: nowrap; }

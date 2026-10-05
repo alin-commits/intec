@@ -20,6 +20,7 @@ import {
   weekStartOf,
   weekdayInitial,
   weekdayName,
+  missingHours,
   type DayCell,
   type DayShift,
   type ExceptionKind,
@@ -44,7 +45,9 @@ type Department = { id: string; name: string; sort_order: number };
 type Member = { id: string; department_id: string; display_name: string; sort_order: number; is_active: boolean };
 type WeekNote = { week_start: string; note: string };
 /** Lo que se puede pintar. "habitual" borra la excepción y deja el turno de siempre. */
-type Pincel = ExceptionKind | "habitual";
+type Pincel = ExceptionKind | "habitual" | "festivo";
+/** Un cambio marcado y todavía sin guardar. */
+type Pendiente = { memberId: string; day: string; pincel: Exclude<Pincel, "festivo">; shift: DayShift | null };
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const todayMonth = () => new Date().toISOString().slice(0, 7);
@@ -54,9 +57,11 @@ const PINCELES: { kind: Pincel; label: string; clase: string }[] = [
   { kind: "vacaciones", label: "Vacaciones", clase: "p-ausencia" },
   { kind: "baja", label: "Baja", clase: "p-ausencia" },
   { kind: "permiso", label: "Permiso", clase: "p-ausencia" },
+  { kind: "no_justificada", label: "Sin justificar", clase: "p-ausencia" },
   { kind: "tarde_libre", label: "Tarde libre", clase: "p-tarde" },
   { kind: "horario", label: "Otro horario", clase: "p-horario" },
   { kind: "no_trabaja", label: "No trabaja", clase: "p-libre" },
+  { kind: "festivo", label: "Festivo", clase: "p-festivo" },
 ];
 
 const claseDe = (cell: DayCell) => {
@@ -89,8 +94,8 @@ export function ScheduleManager() {
 
   const [pincel, setPincel] = useState<Pincel>("vacaciones");
   const [horas, setHoras] = useState({ m1: "08:00", m2: "14:00", t1: "", t2: "" });
-  /** Lo pintado en el arrastre en curso, para verlo antes de guardarlo. */
-  const [pintadas, setPintadas] = useState<Set<string>>(new Set());
+  /** Lo marcado y aún sin guardar, por celda. */
+  const [pendientes, setPendientes] = useState<Map<string, Pendiente>>(new Map());
   const pintando = useRef(false);
   const acumulado = useRef<Set<string>>(new Set());
   const guardar = useRef<() => void>(() => {});
@@ -181,11 +186,53 @@ export function ScheduleManager() {
       && (texto === "" || m.display_name.toLowerCase().includes(texto)));
   }, [ordenados, filtroDepartamento, busqueda]);
 
+  /* Lo pendiente se dibuja como si ya estuviera: así se ve el mes como quedará
+     antes de guardarlo. "habitual" pendiente significa quitar la excepción. */
+  const conPendientes = useMemo(() => {
+    const quitar = new Set([...pendientes.values()].map((p) => `${p.memberId}|${p.day}`));
+    const base = exceptions.filter((e) => !quitar.has(`${e.memberId}|${e.day}`));
+    const nuevas = [...pendientes.values()]
+      .filter((p) => p.pincel !== "habitual")
+      .map((p) => ({ memberId: p.memberId, day: p.day, kind: p.pincel as ExceptionKind, shift: p.shift ?? undefined }));
+    return [...base, ...nuevas];
+  }, [exceptions, pendientes]);
+
   const filas = useMemo(
-    () => buildWeek({ days: dias, memberIds: ordenados.map((m) => m.id), templates, exceptions, holidays }),
-    [dias, ordenados, templates, exceptions, holidays],
+    () => buildWeek({ days: dias, memberIds: ordenados.map((m) => m.id), templates, exceptions: conPendientes, holidays }),
+    [dias, ordenados, templates, conPendientes, holidays],
   );
   const filaDe = useMemo(() => new Map(filas.map((f) => [f.memberId, f])), [filas]);
+  const nombreDe = useMemo(() => new Map(ordenados.map((m) => [m.id, m.display_name])), [ordenados]);
+
+  /* Los dos repasos de fin de mes: lo que no tiene justificante, y las horas
+     sueltas que alguien dejó de hacer sin faltar el día entero. */
+  const turnoDe = useMemo(() => {
+    const mapa = new Map<string, DayShift>();
+    for (const t of templates) mapa.set(`${t.memberId}|${t.weekday}`, t.shift);
+    return mapa;
+  }, [templates]);
+
+  const sinJustificar = useMemo(() => {
+    const dia = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
+    return conPendientes
+      .filter((e) => e.kind === "no_justificada" && dias.includes(e.day))
+      .map((e) => ({ persona: nombreDe.get(e.memberId) ?? "—", day: e.day, horas: turnoDe.get(`${e.memberId}|${dia(e.day) === 0 ? 7 : dia(e.day)}`) }))
+      .sort((a, b) => a.day.localeCompare(b.day) || a.persona.localeCompare(b.persona));
+  }, [conPendientes, dias, nombreDe, turnoDe]);
+
+  const horasSueltas = useMemo(() => {
+    const salida: { persona: string; day: string; faltan: number }[] = [];
+    for (const fila of filas) {
+      for (const day of dias) {
+        const cell = fila.cells[day];
+        if (!cell || cell.kind === "festivo" || cell.kind === "ausencia") continue;
+        const wd = new Date(`${day}T00:00:00Z`).getUTCDay();
+        const faltan = missingHours(cell, turnoDe.get(`${fila.memberId}|${wd === 0 ? 7 : wd}`) ?? null);
+        if (faltan > 0) salida.push({ persona: nombreDe.get(fila.memberId) ?? "—", day, faltan });
+      }
+    }
+    return salida.sort((a, b) => b.faltan - a.faltan || a.day.localeCompare(b.day));
+  }, [filas, dias, nombreDe, turnoDe]);
 
   /** Las semanas del mes, para la cabecera con sus días debajo. */
   const semanas = useMemo(() => {
@@ -199,62 +246,112 @@ export function ScheduleManager() {
     return grupos;
   }, [dias]);
 
-  // ---------- Pintar ----------
+  // ---------- Marcar ----------
+  /*
+     Marcar no guarda: deja el cambio pendiente y se ve en el cuadrante. Así se
+     puede repasar un mes entero y guardarlo de una vez, que es como se trabaja
+     con una hoja de cálculo, en vez de disparar una escritura por celda.
+  */
 
-  function pintar(memberId: string, day: string) {
-    if (!canEdit || holidays.some((h) => h.day === day)) return;
-    acumulado.current.add(`${memberId}|${day}`);
-    setPintadas(new Set(acumulado.current));
+  const horasDelPincel = (): DayShift | null => {
+    if (pincel === "horario") return {
+      morning: horas.m1 && horas.m2 ? { start: horas.m1, end: horas.m2 } : null,
+      afternoon: horas.t1 && horas.t2 ? { start: horas.t1, end: horas.t2 } : null,
+    };
+    if (pincel === "tarde_libre") return { morning: horas.m1 && horas.m2 ? { start: horas.m1, end: horas.m2 } : null, afternoon: null };
+    return null;
+  };
+
+  function marcar(celdas: { memberId: string; day: string }[]) {
+    if (!canEdit || celdas.length === 0) return;
+    if (pincel === "festivo") { void alternarFestivos([...new Set(celdas.map((c) => c.day))]); return; }
+    const shift = horasDelPincel();
+    setPendientes((actuales) => {
+      const siguiente = new Map(actuales);
+      for (const { memberId, day } of celdas) {
+        if (holidays.some((h) => h.day === day)) continue;
+        siguiente.set(`${memberId}|${day}`, { memberId, day, pincel, shift });
+      }
+      return siguiente;
+    });
   }
 
   function empezarPintada(memberId: string, day: string) {
     if (!canEdit) return;
     pintando.current = true;
-    acumulado.current = new Set();
-    pintar(memberId, day);
+    acumulado.current = new Set([`${memberId}|${day}`]);
+    marcar([{ memberId, day }]);
   }
 
-  async function terminarPintada() {
-    if (!pintando.current) return;
-    pintando.current = false;
-    const celdas = [...acumulado.current];
-    acumulado.current = new Set();
-    setPintadas(new Set());
-    if (celdas.length === 0) return;
-    const previas = exceptions.filter((e) => celdas.includes(`${e.memberId}|${e.day}`));
+  function pintar(memberId: string, day: string) {
+    const clave = `${memberId}|${day}`;
+    if (acumulado.current.has(clave)) return;
+    acumulado.current.add(clave);
+    marcar([{ memberId, day }]);
+  }
+
+  /** Toda la fila de una persona: su mes entero. */
+  const marcarFila = (memberId: string) => marcar(dias.map((day) => ({ memberId, day })));
+  /** Toda la columna de un día: a quien se esté viendo. */
+  const marcarColumna = (day: string) => marcar(visibles.map((m) => ({ memberId: m.id, day })));
+
+  async function guardarCambios() {
+    const cambios = [...pendientes.values()];
+    if (cambios.length === 0) return;
+    const claves = cambios.map((c) => `${c.memberId}|${c.day}`);
+    const previas = exceptions.filter((e) => claves.includes(`${e.memberId}|${e.day}`));
     setBusy(true);
     try {
       const supabase = createClient();
-      const partes = celdas.map((c) => c.split("|"));
-      if (pincel === "habitual") {
-        for (const [memberId, day] of partes) {
-          const { error } = await supabase.from("staff_exceptions").delete().eq("member_id", memberId).eq("day", day);
-          if (error) throw error;
-        }
-      } else {
-        const conHoras = pincel === "horario" || pincel === "tarde_libre";
-        const { error } = await supabase.from("staff_exceptions").upsert(partes.map(([memberId, day]) => ({
-          member_id: memberId,
-          day,
-          kind: pincel,
-          morning_start: conHoras && horas.m1 && horas.m2 ? horas.m1 : null,
-          morning_end: conHoras && horas.m1 && horas.m2 ? horas.m2 : null,
-          afternoon_start: pincel === "horario" && horas.t1 && horas.t2 ? horas.t1 : null,
-          afternoon_end: pincel === "horario" && horas.t1 && horas.t2 ? horas.t2 : null,
+      const aBorrar = cambios.filter((c) => c.pincel === "habitual");
+      const aPoner = cambios.filter((c) => c.pincel !== "habitual");
+      for (const c of aBorrar) {
+        const { error } = await supabase.from("staff_exceptions").delete().eq("member_id", c.memberId).eq("day", c.day);
+        if (error) throw error;
+      }
+      if (aPoner.length) {
+        const { error } = await supabase.from("staff_exceptions").upsert(aPoner.map((c) => ({
+          member_id: c.memberId,
+          day: c.day,
+          kind: c.pincel,
+          morning_start: c.shift?.morning?.start ?? null,
+          morning_end: c.shift?.morning?.end ?? null,
+          afternoon_start: c.shift?.afternoon?.start ?? null,
+          afternoon_end: c.shift?.afternoon?.end ?? null,
           updated_at: new Date().toISOString(),
         })), { onConflict: "member_id,day" });
         if (error) throw error;
       }
+      setPendientes(new Map());
       await load(month);
-      setDeshacer({ celdas, previas });
-      setMessage(celdas.length === 1 ? "Día marcado." : `${celdas.length} días marcados.`);
+      setDeshacer({ celdas: claves, previas });
+      setMessage(cambios.length === 1 ? "Guardado 1 cambio." : `Guardados ${cambios.length} cambios.`);
     } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo guardar lo marcado."));
+      setMessage(reportSafeError(cause, "No se pudieron guardar los cambios."));
     } finally {
       setBusy(false);
     }
   }
-  guardar.current = () => void terminarPintada();
+
+  async function alternarFestivos(dias: string[]) {
+    setBusy(true);
+    try {
+      const supabase = createClient();
+      for (const day of dias) {
+        const existe = holidays.some((h) => h.day === day);
+        const { error } = existe
+          ? await supabase.from("staff_holidays").delete().eq("day", day)
+          : await supabase.from("staff_holidays").insert({ day, name: "FESTIVO" });
+        if (error) throw error;
+      }
+      await load(month);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo cambiar el festivo."));
+    } finally {
+      setBusy(false);
+    }
+  }
+  guardar.current = () => { pintando.current = false; };
 
   /** Vuelve a dejar los días de la última pintada como estaban. */
   async function volverAtras() {
@@ -285,24 +382,6 @@ export function ScheduleManager() {
       setMessage("Cambio deshecho.");
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo deshacer."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleFestivo(day: string) {
-    if (!canEdit) return;
-    setBusy(true);
-    try {
-      const supabase = createClient();
-      const existe = holidays.some((h) => h.day === day);
-      const { error } = existe
-        ? await supabase.from("staff_holidays").delete().eq("day", day)
-        : await supabase.from("staff_holidays").insert({ day, name: "FESTIVO" });
-      if (error) throw error;
-      await load(month);
-    } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo cambiar el festivo."));
     } finally {
       setBusy(false);
     }
@@ -454,7 +533,18 @@ export function ScheduleManager() {
                   Ver a todos
                 </button>
               ) : null}
-              {canEdit && deshacer ? (
+              {canEdit && pendientes.size > 0 ? (
+                <div className="horario-pendientes">
+                  <strong>{pendientes.size === 1 ? "1 cambio sin guardar" : `${pendientes.size} cambios sin guardar`}</strong>
+                  <button type="button" className="button button-compact button-primary" disabled={busy} onClick={() => void guardarCambios()}>
+                    Guardar cambios
+                  </button>
+                  <button type="button" className="button button-compact button-secondary" disabled={busy} onClick={() => setPendientes(new Map())}>
+                    Descartar
+                  </button>
+                </div>
+              ) : null}
+              {canEdit && deshacer && pendientes.size === 0 ? (
                 <button type="button" className="button button-compact button-secondary horario-deshacer" disabled={busy} onClick={() => void volverAtras()}>
                   ↩ Deshacer {deshacer.celdas.length === 1 ? "el último cambio" : `los últimos ${deshacer.celdas.length} días`}
                 </button>
@@ -482,7 +572,10 @@ export function ScheduleManager() {
                     ) : null}
                   </div>
                 ) : null}
-                <small className="muted">Pulsa una celda, o arrastra para varias. Se guarda al soltar. El número del día marca o quita el festivo.</small>
+                <small className="muted">
+                  Pulsa una celda o arrastra para varias. El <strong>nombre</strong> marca el mes entero de esa persona y el
+                  <strong> número del día</strong>, toda la columna. Nada se guarda hasta que pulses Guardar.
+                </small>
               </div>
             ) : null}
           </section>
@@ -520,7 +613,7 @@ export function ScheduleManager() {
                         return (
                           <th key={day} className={festivo ? "horario-dia is-festivo" : "horario-dia"}>
                             {canEdit ? (
-                              <button type="button" disabled={busy} onClick={() => void toggleFestivo(day)} title={festivo ? "Quitar festivo" : "Marcar festivo"}>
+                              <button type="button" disabled={busy} onClick={() => marcarColumna(day)} title={pincel === "festivo" ? (festivo ? "Quitar festivo" : "Marcar festivo") : "Marcar toda la columna"}>
                                 <span className="dnum">{day.slice(8, 10)}</span>
                                 <span className="dlet">{weekdayInitial(day)}</span>
                               </button>
@@ -540,13 +633,19 @@ export function ScheduleManager() {
                       return (
                         <tr key={member.id} className={nuevoGrupo ? "horario-grupo" : undefined}>
                           <th scope="row" className="horario-nombre">
-                            {member.display_name}
-                            <span className="dept">{departamento?.name ?? "—"}</span>
+                            {canEdit ? (
+                              <button type="button" className="horario-nombre-boton" disabled={busy} onClick={() => marcarFila(member.id)} title="Marcar el mes entero de esta persona">
+                                {member.display_name}
+                                <span className="dept">{departamento?.name ?? "—"}</span>
+                              </button>
+                            ) : (
+                              <>{member.display_name}<span className="dept">{departamento?.name ?? "—"}</span></>
+                            )}
                           </th>
                           {dias.map((day) => {
                             const cell = fila?.cells[day] ?? { kind: "libre" as const };
                             const lineas = cellLines(cell);
-                            const marcada = pintadas.has(`${member.id}|${day}`);
+                            const marcada = pendientes.has(`${member.id}|${day}`);
                             return (
                               <td
                                 key={day}
@@ -572,6 +671,41 @@ export function ScheduleManager() {
                   Se ven {visibles.length} de {ordenados.length} personas. El PDF sigue saliendo con toda la plantilla.
                 </p>
               ) : null}
+
+              <div className="horario-resumenes">
+                <div>
+                  <h4>Ausencias no justificadas</h4>
+                  {sinJustificar.length === 0 ? (
+                    <p className="muted">Ninguna este mes.</p>
+                  ) : (
+                    <ul>
+                      {sinJustificar.map((a) => (
+                        <li key={`${a.persona}|${a.day}`}>
+                          <span>{a.persona}</span>
+                          <small>{a.day.slice(8, 10)}/{a.day.slice(5, 7)}</small>
+                          <strong>{a.horas ? `${cellLines({ kind: "trabaja", shift: a.horas, tardeLibre: false }).join(" · ")}` : "sin turno"}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div>
+                  <h4>Resto de ausencias: horas sueltas</h4>
+                  {horasSueltas.length === 0 ? (
+                    <p className="muted">Nadie ha dejado horas sueltas este mes.</p>
+                  ) : (
+                    <ul>
+                      {horasSueltas.map((a) => (
+                        <li key={`${a.persona}|${a.day}`}>
+                          <span>{a.persona}</span>
+                          <small>{a.day.slice(8, 10)}/{a.day.slice(5, 7)}</small>
+                          <strong>{a.faltan.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h menos</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
 
               <div className="horario-leyenda">
                 <span><i className="hc" /> Turno de trabajo</span>

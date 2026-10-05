@@ -138,3 +138,36 @@ test("los días laborables de un mes y sus semanas", async () => {
   assert.equal(weekNumber("2026-10-09"), 41);
   assert.equal(weekNumber("2026-10-12"), 42);
 });
+
+test("las horas que faltan respecto al turno de siempre", async () => {
+  const { missingHours, resolveDay } = await import("../src/lib/horarios/model.ts");
+  const habitual = { morning: { start: "08:00", end: "13:30" }, afternoon: { start: "15:30", end: "18:00" } };
+
+  const normal = resolveDay({ day: "2026-10-06", template: habitual, exception: null, holiday: null });
+  assert.equal(missingHours(normal, habitual), 0, "si hace su turno, no falta nada");
+
+  const tardeLibre = resolveDay({ day: "2026-10-06", template: habitual, exception: { memberId: "m", day: "2026-10-06", kind: "tarde_libre" }, holiday: null });
+  assert.equal(missingHours(tardeLibre, habitual), 2.5, "una tarde libre deja de hacer las 2,5 de la tarde");
+
+  const ausente = resolveDay({ day: "2026-10-06", template: habitual, exception: { memberId: "m", day: "2026-10-06", kind: "no_justificada" }, holiday: null });
+  assert.equal(missingHours(ausente, habitual), 8, "un día entero sin justificar son las 8");
+
+  const festivo = resolveDay({ day: "2026-10-09", template: habitual, exception: null, holiday: { day: "2026-10-09", name: "FESTIVO" } });
+  assert.equal(missingHours(festivo, habitual), 0, "un festivo no deja horas que recuperar");
+
+  const corto = resolveDay({
+    day: "2026-10-06",
+    template: habitual,
+    exception: { memberId: "m", day: "2026-10-06", kind: "horario", shift: { morning: { start: "08:00", end: "13:30" }, afternoon: { start: "15:30", end: "17:00" } } },
+    holiday: null,
+  });
+  assert.equal(missingHours(corto, habitual), 1, "irse una hora antes son 1 hora");
+  assert.equal(missingHours(corto, null), 0, "sin turno de siempre no hay con qué comparar");
+});
+
+test("la ausencia sin justificar se pinta como las demás", async () => {
+  const { cellLines, cellHours, resolveDay } = await import("../src/lib/horarios/model.ts");
+  const cell = resolveDay({ day: "2026-10-06", template: null, exception: { memberId: "m", day: "2026-10-06", kind: "no_justificada" }, holiday: null });
+  assert.deepEqual(cellLines(cell), ["SIN JUSTIFICAR"]);
+  assert.equal(cellHours(cell), 0);
+});
