@@ -2013,3 +2013,7 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .horario-lista-dia { color: var(--muted); font-weight: 800; font-size: 11.5px; }
 .horario-lista-persona { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .horario-lista-dato { white-space: nowrap; font-weight: 700; color: #b45309; }
+.horario-resumenes-barra { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.horario-resumenes-barra > span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.horario-resumenes-barra small { flex: 1 1 260px; font-size: 11.5px; }
+.horario-lista li:has(.horario-lista-persona:first-child) { grid-template-columns: minmax(0, 1fr) auto auto; }

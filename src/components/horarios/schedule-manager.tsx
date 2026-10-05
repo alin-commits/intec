@@ -108,6 +108,8 @@ export function ScheduleManager() {
   /** Lo que había antes de la última pintada, para poder volver atrás. */
   const [deshacer, setDeshacer] = useState<{ celdas: string[]; previas: ScheduleException[] } | null>(null);
   const [filtroDepartamento, setFiltroDepartamento] = useState("all");
+  /** Los repasos se pueden leer por persona (quién) o por día (cuándo). */
+  const [agrupar, setAgrupar] = useState<"persona" | "dia">("persona");
   const [busqueda, setBusqueda] = useState("");
 
   const dias = useMemo(() => monthWeekdays(month), [month]);
@@ -214,15 +216,18 @@ export function ScheduleManager() {
 
   const sinJustificar = useMemo(() => {
     const dia = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
+    const aLaVista = new Set(visibles.map((m) => m.id));
     return conPendientes
-      .filter((e) => e.kind === "no_justificada" && dias.includes(e.day))
+      .filter((e) => e.kind === "no_justificada" && dias.includes(e.day) && aLaVista.has(e.memberId))
       .map((e) => ({ persona: nombreDe.get(e.memberId) ?? "—", day: e.day, horas: turnoDe.get(`${e.memberId}|${dia(e.day) === 0 ? 7 : dia(e.day)}`) }))
       .sort((a, b) => a.day.localeCompare(b.day) || a.persona.localeCompare(b.persona));
-  }, [conPendientes, dias, nombreDe, turnoDe]);
+  }, [conPendientes, dias, nombreDe, turnoDe, visibles]);
 
   const horasSueltas = useMemo(() => {
     const salida: { persona: string; day: string; faltan: number }[] = [];
+    const aLaVista = new Set(visibles.map((m) => m.id));
     for (const fila of filas) {
+      if (!aLaVista.has(fila.memberId)) continue;
       for (const day of dias) {
         const cell = fila.cells[day];
         if (!cell || cell.kind === "festivo" || cell.kind === "ausencia") continue;
@@ -232,7 +237,21 @@ export function ScheduleManager() {
       }
     }
     return salida.sort((a, b) => b.faltan - a.faltan || a.day.localeCompare(b.day));
-  }, [filas, dias, nombreDe, turnoDe]);
+  }, [filas, dias, nombreDe, turnoDe, visibles]);
+
+  /** Lo mismo, pero juntando los días de cada persona: quién, cuánto y en cuántos días. */
+  const porPersona = (lista: { persona: string; faltan?: number }[]) => {
+    const mapa = new Map<string, { persona: string; dias: number; horas: number }>();
+    for (const item of lista) {
+      const fila = mapa.get(item.persona) ?? { persona: item.persona, dias: 0, horas: 0 };
+      fila.dias++;
+      fila.horas += item.faltan ?? 0;
+      mapa.set(item.persona, fila);
+    }
+    return [...mapa.values()].sort((a, b) => b.horas - a.horas || b.dias - a.dias || a.persona.localeCompare(b.persona));
+  };
+  const sinJustificarPorPersona = useMemo(() => porPersona(sinJustificar), [sinJustificar]);
+  const horasSueltasPorPersona = useMemo(() => porPersona(horasSueltas), [horasSueltas]);
 
   /** Las semanas del mes, para la cabecera con sus días debajo. */
   const semanas = useMemo(() => {
@@ -683,6 +702,19 @@ export function ScheduleManager() {
             </section>
 
           <section className="horario-resumenes">
+            <div className="horario-resumenes-barra">
+              <span>Cómo leerlo</span>
+              <div className="role-chip-group">
+                <button type="button" aria-pressed={agrupar === "persona"} className={agrupar === "persona" ? "role-chip active" : "role-chip"} onClick={() => setAgrupar("persona")}>Por persona</button>
+                <button type="button" aria-pressed={agrupar === "dia"} className={agrupar === "dia" ? "role-chip active" : "role-chip"} onClick={() => setAgrupar("dia")}>Día a día</button>
+              </div>
+              <small className="muted">
+                {visibles.length !== ordenados.length
+                  ? `Solo de las ${visibles.length} personas que estás viendo. Quita los filtros de arriba para verlo de toda la plantilla.`
+                  : "Usa el departamento o el buscador de arriba para acotar estas listas."}
+              </small>
+            </div>
+
             <article className="panel panel-padded">
               <div className="panel-heading">
                 <div>
@@ -692,7 +724,16 @@ export function ScheduleManager() {
                 <span className={sinJustificar.length ? "horario-cuenta is-alerta" : "horario-cuenta"}>{sinJustificar.length}</span>
               </div>
               {sinJustificar.length === 0 ? (
-                <p className="muted">Ninguna este mes.</p>
+                <p className="muted">Ninguna este mes{visibles.length !== ordenados.length ? " entre quienes estás viendo" : ""}.</p>
+              ) : agrupar === "persona" ? (
+                <ul className="horario-lista">
+                  {sinJustificarPorPersona.map((a) => (
+                    <li key={a.persona}>
+                      <span className="horario-lista-persona">{a.persona}</span>
+                      <span className="horario-lista-dato">{a.dias === 1 ? "1 día" : `${a.dias} días`}</span>
+                    </li>
+                  ))}
+                </ul>
               ) : (
                 <ul className="horario-lista">
                   {sinJustificar.map((a) => (
@@ -717,7 +758,17 @@ export function ScheduleManager() {
                 </span>
               </div>
               {horasSueltas.length === 0 ? (
-                <p className="muted">Nadie ha dejado horas sueltas este mes.</p>
+                <p className="muted">Nadie ha dejado horas sueltas este mes{visibles.length !== ordenados.length ? " entre quienes estás viendo" : ""}.</p>
+              ) : agrupar === "persona" ? (
+                <ul className="horario-lista">
+                  {horasSueltasPorPersona.map((a) => (
+                    <li key={a.persona}>
+                      <span className="horario-lista-persona">{a.persona}</span>
+                      <span className="horario-lista-dia">{a.dias === 1 ? "1 día" : `${a.dias} días`}</span>
+                      <span className="horario-lista-dato">{a.horas.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h</span>
+                    </li>
+                  ))}
+                </ul>
               ) : (
                 <ul className="horario-lista">
                   {horasSueltas.map((a) => (
