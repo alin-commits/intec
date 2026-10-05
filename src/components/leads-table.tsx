@@ -226,6 +226,15 @@ export function LeadsTable() {
     [team, draft.assignees],
   );
 
+  /**
+   * Pulsar una tarjeta filtra la lista por su estado, y volver a pulsarla lo
+   * quita. Las cuatro hablan del mismo filtro —"Estado"—, así que "Conversión"
+   * y "Valor ganado" llevan las dos a los ganados, y "Leads" lo deja en todos.
+   */
+  const filtrarPorEstado = (destino: string) => () => {
+    setStatus((actual) => (destino !== "all" && actual === destino ? "all" : destino));
+  };
+
   const leadSummary = useMemo(() => {
     const won = visibleRows.filter((lead) => lead.status === "won");
     return {
@@ -579,10 +588,10 @@ export function LeadsTable() {
         </div>
       </CollapsibleFilters>
       <section className="kpi-grid">
-        <KpiCard label="Leads" value={numberFormatter.format(leadSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<LeadsIcon />} tone="sky" />
-        <KpiCard label="Sin contactar" value={numberFormatter.format(leadSummary.fresh)} delta="Sin comparación" helper="en estado nuevo" icon={<PlusCircleIcon />} tone={leadSummary.fresh > 0 ? "rose" : "indigo"} />
-        <KpiCard label="Conversión" value={formatPercent(leadSummary.conversion)} delta="Sin comparación" helper={`${numberFormatter.format(leadSummary.won)} ganados`} icon={<ConversionIcon />} tone="emerald" />
-        <KpiCard label="Valor ganado" value={currencyFormatter.format(leadSummary.value)} delta="Sin comparación" helper="de los leads ganados" icon={<EuroIcon />} tone="amber" />
+        <KpiCard label="Leads" value={numberFormatter.format(leadSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<LeadsIcon />} tone="sky" onClick={filtrarPorEstado("all")} actionLabel="Ver todos" active={status === "all"} />
+        <KpiCard label="Sin contactar" value={numberFormatter.format(leadSummary.fresh)} delta="Sin comparación" helper="en estado nuevo" icon={<PlusCircleIcon />} tone={leadSummary.fresh > 0 ? "rose" : "indigo"} onClick={filtrarPorEstado("new")} actionLabel={status === "new" ? "Quitar filtro" : "Ver los nuevos"} active={status === "new"} />
+        <KpiCard label="Conversión" value={formatPercent(leadSummary.conversion)} delta="Sin comparación" helper={`${numberFormatter.format(leadSummary.won)} ganados`} icon={<ConversionIcon />} tone="emerald" onClick={filtrarPorEstado("won")} actionLabel={status === "won" ? "Quitar filtro" : "Ver los ganados"} active={status === "won"} />
+        <KpiCard label="Valor ganado" value={currencyFormatter.format(leadSummary.value)} delta="Sin comparación" helper="de los leads ganados" icon={<EuroIcon />} tone="amber" onClick={filtrarPorEstado("won")} actionLabel={status === "won" ? "Quitar filtro" : "Ver los ganados"} active={status === "won"} />
       </section>
       <section className="panel table-panel">
         <div className="table-scroll">
