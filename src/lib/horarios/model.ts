@@ -134,6 +134,31 @@ export function buildWeek(input: {
   });
 }
 
+/** Los días laborables (lunes a viernes) de un mes, en orden. */
+export function monthWeekdays(monthKey: string): string[] {
+  const [year, month] = monthKey.split("-").map(Number);
+  const dias: string[] = [];
+  const cursor = new Date(Date.UTC(year, month - 1, 1));
+  while (cursor.getUTCMonth() === month - 1) {
+    const d = cursor.getUTCDay();
+    if (d >= 1 && d <= 5) dias.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dias;
+}
+
+/** El número de semana del año, como lo numera el cuadrante de papel. */
+export function weekNumber(day: string): number {
+  const d = new Date(`${day}T00:00:00Z`);
+  const jueves = new Date(d);
+  jueves.setUTCDate(d.getUTCDate() + (4 - weekdayOf(day)));
+  const primero = new Date(Date.UTC(jueves.getUTCFullYear(), 0, 1));
+  return Math.ceil(((jueves.getTime() - primero.getTime()) / 86400000 + 1) / 7);
+}
+
+/** La inicial del día que va bajo el número en la cabecera: L, M, X, J, V. */
+export const weekdayInitial = (day: string): string => ["L", "M", "X", "J", "V", "S", "D"][weekdayOf(day) - 1];
+
 const DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
 export const weekdayName = (day: string): string => DIAS[weekdayOf(day) - 1];
 

@@ -121,3 +121,20 @@ test("la semana entera: horas, festivo y en qué día cae la tarde libre", () =>
 test("una semana sin nadie ni nada no revienta", () => {
   assert.deepEqual(buildWeek({ days: weekDays("2026-10-05"), memberIds: [], templates: [], exceptions: [], holidays: [] }), []);
 });
+
+test("los días laborables de un mes y sus semanas", async () => {
+  const { monthWeekdays, weekNumber, weekdayInitial } = await import("../src/lib/horarios/model.ts");
+  const dias = monthWeekdays("2026-10");
+  assert.equal(dias.length, 22, "octubre de 2026 tiene 22 días laborables");
+  assert.equal(dias[0], "2026-10-01", "empieza el jueves 1");
+  assert.equal(dias[dias.length - 1], "2026-10-30");
+  assert.ok(!dias.includes("2026-10-03"), "el sábado 3 no está");
+  assert.ok(!dias.includes("2026-10-04"), "el domingo 4 tampoco");
+  assert.equal(weekdayInitial("2026-10-01"), "J");
+  assert.equal(weekdayInitial("2026-10-05"), "L");
+  assert.equal(weekdayInitial("2026-10-07"), "X");
+  // La semana del 5 al 9 de octubre es la 41, como en el cuadrante de papel.
+  assert.equal(weekNumber("2026-10-05"), 41);
+  assert.equal(weekNumber("2026-10-09"), 41);
+  assert.equal(weekNumber("2026-10-12"), 42);
+});

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MonthField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { PageLoader } from "@/components/ui/page-loader";
 import { SCHEDULE_EDIT_ROLES, SCHEDULE_ROLES, hasAnyRole } from "@/lib/constants";
 import { reportSafeError } from "@/lib/errors";
@@ -13,8 +14,11 @@ import { exportSchedulePdf } from "@/lib/horarios/schedule-pdf";
 import {
   buildWeek,
   cellLines,
+  monthWeekdays,
   weekDays,
+  weekNumber,
   weekStartOf,
+  weekdayInitial,
   weekdayName,
   type DayCell,
   type DayShift,
@@ -25,72 +29,45 @@ import {
 } from "@/lib/horarios/model";
 
 /*
-  El cuadrante de horarios, semana a semana.
+  El cuadrante de horarios: el mes entero de un vistazo y editable encima.
 
-  Lo que se ve es el mismo papel de siempre: departamentos a la izquierda, de
-  lunes a viernes, mañana arriba y tarde abajo. Lo que cambia es que debajo no
-  hay 500 celdas escritas a mano, sino el turno habitual de cada persona y las
-  cuatro cosas que se salen de él esa semana.
+  Debajo no hay una celda guardada por persona y día —serían más de quinientas
+  al mes y nadie las mantendría—, sino el turno habitual de cada uno y las pocas
+  cosas que se salen de él. Lo que se ve aquí es el resultado de juntar ambas.
+
+  Se edita como una hoja de cálculo: se elige arriba qué marcar y se pinta sobre
+  las celdas, arrastrando si son varias. Todo lo pintado se guarda de una vez al
+  soltar el ratón, no celda a celda.
 */
 
 type Department = { id: string; name: string; sort_order: number };
 type Member = { id: string; department_id: string; display_name: string; sort_order: number; is_active: boolean };
 type WeekNote = { week_start: string; note: string };
+/** Lo que se puede pintar. "habitual" borra la excepción y deja el turno de siempre. */
+type Pincel = ExceptionKind | "habitual";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
-const DIAS_CABECERA = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES"];
-
-const monthKeyOf = (day: string) => day.slice(0, 7);
 const todayMonth = () => new Date().toISOString().slice(0, 7);
 
-/** Las semanas (su lunes) que tocan algún día de ese mes, de lunes a viernes. */
-export function weeksOfMonth(monthKey: string): string[] {
-  const [year, month] = monthKey.split("-").map(Number);
-  const semanas: string[] = [];
-  const cursor = new Date(Date.UTC(year, month - 1, 1));
-  const fin = new Date(Date.UTC(year, month, 0));
-  let lunes = weekStartOf(cursor.toISOString().slice(0, 10));
-  while (lunes <= fin.toISOString().slice(0, 10)) {
-    // Una semana cuenta si alguno de sus días laborables cae dentro del mes.
-    if (weekDays(lunes).some((d) => monthKeyOf(d) === monthKey)) semanas.push(lunes);
-    const siguiente = new Date(`${lunes}T00:00:00Z`);
-    siguiente.setUTCDate(siguiente.getUTCDate() + 7);
-    lunes = siguiente.toISOString().slice(0, 10);
-  }
-  return semanas;
-}
-
-/** El número de semana del año, como lo numera el cuadrante de papel. */
-export function weekNumber(day: string): number {
-  const d = new Date(`${day}T00:00:00Z`);
-  const jueves = new Date(d);
-  jueves.setUTCDate(d.getUTCDate() + 3);
-  const primero = new Date(Date.UTC(jueves.getUTCFullYear(), 0, 1));
-  return Math.ceil(((jueves.getTime() - primero.getTime()) / 86400000 + 1) / 7);
-}
-
-const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
-export function rangeLabel(weekStart: string): string {
-  const dias = weekDays(weekStart);
-  const ultimo = dias[dias.length - 1];
-  return `DEL ${dias[0].slice(8, 10)} AL ${ultimo.slice(8, 10)} DE ${MESES[Number(ultimo.slice(5, 7)) - 1].toUpperCase()}`;
-}
-
-const TIPOS: { kind: ExceptionKind; label: string }[] = [
-  { kind: "vacaciones", label: "Vacaciones" },
-  { kind: "baja", label: "Baja" },
-  { kind: "permiso", label: "Permiso" },
-  { kind: "tarde_libre", label: "Tarde libre" },
-  { kind: "horario", label: "Otro horario" },
-  { kind: "no_trabaja", label: "No trabaja" },
+const PINCELES: { kind: Pincel; label: string; clase: string }[] = [
+  { kind: "habitual", label: "Turno de siempre", clase: "p-habitual" },
+  { kind: "vacaciones", label: "Vacaciones", clase: "p-ausencia" },
+  { kind: "baja", label: "Baja", clase: "p-ausencia" },
+  { kind: "permiso", label: "Permiso", clase: "p-ausencia" },
+  { kind: "tarde_libre", label: "Tarde libre", clase: "p-tarde" },
+  { kind: "horario", label: "Otro horario", clase: "p-horario" },
+  { kind: "no_trabaja", label: "No trabaja", clase: "p-libre" },
 ];
 
-const cellClass = (cell: DayCell) => {
-  if (cell.kind === "festivo") return "horario-celda is-festivo";
-  if (cell.kind === "ausencia") return "horario-celda is-ausencia";
-  if (cell.kind === "libre") return "horario-celda is-libre";
-  return cell.tardeLibre ? "horario-celda is-tarde-libre" : "horario-celda";
+const claseDe = (cell: DayCell) => {
+  if (cell.kind === "festivo") return "hc is-festivo";
+  if (cell.kind === "ausencia") return "hc is-ausencia";
+  if (cell.kind === "libre") return "hc is-libre";
+  return cell.tardeLibre ? "hc is-tarde-libre" : "hc";
 };
+
+/** "08:00 - 13:30" no cabe en una columna de día: aquí se acorta a "8–13:30". */
+const corto = (linea: string) => linea.replace(/\s*-\s*/, "–").replace(/:00/g, "").replace(/\b0(\d)/g, "$1");
 
 export function ScheduleManager() {
   const configured = isSupabaseConfigured();
@@ -98,9 +75,10 @@ export function ScheduleManager() {
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(configured);
   const [message, setMessage] = useState<string | null>(null);
+  const [faltaMigracion, setFaltaMigracion] = useState(false);
 
   const [month, setMonth] = useState(todayMonth);
-  const [weekStart, setWeekStart] = useState(() => weeksOfMonth(todayMonth())[0] ?? weekStartOf(new Date().toISOString().slice(0, 10)));
+  const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -109,14 +87,21 @@ export function ScheduleManager() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [notes, setNotes] = useState<WeekNote[]>([]);
 
-  const [editing, setEditing] = useState<{ member: Member; day: string; current: DayCell } | null>(null);
+  const [pincel, setPincel] = useState<Pincel>("vacaciones");
+  const [horas, setHoras] = useState({ m1: "08:00", m2: "14:00", t1: "", t2: "" });
+  /** Lo pintado en el arrastre en curso, para verlo antes de guardarlo. */
+  const [pintadas, setPintadas] = useState<Set<string>>(new Set());
+  const pintando = useRef(false);
+  const acumulado = useRef<Set<string>>(new Set());
+  const guardar = useRef<() => void>(() => {});
+
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
-  /** true mientras no se hayan aplicado las migraciones del cuadrante. */
-  const [faltaMigracion, setFaltaMigracion] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(false);
+  const [nuevo, setNuevo] = useState({ nombre: "", departamento: "" });
+  const [borrando, setBorrando] = useState<Member | null>(null);
 
-  const semanas = useMemo(() => weeksOfMonth(month), [month]);
-  const dias = useMemo(() => weekDays(weekStart), [weekStart]);
+  const dias = useMemo(() => monthWeekdays(month), [month]);
 
   useEffect(() => {
     if (!configured) return;
@@ -128,15 +113,19 @@ export function ScheduleManager() {
       await load(month);
       setLoading(false);
     })();
-    // La carga de cada mes se pide aparte, más abajo.
   }, [configured]);
 
-  // Al cambiar de mes se recoloca la semana y se traen sus excepciones.
-  const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
   useEffect(() => {
     if (!configured || access !== "allowed" || loadedMonth === month) return;
     void load(month);
   }, [configured, access, month, loadedMonth]);
+
+  // Soltar el ratón fuera de la tabla también termina de pintar.
+  useEffect(() => {
+    const soltar = () => guardar.current();
+    window.addEventListener("mouseup", soltar);
+    return () => window.removeEventListener("mouseup", soltar);
+  }, []);
 
   async function load(target: string) {
     const supabase = createClient();
@@ -152,21 +141,16 @@ export function ScheduleManager() {
     ]);
     const fallo = dep.error ?? mem.error ?? tpl.error ?? exc.error ?? fes.error ?? not_.error;
     if (fallo) {
-      // Entre que se despliega el código y se ejecuta la migración pasan
-      // minutos, y "no se pudo cargar" suena a roto cuando lo que falta es un
-      // paso. Si las tablas no están todavía, se dice.
       const codigo = (fallo as { code?: string }).code ?? "";
-      setFaltaMigracion(codigo === "PGRST205" || codigo === "42P01");
-      if (codigo !== "PGRST205" && codigo !== "42P01") setMessage(reportSafeError(fallo, "No se pudo cargar el cuadrante."));
+      const faltan = codigo === "PGRST205" || codigo === "42P01";
+      setFaltaMigracion(faltan);
+      if (!faltan) setMessage(reportSafeError(fallo, "No se pudo cargar el cuadrante."));
+      setLoadedMonth(target);
       return;
     }
     setFaltaMigracion(false);
-
     const slot = (a: string | null, b: string | null) => (a && b ? { start: a, end: b } : null);
-    const shiftOf = (r: Record<string, string | null>): DayShift => ({
-      morning: slot(r.morning_start, r.morning_end),
-      afternoon: slot(r.afternoon_start, r.afternoon_end),
-    });
+    const shiftOf = (r: Record<string, string | null>): DayShift => ({ morning: slot(r.morning_start, r.morning_end), afternoon: slot(r.afternoon_start, r.afternoon_end) });
     setDepartments((dep.data ?? []) as Department[]);
     setMembers((mem.data ?? []) as Member[]);
     setTemplates((tpl.data ?? []).map((r) => ({ memberId: r.member_id as string, weekday: Number(r.weekday), shift: shiftOf(r as never) })));
@@ -174,56 +158,91 @@ export function ScheduleManager() {
     setHolidays((fes.data ?? []).map((r) => ({ day: String(r.day), name: String(r.name) })));
     setNotes((not_.data ?? []) as WeekNote[]);
     setLoadedMonth(target);
-    if (!weeksOfMonth(target).includes(weekStart)) setWeekStart(weeksOfMonth(target)[0] ?? weekStart);
   }
 
-  const ordered = useMemo(() => {
-    const porDepartamento = new Map(departments.map((d) => [d.id, d]));
-    return [...members].sort((a, b) => {
-      const da = porDepartamento.get(a.department_id)?.sort_order ?? 0;
-      const db = porDepartamento.get(b.department_id)?.sort_order ?? 0;
-      return da - db || a.sort_order - b.sort_order || a.display_name.localeCompare(b.display_name);
-    });
+  const ordenados = useMemo(() => {
+    const pos = new Map(departments.map((d) => [d.id, d.sort_order]));
+    return [...members].sort((a, b) =>
+      (pos.get(a.department_id) ?? 0) - (pos.get(b.department_id) ?? 0)
+      || a.sort_order - b.sort_order
+      || a.display_name.localeCompare(b.display_name));
   }, [members, departments]);
 
-  const rows = useMemo(
-    () => buildWeek({ days: dias, memberIds: ordered.map((m) => m.id), templates, exceptions, holidays }),
-    [dias, ordered, templates, exceptions, holidays],
+  const filas = useMemo(
+    () => buildWeek({ days: dias, memberIds: ordenados.map((m) => m.id), templates, exceptions, holidays }),
+    [dias, ordenados, templates, exceptions, holidays],
   );
-  const rowOf = useMemo(() => new Map(rows.map((r) => [r.memberId, r])), [rows]);
-  const noteOf = (semana: string) => notes.find((n) => n.week_start === semana)?.note ?? "";
+  const filaDe = useMemo(() => new Map(filas.map((f) => [f.memberId, f])), [filas]);
 
-  async function saveException(kind: ExceptionKind | null, shift?: DayShift) {
-    if (!editing) return;
+  /** Las semanas del mes, para la cabecera con sus días debajo. */
+  const semanas = useMemo(() => {
+    const grupos: { numero: number; dias: string[] }[] = [];
+    for (const day of dias) {
+      const n = weekNumber(day);
+      const ultimo = grupos[grupos.length - 1];
+      if (ultimo && ultimo.numero === n) ultimo.dias.push(day);
+      else grupos.push({ numero: n, dias: [day] });
+    }
+    return grupos;
+  }, [dias]);
+
+  // ---------- Pintar ----------
+
+  function pintar(memberId: string, day: string) {
+    if (!canEdit || holidays.some((h) => h.day === day)) return;
+    acumulado.current.add(`${memberId}|${day}`);
+    setPintadas(new Set(acumulado.current));
+  }
+
+  function empezarPintada(memberId: string, day: string) {
+    if (!canEdit) return;
+    pintando.current = true;
+    acumulado.current = new Set();
+    pintar(memberId, day);
+  }
+
+  async function terminarPintada() {
+    if (!pintando.current) return;
+    pintando.current = false;
+    const celdas = [...acumulado.current];
+    acumulado.current = new Set();
+    setPintadas(new Set());
+    if (celdas.length === 0) return;
     setBusy(true);
     try {
       const supabase = createClient();
-      if (kind === null) {
-        const { error } = await supabase.from("staff_exceptions").delete().eq("member_id", editing.member.id).eq("day", editing.day);
-        if (error) throw error;
+      const partes = celdas.map((c) => c.split("|"));
+      if (pincel === "habitual") {
+        for (const [memberId, day] of partes) {
+          const { error } = await supabase.from("staff_exceptions").delete().eq("member_id", memberId).eq("day", day);
+          if (error) throw error;
+        }
       } else {
-        const { error } = await supabase.from("staff_exceptions").upsert({
-          member_id: editing.member.id,
-          day: editing.day,
-          kind,
-          morning_start: shift?.morning?.start ?? null,
-          morning_end: shift?.morning?.end ?? null,
-          afternoon_start: shift?.afternoon?.start ?? null,
-          afternoon_end: shift?.afternoon?.end ?? null,
+        const conHoras = pincel === "horario" || pincel === "tarde_libre";
+        const { error } = await supabase.from("staff_exceptions").upsert(partes.map(([memberId, day]) => ({
+          member_id: memberId,
+          day,
+          kind: pincel,
+          morning_start: conHoras && horas.m1 && horas.m2 ? horas.m1 : null,
+          morning_end: conHoras && horas.m1 && horas.m2 ? horas.m2 : null,
+          afternoon_start: pincel === "horario" && horas.t1 && horas.t2 ? horas.t1 : null,
+          afternoon_end: pincel === "horario" && horas.t1 && horas.t2 ? horas.t2 : null,
           updated_at: new Date().toISOString(),
-        }, { onConflict: "member_id,day" });
+        })), { onConflict: "member_id,day" });
         if (error) throw error;
       }
       await load(month);
-      setEditing(null);
+      setMessage(celdas.length === 1 ? "Día marcado." : `${celdas.length} días marcados.`);
     } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo guardar el cambio."));
+      setMessage(reportSafeError(cause, "No se pudo guardar lo marcado."));
     } finally {
       setBusy(false);
     }
   }
+  guardar.current = () => void terminarPintada();
 
-  async function toggleHoliday(day: string) {
+  async function toggleFestivo(day: string) {
+    if (!canEdit) return;
     setBusy(true);
     try {
       const supabase = createClient();
@@ -253,27 +272,72 @@ export function ScheduleManager() {
     }
   }
 
+  // ---------- Personal ----------
+
+  async function anadirPersona() {
+    if (!nuevo.nombre.trim() || !nuevo.departamento) { setMessage("Pon el nombre y el departamento."); return; }
+    setBusy(true);
+    try {
+      const hermanos = members.filter((m) => m.department_id === nuevo.departamento);
+      const { error } = await createClient().from("staff_members").insert({
+        department_id: nuevo.departamento,
+        display_name: nuevo.nombre.trim().toUpperCase(),
+        sort_order: Math.max(0, ...hermanos.map((h) => h.sort_order)) + 1,
+      });
+      if (error) throw error;
+      setNuevo({ nombre: "", departamento: nuevo.departamento });
+      await load(month);
+      setMessage("Persona añadida. Márcale su turno pintando sobre el cuadrante.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo añadir."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function quitarPersona() {
+    if (!borrando) return;
+    setBusy(true);
+    try {
+      // Se desactiva en vez de borrarse: los meses pasados tienen que seguir
+      // contando lo que ocurrió de verdad.
+      const { error } = await createClient().from("staff_members").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", borrando.id);
+      if (error) throw error;
+      setBorrando(null);
+      await load(month);
+      setMessage("Persona quitada del cuadrante.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo quitar."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- PDF ----------
+
   async function exportPdf() {
     setPdfBusy(true);
     try {
+      const lunes = [...new Set(dias.map(weekStartOf))];
       await exportSchedulePdf({
         monthLabel: `${MESES[Number(month.slice(5, 7)) - 1].toUpperCase()} ${month.slice(0, 4)}`,
         filename: `horario_${month}.pdf`,
-        weeks: semanas.map((semana) => {
-          const dias = weekDays(semana);
-          const filas = buildWeek({ days: dias, memberIds: ordered.map((m) => m.id), templates, exceptions, holidays });
-          const porId = new Map(filas.map((f) => [f.memberId, f]));
+        weeks: lunes.map((semana) => {
+          const diasSemana = weekDays(semana);
+          const hechas = buildWeek({ days: diasSemana, memberIds: ordenados.map((m) => m.id), templates, exceptions, holidays });
+          const porId = new Map(hechas.map((f) => [f.memberId, f]));
+          const ultimo = diasSemana[diasSemana.length - 1];
           return {
             number: weekNumber(semana),
-            range: rangeLabel(semana),
-            note: noteOf(semana),
-            days: dias,
-            rows: ordered.map((m) => {
+            range: `DEL ${semana.slice(8, 10)} AL ${ultimo.slice(8, 10)} DE ${MESES[Number(ultimo.slice(5, 7)) - 1].toUpperCase()}`,
+            note: notes.find((n) => n.week_start === semana)?.note ?? "",
+            days: diasSemana,
+            rows: ordenados.map((m) => {
               const fila = porId.get(m.id)!;
               return {
                 department: departments.find((d) => d.id === m.department_id)?.name ?? "",
                 person: m.display_name,
-                cells: dias.map((d) => fila.cells[d]),
+                cells: diasSemana.map((d) => fila.cells[d]),
                 tardeLibre: fila.tardeLibreDay ? weekdayName(fila.tardeLibreDay).toUpperCase() : "",
               };
             }),
@@ -299,151 +363,203 @@ export function ScheduleManager() {
     );
   }
 
-  const sinPlantilla = members.length === 0;
-
   return (
     <div className="page-stack">
       <section className="section-heading">
         <div>
           <span className="eyebrow">Administración</span>
           <h2>Horarios</h2>
-          <p>El turno de siempre de cada persona, y encima lo que cambia esta semana: festivos, vacaciones, bajas y tardes libres.</p>
+          <p>El turno de siempre de cada persona y, encima, lo que cambia: festivos, vacaciones, bajas y tardes libres.</p>
         </div>
         <div className="panel-heading-trailing">
-          <button type="button" className="button button-secondary" disabled={pdfBusy || sinPlantilla} onClick={() => void exportPdf()}>
-            {pdfBusy ? "Generando…" : "Exportar PDF del mes"}
+          {canEdit ? <button type="button" className="button button-secondary" onClick={() => setPersonalOpen(true)}>Personal</button> : null}
+          <button type="button" className="button button-primary" disabled={pdfBusy || members.length === 0} onClick={() => void exportPdf()}>
+            {pdfBusy ? "Generando…" : "Exportar PDF"}
           </button>
         </div>
       </section>
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
 
-      <section className="panel panel-padded horario-controles">
-        <label><span>Mes</span><MonthField value={month} onChange={(value) => setMonth(value || todayMonth())} /></label>
-        <div className="horario-semanas" role="tablist" aria-label="Semanas del mes">
-          {semanas.map((semana) => (
-            <button
-              key={semana}
-              type="button"
-              role="tab"
-              aria-selected={semana === weekStart}
-              className={semana === weekStart ? "view-tab active" : "view-tab"}
-              onClick={() => setWeekStart(semana)}
-            >
-              Semana {weekNumber(semana)}
-            </button>
-          ))}
-        </div>
-      </section>
-
       {faltaMigracion ? (
         <section className="panel panel-padded">
           <h3>Falta aplicar la migración del cuadrante</h3>
-          <p className="muted">
-            Las tablas de horarios todavía no existen en la base de datos. En cuanto se ejecute
-            <strong> 202610050001_horarios.sql</strong>, esta pestaña empieza a funcionar.
-          </p>
-        </section>
-      ) : sinPlantilla ? (
-        <section className="panel panel-padded">
-          <h3>Todavía no hay nadie en el cuadrante</h3>
-          <p className="muted">En cuanto se cargue la plantilla y su turno habitual, aquí sale el cuadrante de cada semana.</p>
+          <p className="muted">Las tablas de horarios todavía no existen. Ejecuta <strong>202610050001_horarios.sql</strong> y esta pestaña empieza a funcionar.</p>
         </section>
       ) : (
-        <section className="panel table-panel horario-panel">
-          <div className="panel-heading horario-cabecera">
-            <div>
-              <h3>Semana {weekNumber(weekStart)}</h3>
-              <p className="panel-subtitle">{rangeLabel(weekStart)}</p>
-            </div>
+        <>
+          <section className="panel panel-padded horario-barra">
+            <label className="horario-mes"><span>Mes</span><MonthField value={month} onChange={(value) => setMonth(value || todayMonth())} /></label>
             {canEdit ? (
-              <input
-                className="horario-aviso"
-                defaultValue={noteOf(weekStart)}
-                placeholder="Aviso de la semana (por ejemplo: NO SE LIBRA POR FESTIVO 09/10)"
-                onBlur={(event) => void saveNote(weekStart, event.target.value)}
-              />
-            ) : noteOf(weekStart) ? <strong className="horario-aviso-texto">{noteOf(weekStart)}</strong> : null}
-          </div>
-
-          <div className="table-scroll">
-            <table className="horario-tabla">
-              <thead>
-                <tr>
-                  <th>Departamento</th>
-                  <th>Persona</th>
-                  {dias.map((day, i) => (
-                    <th key={day}>
-                      {DIAS_CABECERA[i]}
-                      <small>{dayLabel(day)}</small>
-                      {canEdit ? (
-                        <button type="button" className="horario-festivo-toggle" disabled={busy} onClick={() => void toggleHoliday(day)}>
-                          {holidays.some((h) => h.day === day) ? "quitar festivo" : "marcar festivo"}
-                        </button>
-                      ) : null}
-                    </th>
+              <div className="horario-pinceles">
+                <span>Marcar pintando</span>
+                <div className="role-chip-group">
+                  {PINCELES.map((p) => (
+                    <button key={p.kind} type="button" aria-pressed={pincel === p.kind} className={pincel === p.kind ? `role-chip active ${p.clase}` : `role-chip ${p.clase}`} onClick={() => setPincel(p.kind)}>
+                      {p.label}
+                    </button>
                   ))}
-                  <th>Tarde libre</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ordered.map((member, index) => {
-                  const fila = rowOf.get(member.id);
-                  const departamento = departments.find((d) => d.id === member.department_id);
-                  const primeroDelGrupo = index === 0 || ordered[index - 1].department_id !== member.department_id;
-                  const cuantos = ordered.filter((m) => m.department_id === member.department_id).length;
-                  return (
-                    <tr key={member.id}>
-                      {primeroDelGrupo ? <th scope="rowgroup" rowSpan={cuantos} className="horario-departamento">{departamento?.name ?? "—"}</th> : null}
-                      <td className="horario-persona">{member.display_name}</td>
+                </div>
+                {pincel === "horario" || pincel === "tarde_libre" ? (
+                  <div className="horario-horas">
+                    <label><small>Mañana</small><input type="time" value={horas.m1} onChange={(e) => setHoras((h) => ({ ...h, m1: e.target.value }))} /></label>
+                    <label><small>a</small><input type="time" value={horas.m2} onChange={(e) => setHoras((h) => ({ ...h, m2: e.target.value }))} /></label>
+                    {pincel === "horario" ? (
+                      <>
+                        <label><small>Tarde</small><input type="time" value={horas.t1} onChange={(e) => setHoras((h) => ({ ...h, t1: e.target.value }))} /></label>
+                        <label><small>a</small><input type="time" value={horas.t2} onChange={(e) => setHoras((h) => ({ ...h, t2: e.target.value }))} /></label>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                <small className="muted">Pulsa una celda, o arrastra para varias. Se guarda al soltar. El número del día marca o quita el festivo.</small>
+              </div>
+            ) : null}
+          </section>
+
+          {members.length === 0 ? (
+            <section className="panel panel-padded">
+              <h3>Todavía no hay nadie en el cuadrante</h3>
+              <p className="muted">Añade personas desde el botón «Personal» y márcales su turno pintando sobre las celdas.</p>
+            </section>
+          ) : (
+            <section className="panel table-panel horario-panel">
+              <div className="table-scroll">
+                <table className="horario-mes-tabla">
+                  <thead>
+                    <tr>
+                      <th className="horario-esquina" rowSpan={2}>Persona / departamento</th>
+                      {semanas.map((s) => (
+                        <th key={s.numero} className="horario-semana-cabecera" colSpan={s.dias.length}>
+                          <span>Semana {s.numero}</span>
+                          {canEdit ? (
+                            <input
+                              className="horario-aviso-mini"
+                              defaultValue={notes.find((n) => n.week_start === weekStartOf(s.dias[0]))?.note ?? ""}
+                              placeholder="aviso de la semana…"
+                              onBlur={(event) => void saveNote(weekStartOf(s.dias[0]), event.target.value)}
+                            />
+                          ) : null}
+                        </th>
+                      ))}
+                      <th className="horario-total-cabecera" rowSpan={2}>Horas</th>
+                    </tr>
+                    <tr>
                       {dias.map((day) => {
-                        const cell = fila?.cells[day] ?? { kind: "libre" as const };
-                        const lineas = cellLines(cell);
+                        const festivo = holidays.some((h) => h.day === day);
                         return (
-                          <td key={day} className={cellClass(cell)}>
+                          <th key={day} className={festivo ? "horario-dia is-festivo" : "horario-dia"}>
                             {canEdit ? (
-                              <button type="button" className="horario-celda-boton" onClick={() => setEditing({ member, day, current: cell })}>
-                                {lineas.length ? lineas.map((l) => <span key={l}>{l}</span>) : <span className="muted">—</span>}
+                              <button type="button" disabled={busy} onClick={() => void toggleFestivo(day)} title={festivo ? "Quitar festivo" : "Marcar festivo"}>
+                                <span className="dnum">{day.slice(8, 10)}</span>
+                                <span className="dlet">{weekdayInitial(day)}</span>
                               </button>
                             ) : (
-                              lineas.length ? lineas.map((l) => <span key={l}>{l}</span>) : <span className="muted">—</span>
+                              <><span className="dnum">{day.slice(8, 10)}</span><span className="dlet">{weekdayInitial(day)}</span></>
                             )}
-                          </td>
+                          </th>
                         );
                       })}
-                      <td className="horario-tarde-libre">{fila?.tardeLibreDay ? weekdayName(fila.tardeLibreDay).toUpperCase() : ""}</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                  </thead>
+                  <tbody>
+                    {ordenados.map((member, index) => {
+                      const fila = filaDe.get(member.id);
+                      const departamento = departments.find((d) => d.id === member.department_id);
+                      const nuevoGrupo = index === 0 || ordenados[index - 1].department_id !== member.department_id;
+                      return (
+                        <tr key={member.id} className={nuevoGrupo ? "horario-grupo" : undefined}>
+                          <th scope="row" className="horario-nombre">
+                            {member.display_name}
+                            <span className="dept">{departamento?.name ?? "—"}</span>
+                          </th>
+                          {dias.map((day) => {
+                            const cell = fila?.cells[day] ?? { kind: "libre" as const };
+                            const lineas = cellLines(cell);
+                            const marcada = pintadas.has(`${member.id}|${day}`);
+                            return (
+                              <td
+                                key={day}
+                                className={marcada ? `${claseDe(cell)} is-pintando` : claseDe(cell)}
+                                title={`${member.display_name} · ${day.slice(8, 10)}/${day.slice(5, 7)}: ${lineas.join(" · ") || "no trabaja"}`}
+                                onMouseDown={() => empezarPintada(member.id, day)}
+                                onMouseEnter={() => { if (pintando.current) pintar(member.id, day); }}
+                              >
+                                {lineas.map((l) => <span key={l}>{corto(l)}</span>)}
+                              </td>
+                            );
+                          })}
+                          <td className="horario-total">{fila ? fila.hours.toLocaleString("es-ES", { maximumFractionDigits: 1 }) : "0"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="horario-leyenda">
+                <span><i className="hc" /> Turno de trabajo</span>
+                <span><i className="hc is-tarde-libre" /> Tarde libre</span>
+                <span><i className="hc is-ausencia" /> Vacaciones, baja o permiso</span>
+                <span><i className="hc is-festivo" /> Festivo</span>
+                <span><i className="hc is-libre" /> No trabaja</span>
+              </div>
+            </section>
+          )}
+        </>
       )}
 
-      <Modal open={Boolean(editing)} title={editing ? `${editing.member.display_name} · ${dayLabel(editing.day)}` : ""} eyebrow="Cambiar el día" onClose={() => setEditing(null)}>
-        {editing ? (
-          <div className="horario-editor">
-            <p className="muted">
-              Hoy pone: <strong>{cellLines(editing.current).join(" · ") || "no trabaja"}</strong>.
-              {editing.current.kind === "festivo" ? " Es festivo de toda la casa, así que manda sobre lo que pongas aquí." : ""}
-            </p>
-            <div className="role-chip-group">
-              {TIPOS.map((tipo) => (
-                <button key={tipo.kind} type="button" className="role-chip" disabled={busy} onClick={() => void saveException(tipo.kind)}>
-                  {tipo.label}
-                </button>
-              ))}
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="button button-secondary" onClick={() => setEditing(null)}>Cerrar</button>
-              <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveException(null)}>
-                Volver a su turno de siempre
-              </button>
-            </div>
+      <Modal open={personalOpen} title="Personal del cuadrante" eyebrow="Horarios" onClose={() => setPersonalOpen(false)}>
+        <div className="horario-personal">
+          <div className="form-grid">
+            <label><span>Nombre</span><input value={nuevo.nombre} placeholder="Como sale en el cuadrante" onChange={(e) => setNuevo((n) => ({ ...n, nombre: e.target.value }))} /></label>
+            <label><span>Departamento</span>
+              <select value={nuevo.departamento} onChange={(e) => setNuevo((n) => ({ ...n, departamento: e.target.value }))}>
+                <option value="">Elige uno…</option>
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </label>
           </div>
-        ) : null}
+          <div className="modal-actions">
+            <button type="button" className="button button-primary" disabled={busy} onClick={() => void anadirPersona()}>Añadir persona</button>
+          </div>
+          <div className="horario-personal-lista">
+            {departments.map((d) => {
+              const suyos = ordenados.filter((m) => m.department_id === d.id);
+              if (suyos.length === 0) return null;
+              return (
+                <div key={d.id}>
+                  <h4>{d.name}</h4>
+                  <ul>
+                    {suyos.map((m) => (
+                      <li key={m.id}>
+                        <span>{m.display_name}</span>
+                        <button type="button" className="button button-compact button-secondary" onClick={() => setBorrando(m)}>Quitar</button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </Modal>
+
+      <ConfirmationDialog
+        open={Boolean(borrando)}
+        title="¿Quitar a esta persona del cuadrante?"
+        confirmLabel="Quitar"
+        busy={busy}
+        onCancel={() => setBorrando(null)}
+        onConfirm={() => void quitarPersona()}
+      >
+        {borrando ? (
+          <p className="muted">
+            <strong>{borrando.display_name}</strong> deja de salir en el cuadrante. Los meses ya pasados se quedan como están,
+            así que no se pierde lo que trabajó.
+          </p>
+        ) : null}
+      </ConfirmationDialog>
     </div>
   );
 }
