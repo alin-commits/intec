@@ -586,7 +586,16 @@ export function ScheduleManager() {
               <p className="muted">Añade personas desde el botón «Personal» y márcales su turno pintando sobre las celdas.</p>
             </section>
           ) : (
+            <>
             <section className="panel table-panel horario-panel">
+              <div className="horario-leyenda">
+                <span><i className="hc" /> Turno de trabajo</span>
+                <span><i className="hc is-tarde-libre" /> Tarde libre</span>
+                <span><i className="hc is-ausencia" /> Vacaciones, baja o permiso</span>
+                <span><i className="hc is-festivo" /> Festivo</span>
+                <span><i className="hc is-libre" /> No trabaja</span>
+              </div>
+
               <div className="table-scroll">
                 <table className="horario-mes-tabla">
                   <thead>
@@ -671,50 +680,58 @@ export function ScheduleManager() {
                   Se ven {visibles.length} de {ordenados.length} personas. El PDF sigue saliendo con toda la plantilla.
                 </p>
               ) : null}
-
-              <div className="horario-resumenes">
-                <div>
-                  <h4>Ausencias no justificadas</h4>
-                  {sinJustificar.length === 0 ? (
-                    <p className="muted">Ninguna este mes.</p>
-                  ) : (
-                    <ul>
-                      {sinJustificar.map((a) => (
-                        <li key={`${a.persona}|${a.day}`}>
-                          <span>{a.persona}</span>
-                          <small>{a.day.slice(8, 10)}/{a.day.slice(5, 7)}</small>
-                          <strong>{a.horas ? `${cellLines({ kind: "trabaja", shift: a.horas, tardeLibre: false }).join(" · ")}` : "sin turno"}</strong>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div>
-                  <h4>Resto de ausencias: horas sueltas</h4>
-                  {horasSueltas.length === 0 ? (
-                    <p className="muted">Nadie ha dejado horas sueltas este mes.</p>
-                  ) : (
-                    <ul>
-                      {horasSueltas.map((a) => (
-                        <li key={`${a.persona}|${a.day}`}>
-                          <span>{a.persona}</span>
-                          <small>{a.day.slice(8, 10)}/{a.day.slice(5, 7)}</small>
-                          <strong>{a.faltan.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h menos</strong>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-
-              <div className="horario-leyenda">
-                <span><i className="hc" /> Turno de trabajo</span>
-                <span><i className="hc is-tarde-libre" /> Tarde libre</span>
-                <span><i className="hc is-ausencia" /> Vacaciones, baja o permiso</span>
-                <span><i className="hc is-festivo" /> Festivo</span>
-                <span><i className="hc is-libre" /> No trabaja</span>
-              </div>
             </section>
+
+          <section className="horario-resumenes">
+            <article className="panel panel-padded">
+              <div className="panel-heading">
+                <div>
+                  <h3>Ausencias no justificadas</h3>
+                  <p className="panel-subtitle">Días que nadie ha justificado todavía</p>
+                </div>
+                <span className={sinJustificar.length ? "horario-cuenta is-alerta" : "horario-cuenta"}>{sinJustificar.length}</span>
+              </div>
+              {sinJustificar.length === 0 ? (
+                <p className="muted">Ninguna este mes.</p>
+              ) : (
+                <ul className="horario-lista">
+                  {sinJustificar.map((a) => (
+                    <li key={`${a.persona}|${a.day}`}>
+                      <span className="horario-lista-dia">{a.day.slice(8, 10)}/{a.day.slice(5, 7)}</span>
+                      <span className="horario-lista-persona">{a.persona}</span>
+                      <span className="horario-lista-dato">{a.horas ? cellLines({ kind: "trabaja", shift: a.horas, tardeLibre: false }).join(" · ") : "sin turno"}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+
+            <article className="panel panel-padded">
+              <div className="panel-heading">
+                <div>
+                  <h3>Resto de ausencias: horas sueltas</h3>
+                  <p className="panel-subtitle">Lo que se deja de hacer sin faltar el día entero</p>
+                </div>
+                <span className="horario-cuenta">
+                  {horasSueltas.reduce((suma, a) => suma + a.faltan, 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} h
+                </span>
+              </div>
+              {horasSueltas.length === 0 ? (
+                <p className="muted">Nadie ha dejado horas sueltas este mes.</p>
+              ) : (
+                <ul className="horario-lista">
+                  {horasSueltas.map((a) => (
+                    <li key={`${a.persona}|${a.day}`}>
+                      <span className="horario-lista-dia">{a.day.slice(8, 10)}/{a.day.slice(5, 7)}</span>
+                      <span className="horario-lista-persona">{a.persona}</span>
+                      <span className="horario-lista-dato">{a.faltan.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h menos</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          </section>
+            </>
           )}
         </>
       )}
