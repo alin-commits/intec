@@ -53,8 +53,8 @@ export const EXPENSES_ROLES: AppRole[] = ["admin", "marketing", "direction"];
 /** Las ventas que llegan de Sage: cifras de negocio, solo dirección y administración. */
 export const SALES_ROLES: AppRole[] = ["admin", "direction"];
 /** El cuadrante de horarios: lo lleva administración, dirección solo lo mira. */
-export const SCHEDULE_ROLES: AppRole[] = ["admin", "direction"];
-export const SCHEDULE_EDIT_ROLES: AppRole[] = ["admin"];
+export const SCHEDULE_ROLES: AppRole[] = ["admin", "accounting"];
+export const SCHEDULE_EDIT_ROLES: AppRole[] = ["admin", "accounting"];
 /**
  * Pagos a proveedores (confirming, tesorería, contratos con los bancos): del
  * departamento de Administración y de quien administra la plataforma. Dirección

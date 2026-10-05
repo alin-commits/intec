@@ -1,5 +1,6 @@
-import { ScheduleManager } from "@/components/horarios/schedule-manager";
+import { redirect } from "next/navigation";
 
+// El cuadrante es ya una pestaña de Administración: los enlaces antiguos llevan ahí.
 export default function HorariosPage() {
-  return <ScheduleManager />;
+  redirect("/administracion?p=horarios");
 }
