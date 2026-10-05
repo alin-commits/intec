@@ -89,7 +89,14 @@ export const USER_MANAGER_ROLES: AppRole[] = ALL_APP_ROLES.filter(
 );
 
 /** True if the user holds at least one of the given roles. */
+/**
+ * El propietario pasa por todas partes. Va aquí y no en cada lista de roles
+ * para que una pantalla nueva no se le quede cerrada por olvido; la base de
+ * datos hace lo mismo en current_user_has_any_role(), así que las dos mitades
+ * dicen lo mismo.
+ */
 export function hasAnyRole(userRoles: AppRole[], allowed: AppRole[]): boolean {
+  if (userRoles.includes("owner")) return true;
   return userRoles.some((role) => allowed.includes(role));
 }
 

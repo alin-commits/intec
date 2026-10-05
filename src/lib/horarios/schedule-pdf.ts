@@ -54,7 +54,7 @@ function fondoDe(cell: DayCell): RGB | null {
   return cell.tardeLibre ? AMARILLO : null;
 }
 
-export async function exportSchedulePdf(options: SchedulePdfOptions): Promise<void> {
+export async function buildSchedulePdf(options: SchedulePdfOptions) {
   const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
 
@@ -153,5 +153,10 @@ export async function exportSchedulePdf(options: SchedulePdfOptions): Promise<vo
     y = yInicio + week.rows.length * altoFila + 8;
   });
 
+  return pdf;
+}
+
+export async function exportSchedulePdf(options: SchedulePdfOptions): Promise<void> {
+  const pdf = await buildSchedulePdf(options);
   pdf.save(options.filename);
 }
