@@ -7,6 +7,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
@@ -41,6 +42,9 @@ import type {
   SocialMediaStat,
   SocialNetwork,
 } from "@/lib/types";
+
+/** Los registros mensuales, de cinco en cinco: la tabla es el detalle, no la pantalla. */
+const FILAS_POR_PAGINA = 5;
 
 const SOCIAL_STORAGE_KEY = "intec-demo-social-media-stats";
 const MAILING_STORAGE_KEY = "intec-demo-mailing-campaigns";
@@ -366,7 +370,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   // cambiar cualquiera de los tres creaba otro registro dejando intacto el que
   // tenías delante: "le doy a guardar y no cambia nada".
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [rowsExpanded, setRowsExpanded] = useState(false);
+  const [pagina, setPagina] = useState(0);
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -439,6 +443,12 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       if (monthCompare !== 0) return sortAsc ? monthCompare : -monthCompare;
       return a.network.localeCompare(b.network);
     }), [stats, unitFilter, networkFilter, sortAsc, monthFrom, monthTo]);
+
+  // Si al filtrar quedan menos páginas que la que estabas mirando, se vuelve a
+  // la última que existe en vez de enseñar una tabla vacía.
+  const paginas = Math.max(1, Math.ceil(visibleRows.length / FILAS_POR_PAGINA));
+  const paginaActual = Math.min(pagina, paginas - 1);
+  const filasDeLaPagina = visibleRows.slice(paginaActual * FILAS_POR_PAGINA, paginaActual * FILAS_POR_PAGINA + FILAS_POR_PAGINA);
 
   function openNew() {
     setEditingId(null);
@@ -591,9 +601,9 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
       ) : (
         <>
       <div className="brand-chip-row" role="tablist" aria-label="Filtrar por marca">
-        <button type="button" className={unitFilter === "all" ? "brand-chip active" : "brand-chip"} onClick={() => setUnitFilter("all")}>Todas las marcas</button>
+        <button type="button" className={unitFilter === "all" ? "brand-chip active" : "brand-chip"} onClick={() => { setPagina(0); setUnitFilter("all"); }}>Todas las marcas</button>
         {units.map((unit) => (
-          <button type="button" key={unit.id} className={unitFilter === unit.id ? "brand-chip active" : "brand-chip"} onClick={() => setUnitFilter(unit.id)}>
+          <button type="button" key={unit.id} className={unitFilter === unit.id ? "brand-chip active" : "brand-chip"} onClick={() => { setPagina(0); setUnitFilter(unit.id); }}>
             <UnitBrandMark unit={unit} size={22} />
             {unit.name}
           </button>
@@ -667,17 +677,17 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
 
       <CollapsibleFilters
         hasActiveFilters={networkFilter !== "all" || monthFrom !== "" || monthTo !== ""}
-        onClear={() => { setNetworkFilter("all"); setMonthFrom(""); setMonthTo(""); }}
+        onClear={() => { setPagina(0); setNetworkFilter("all"); setMonthFrom(""); setMonthTo(""); }}
         resultCount={visibleRows.length}
         resultLabel="Registros"
       >
         <div className="filter-bar lead-filters">
-          <label><span>Red</span><select value={networkFilter} onChange={(event) => setNetworkFilter(event.target.value)}>
+          <label><span>Red</span><select value={networkFilter} onChange={(event) => { setPagina(0); setNetworkFilter(event.target.value); }}>
             <option value="all">Todas</option>
             {socialNetworkOrder.map((network) => <option key={network} value={network}>{socialNetworkLabels[network]}</option>)}
           </select></label>
-          <label><span>Desde</span><MonthField value={monthFrom} onChange={(value) => setMonthFrom(value)} /></label>
-          <label><span>Hasta</span><MonthField value={monthTo} onChange={(value) => setMonthTo(value)} /></label>
+          <label><span>Desde</span><MonthField value={monthFrom} onChange={(value) => { setPagina(0); setMonthFrom(value); }} /></label>
+          <label><span>Hasta</span><MonthField value={monthTo} onChange={(value) => { setPagina(0); setMonthTo(value); }} /></label>
         </div>
       </CollapsibleFilters>
 
@@ -692,7 +702,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           <table>
             <thead><tr><th>Mes</th><th>Marca</th><th>Red</th><th>Seguidores</th><th>Nuevos</th><th>Publicaciones</th><th>Interacciones</th><th>Alcance</th><th>Leads</th>{canEdit ? <th /> : null}</tr></thead>
             <tbody>
-              {visibleRows.slice(0, rowsExpanded ? visibleRows.length : 5).map((row) => {
+              {filasDeLaPagina.map((row) => {
                 const unit = units.find((item) => item.id === row.businessUnitId);
                 return (
                   <tr key={row.id}>
@@ -720,13 +730,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
             </tbody>
           </table>
         </div>
-        {visibleRows.length > 5 ? (
-          <div className="table-panel-footer">
-            <button type="button" className="button button-secondary button-compact" onClick={() => setRowsExpanded((current) => !current)}>
-              {rowsExpanded ? "Mostrar menos" : `Mostrar más (${visibleRows.length - 5} más)`}
-            </button>
-          </div>
-        ) : null}
+        <TablePagination page={paginaActual} pageCount={paginas} total={visibleRows.length} label="registros" onChange={setPagina} />
       </section>
         </>
       )}
