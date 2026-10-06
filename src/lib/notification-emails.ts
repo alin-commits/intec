@@ -92,6 +92,43 @@ export function buildNewLeadEmail(input: { recipientName: string | null; contact
   };
 }
 
+// ---------- Tickets pendientes ----------
+
+export type PendingTicketRow = { number: string; title: string; reporter: string; priority: string; status: string; age: string };
+
+/**
+ * El repaso de los tickets que siguen abiertos. Existía solo como campana
+ * dentro del Hub: si quien lleva informática no entraba, nadie se enteraba de
+ * que había un ticket urgente esperando.
+ */
+export function buildPendingTicketsEmail(input: { recipientName: string | null; urgent: PendingTicketRow[]; stale: PendingTicketRow[]; staleDays: number; url: string }): EmailContent {
+  const tabla = (rows: PendingTicketRow[]) => `
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr><th style="${HEAD}">Nº</th><th style="${HEAD}">Asunto</th><th style="${HEAD}">Quién lo pidió</th><th style="${HEAD}">Estado</th><th style="${HEAD}white-space:nowrap;">Abierto</th></tr>
+      ${rows.map((t) => `<tr><td style="${CELL}white-space:nowrap;">${escapeHtml(t.number)}</td><td style="${CELL}">${escapeHtml(t.title)}</td><td style="${CELL}">${escapeHtml(t.reporter)}</td><td style="${CELL}">${escapeHtml(t.status)}</td><td style="${CELL}white-space:nowrap;">${escapeHtml(t.age)}</td></tr>`).join("")}
+    </table>`;
+
+  const partes: string[] = [];
+  if (input.urgent.length) {
+    const uno = input.urgent.length === 1;
+    partes.push(`<p><strong style="color:#b91c1c;">${uno ? "Un ticket" : `${input.urgent.length} tickets`} de prioridad alta</strong> ${uno ? "sigue" : "siguen"} sin resolver.</p>${tabla(input.urgent)}`);
+  }
+  if (input.stale.length) {
+    const uno = input.stale.length === 1;
+    partes.push(`<p style="margin-top:14px;"><strong>${uno ? "Otro ticket" : `Otros ${input.stale.length}`}</strong> ${uno ? "lleva" : "llevan"} abierto${uno ? "" : "s"} más de ${input.staleDays} días.</p>${tabla(input.stale)}`);
+  }
+
+  const body = `
+    <p>Hola${input.recipientName ? ` ${escapeHtml(input.recipientName)}` : ""},</p>
+    ${partes.join("")}
+    ${emailButton(input.url, "Ver los tickets")}
+  `;
+  const subject = input.urgent.length
+    ? `${input.urgent.length} ticket${input.urgent.length === 1 ? "" : "s"} de prioridad alta sin resolver`
+    : `${input.stale.length} ticket${input.stale.length === 1 ? "" : "s"} llevan abiertos más de ${input.staleDays} días`;
+  return { subject, html: emailShell("Tickets pendientes", body, "Intec Commercial Hub", 620) };
+}
+
 // ---------- Monthly report ----------
 
 export function buildMonthlyReportEmail(input: { monthLabel: string; stats: { label: string; value: string }[]; url: string }): EmailContent {
