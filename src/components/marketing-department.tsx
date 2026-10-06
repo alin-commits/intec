@@ -2,6 +2,7 @@
 
 import { CampaignsManager } from "@/components/campaigns-manager";
 import { ExpensesManager } from "@/components/expenses-manager";
+import { FeedPreview } from "@/components/rrss/feed-preview";
 import { RrssManager } from "@/components/rrss-manager";
 import { DepartmentTabs, type DepartmentPage } from "@/components/ui/department-tabs";
 import { CAMPAIGNS_ROLES, EXPENSES_ROLES, RRSS_ROLES } from "@/lib/constants";
@@ -17,6 +18,7 @@ const pages: DepartmentPage[] = [
   { key: "campanas", label: "Campañas", roles: CAMPAIGNS_ROLES, render: () => <CampaignsManager /> },
   { key: "redes", label: "Redes sociales", roles: RRSS_ROLES, render: () => <RrssManager tab="social" /> },
   { key: "ads", label: "Meta Ads", roles: RRSS_ROLES, render: () => <RrssManager tab="ads" /> },
+  { key: "feed", label: "Feed de Instagram", roles: RRSS_ROLES, render: () => <FeedPreview /> },
   { key: "mailing", label: "Mailing", roles: RRSS_ROLES, render: () => <RrssManager tab="mailing" /> },
   { key: "gastos", label: "Gastos", roles: EXPENSES_ROLES, render: () => <ExpensesManager /> },
 ];
