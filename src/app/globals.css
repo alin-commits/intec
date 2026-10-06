@@ -2036,33 +2036,47 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .feed-switch select { min-height: 32px; border: 1px solid var(--border); border-radius: 8px; padding: 0 8px; background: white; color: var(--text); font-size: 12.5px; font-weight: 700; }
 .feed-switch select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 
-/* El teléfono: la cabecera del perfil y la rejilla, a los 390px que mide la
-   pantalla de un móvil, para que los cuadros midan lo que van a medir. */
-.ig-phone { max-width: 390px; margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); overflow: hidden; }
-.ig-phone.is-wide { max-width: none; border: 0; border-radius: 0; }
-.ig-profile { display: grid; gap: 3px; padding: 14px 14px 10px; }
-.ig-profile-top { display: flex; align-items: center; gap: 16px; margin-bottom: 7px; }
-.ig-avatar { position: relative; display: block; flex: 0 0 auto; width: 76px; height: 76px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-muted); overflow: hidden; }
+/* El teléfono: la cabecera del perfil y la rejilla.
+   Todo lo de dentro va en `em` sobre una letra atada al ancho (ancho/30), así
+   que al elegir un tamaño mayor crece TODO a la vez —foto de perfil, textos,
+   pestañas y cuadros— y el simulador sigue siendo fiel. A 390px la letra sale
+   a 13px, que es la de Instagram en un móvil. */
+.ig-phone {
+  --ig-ancho: 520px;
+  width: min(var(--ig-ancho), 100%);
+  font-size: calc(min(var(--ig-ancho), 100vw - 56px) / 30);
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 1.2em;
+  background: var(--surface);
+  overflow: hidden;
+}
+.ig-phone.is-movil { --ig-ancho: 390px; }
+.ig-phone.is-grande { --ig-ancho: 660px; }
+.ig-phone.is-enorme { --ig-ancho: 820px; }
+.ig-profile { display: grid; gap: 0.23em; padding: 1.08em 1.08em 0.77em; }
+.ig-profile-top { display: flex; align-items: center; gap: 1.23em; margin-bottom: 0.54em; }
+.ig-avatar { position: relative; display: block; flex: 0 0 auto; width: 5.85em; height: 5.85em; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-muted); overflow: hidden; }
 .ig-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ig-avatar-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 28px; font-weight: 800; }
-.ig-stats { display: flex; flex: 1; gap: 4px; text-align: center; }
+.ig-avatar-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 2.15em; font-weight: 800; }
+.ig-stats { display: flex; flex: 1; gap: 0.3em; text-align: center; }
 .ig-stat { flex: 1 1 0; min-width: 0; }
-.ig-stat strong, .ig-stat .ig-field { display: block; font-size: 15px; font-weight: 800; text-align: center; }
-.ig-stat span { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.2; }
+.ig-stat strong, .ig-stat .ig-field { display: block; font-size: 1.15em; font-weight: 800; text-align: center; }
+.ig-stat span { display: block; color: var(--muted); font-size: 0.885em; line-height: 1.2; }
 /* Los textos del perfil se escriben encima, pero tienen que verse como texto. */
-.ig-field { width: 100%; padding: 1px 4px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; }
+.ig-field { width: 100%; padding: 0.08em 0.3em; border: 0; border-radius: 0.4em; background: transparent; color: inherit; font: inherit; }
 .ig-field:hover { background: var(--surface-muted); }
 .ig-field:focus { outline: none; background: var(--surface-muted); box-shadow: 0 0 0 2px var(--ring); }
 .ig-field::placeholder { color: #cbd5e1; }
-.ig-nombre { font-size: 13.5px; font-weight: 800; }
-.ig-usuario { color: var(--muted); font-size: 12.5px; }
-.ig-bio { font-size: 13px; line-height: 1.35; resize: none; }
+.ig-nombre { font-size: 1.04em; font-weight: 800; }
+.ig-usuario { color: var(--muted); font-size: 0.96em; }
+.ig-bio { font-size: 1em; line-height: 1.35; resize: none; }
 .ig-tabs { display: flex; border-top: 1px solid var(--border); }
-.ig-tabs span { flex: 1; display: flex; align-items: center; justify-content: center; padding: 9px 0; color: #94a3b8; }
+.ig-tabs span { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.7em 0; color: #94a3b8; }
 .ig-tabs span.is-active { color: var(--text); box-shadow: inset 0 2px 0 var(--text); }
-.ig-tabs svg { width: 19px; height: 19px; }
+.ig-tabs svg { width: 1.46em; height: 1.46em; }
 
-.feed-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.feed-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.16em; }
 /* 4:5, que es como Instagram enseña el perfil desde 2025. */
 .feed-tile { position: relative; margin: 0; aspect-ratio: 4 / 5; background: var(--surface-muted); overflow: hidden; cursor: grab; }
 .feed-grid.is-square .feed-tile { aspect-ratio: 1; }
@@ -2071,21 +2085,21 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .feed-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* Lo que todavía no está publicado se distingue sin tapar la foto. */
 .feed-tile.is-pending { box-shadow: inset 0 0 0 2px #f59e0b; }
-.feed-tag { position: absolute; top: 5px; left: 5px; padding: 2px 7px; border-radius: 999px; background: rgba(245, 158, 11, .92); color: #3b2300; font-size: 10px; font-weight: 800; }
-.feed-tag-copy { left: auto; right: 5px; background: rgba(15, 23, 42, .68); color: white; }
+.feed-tag { position: absolute; top: 0.4em; left: 0.4em; padding: 0.15em 0.55em; border-radius: 999px; background: rgba(245, 158, 11, .92); color: #3b2300; font-size: 0.77em; font-weight: 800; }
+.feed-tag-copy { left: auto; right: 0.4em; background: rgba(15, 23, 42, .68); color: white; }
 .feed-grid.is-clean .feed-tag { display: none; }
 .feed-grid.is-clean .feed-tile.is-pending { box-shadow: none; }
 .feed-tile.is-moving { opacity: .35; }
-.feed-tile-bar { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 3px; background: rgba(15, 23, 42, .62); color: white; font-size: 11px; font-weight: 800; }
+.feed-tile-bar { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; justify-content: center; gap: 0.2em; padding: 0.25em; background: rgba(15, 23, 42, .62); color: white; font-size: 0.85em; font-weight: 800; }
 .feed-grid.is-clean .feed-tile-bar { display: none; }
 .feed-grid.is-clean .feed-tile { cursor: default; }
-.feed-tile-button { width: 22px; height: 20px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: white; font-size: 12px; line-height: 1; cursor: pointer; }
+.feed-tile-button { width: 2em; height: 1.85em; padding: 0; border: 0; border-radius: 0.45em; background: transparent; color: white; font-size: 1.1em; line-height: 1; cursor: pointer; }
 .feed-tile-button:hover:not(:disabled) { background: rgba(255, 255, 255, .22); }
 .feed-tile-button:disabled { opacity: .35; cursor: default; }
 .feed-tile-button.is-on { background: #16a34a; }
 .feed-tile-button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 /* Un HEIC del iPhone no lo pinta ningún navegador: se dice en el hueco. */
-.feed-ilegible { display: flex; align-items: center; justify-content: center; height: 100%; padding: 8px; color: var(--muted); font-size: 10.5px; font-weight: 700; text-align: center; }
+.feed-ilegible { display: flex; align-items: center; justify-content: center; height: 100%; padding: 0.6em; color: var(--muted); font-size: 0.8em; font-weight: 700; text-align: center; }
 
 /* La ficha: la foto a un lado y el texto al otro. */
 .post-ficha { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
@@ -2107,6 +2121,6 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 
 @media (max-width: 640px) {
   .feed-dropzone { padding: 16px; }
-  .ig-phone { max-width: none; border: 0; border-radius: 0; }
+  .ig-phone { --ig-ancho: 100vw; border: 0; border-radius: 0; }
   .feed-tile-bar { gap: 0; }
 }

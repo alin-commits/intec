@@ -44,6 +44,14 @@ type Post = {
 };
 
 type Formato = "4:5" | "1:1";
+/** Lo grande que se ve el simulador. Crece entero: las proporciones no cambian. */
+type Tamano = "movil" | "mediano" | "grande" | "enorme";
+const CLASES_TAMANO: Record<Tamano, string> = {
+  movil: "ig-phone is-movil",
+  mediano: "ig-phone",
+  grande: "ig-phone is-grande",
+  enorme: "ig-phone is-enorme",
+};
 
 const CUBO = "social-posts";
 /** Las firmas duran dos horas: lo que dura una sesión de preparar el feed. */
@@ -71,7 +79,7 @@ export function PostPlanner() {
   const [abierto, setAbierto] = useState<Post | null>(null);
   const [borrador, setBorrador] = useState({ caption: "", status: "pendiente" as Post["status"] });
   const [borrando, setBorrando] = useState<Post | null>(null);
-  const [anchoMovil, setAnchoMovil] = useState(true);
+  const [tamano, setTamano] = useState<Tamano>("mediano");
   const [vistaLimpia, setVistaLimpia] = useState(false);
   const [formato, setFormato] = useState<Formato>("4:5");
   const [cabeceras, setCabeceras] = useState<Record<string, Partial<Cabecera>>>({});
@@ -452,11 +460,13 @@ export function PostPlanner() {
           </div>
           <div className="feed-switches">
             <label className="feed-switch">
-              <span>Ancho de móvil</span>
-              <span className="switch">
-                <input type="checkbox" checked={anchoMovil} onChange={(event) => setAnchoMovil(event.target.checked)} />
-                <span className="switch-track"><span className="switch-thumb" /></span>
-              </span>
+              <span>Tamaño</span>
+              <select value={tamano} onChange={(event) => setTamano(event.target.value as Tamano)}>
+                <option value="movil">Como en el móvil</option>
+                <option value="mediano">Mediano</option>
+                <option value="grande">Grande</option>
+                <option value="enorme">Muy grande</option>
+              </select>
             </label>
             <label className="feed-switch">
               <span>Vista limpia</span>
@@ -483,7 +493,7 @@ export function PostPlanner() {
               : "Cuando marketing prepare publicaciones, saldrán aquí."}
           </div>
         ) : (
-          <div className={anchoMovil ? "ig-phone" : "ig-phone is-wide"}>
+          <div className={CLASES_TAMANO[tamano]}>
             {red === "instagram" ? (
               <>
                 <header className="ig-profile">
