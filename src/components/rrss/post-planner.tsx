@@ -80,6 +80,9 @@ export function PostPlanner() {
   const [borrador, setBorrador] = useState({ caption: "", status: "pendiente" as Post["status"] });
   const [borrando, setBorrando] = useState<Post | null>(null);
   const [tamano, setTamano] = useState<Tamano>("mediano");
+  const [seleccionando, setSeleccionando] = useState(false);
+  const [seleccion, setSeleccion] = useState<string[]>([]);
+  const [preparando, setPreparando] = useState<string | null>(null);
   const [vistaLimpia, setVistaLimpia] = useState(false);
   const [formato, setFormato] = useState<Formato>("4:5");
   const [cabeceras, setCabeceras] = useState<Record<string, Partial<Cabecera>>>({});
@@ -310,42 +313,97 @@ export function PostPlanner() {
   }
 
   /**
-   * Descarga la foto recortada tal y como se ve en la rejilla, lista para
-   * subir. Se baja primero el archivo y se dibuja desde aquí: así el lienzo no
-   * queda marcado como de otro sitio y el navegador deja exportarlo.
+   * La foto recortada tal y como se ve en la rejilla. Se baja primero el
+   * archivo y se dibuja desde aquí: así el lienzo no queda marcado como de
+   * otro sitio y el navegador deja exportarlo.
    */
+  async function recortar(direccion: string): Promise<Blob> {
+    const respuesta = await fetch(direccion);
+    const original = await respuesta.blob();
+    const urlLocal = URL.createObjectURL(original);
+    try {
+      const imagen = new Image();
+      imagen.src = urlLocal;
+      await imagen.decode();
+      const proporcion = formato === "4:5" ? 4 / 5 : 1;
+      const suya = imagen.naturalWidth / imagen.naturalHeight;
+      const ancho = suya > proporcion ? imagen.naturalHeight * proporcion : imagen.naturalWidth;
+      const alto = suya > proporcion ? imagen.naturalHeight : imagen.naturalWidth / proporcion;
+      const lienzo = document.createElement("canvas");
+      lienzo.width = Math.round(ancho);
+      lienzo.height = Math.round(alto);
+      const pincel = lienzo.getContext("2d");
+      if (!pincel) throw new Error("Sin lienzo");
+      pincel.drawImage(imagen, (imagen.naturalWidth - ancho) / 2, (imagen.naturalHeight - alto) / 2, ancho, alto, 0, 0, lienzo.width, lienzo.height);
+      const recortada = await new Promise<Blob | null>((listo) => lienzo.toBlob(listo, "image/jpeg", 0.92));
+      return recortada ?? original;
+    } finally {
+      URL.revokeObjectURL(urlLocal);
+    }
+  }
+
+  const nombreDeArchivo = (post: Post, posicion: number) =>
+    `${String(posicion + 1).padStart(2, "0")}-${(post.fileName ?? "foto").replace(/\.[^.]+$/, "").slice(0, 40)}.jpg`;
+
   async function descargar(post: Post) {
     if (!post.url) return;
     setBusy(true);
     try {
-      const respuesta = await fetch(post.url);
-      const original = await respuesta.blob();
-      const urlLocal = URL.createObjectURL(original);
-      try {
-        const imagen = new Image();
-        imagen.src = urlLocal;
-        await imagen.decode();
-        const proporcion = formato === "4:5" ? 4 / 5 : 1;
-        const suya = imagen.naturalWidth / imagen.naturalHeight;
-        const ancho = suya > proporcion ? imagen.naturalHeight * proporcion : imagen.naturalWidth;
-        const alto = suya > proporcion ? imagen.naturalHeight : imagen.naturalWidth / proporcion;
-        const lienzo = document.createElement("canvas");
-        lienzo.width = Math.round(ancho);
-        lienzo.height = Math.round(alto);
-        const pincel = lienzo.getContext("2d");
-        if (!pincel) throw new Error("Sin lienzo");
-        pincel.drawImage(imagen, (imagen.naturalWidth - ancho) / 2, (imagen.naturalHeight - alto) / 2, ancho, alto, 0, 0, lienzo.width, lienzo.height);
-        const recortada = await new Promise<Blob | null>((listo) => lienzo.toBlob(listo, "image/jpeg", 0.92));
-        const nombre = `${unidad?.slug ?? "post"}-${formato.replace(":", "x")}-${(post.fileName ?? "foto").replace(/\.[^.]+$/, "")}.jpg`;
-        bajar(recortada ?? original, nombre);
-      } finally {
-        URL.revokeObjectURL(urlLocal);
-      }
+      const recortada = await recortar(post.url);
+      bajar(recortada, `${unidad?.slug ?? "post"}-${formato.replace(":", "x")}-${(post.fileName ?? "foto").replace(/\.[^.]+$/, "")}.jpg`);
     } catch (causa) {
       setAviso(reportSafeError(causa, "No se pudo preparar la descarga."));
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Varias de golpe, en un zip. Van numeradas en el orden del feed, que es el
+   * orden en que hay que subirlas, y si alguna tiene texto se añade un
+   * `textos.txt` con los mismos números: copiar ocho copys a mano uno por uno
+   * era justo lo que había que evitar.
+   */
+  async function descargarSeleccionadas() {
+    const elegidas = posts.map((post, posicion) => ({ post, posicion })).filter(({ post }) => seleccion.includes(post.id));
+    if (elegidas.length === 0) return;
+    setPreparando(`0 de ${elegidas.length}`);
+    try {
+      const archivos: Record<string, Uint8Array> = {};
+      const textos: string[] = [];
+      const fallidas: string[] = [];
+      for (const [hechas, { post, posicion }] of elegidas.entries()) {
+        setPreparando(`${hechas} de ${elegidas.length}`);
+        if (!post.url) { fallidas.push(post.fileName ?? "una foto"); continue; }
+        const nombre = nombreDeArchivo(post, posicion);
+        archivos[nombre] = new Uint8Array(await (await recortar(post.url)).arrayBuffer());
+        if (post.caption.trim()) textos.push(`${nombre}\n${post.caption.trim()}\n`);
+      }
+      if (textos.length > 0) archivos["textos.txt"] = new TextEncoder().encode(textos.join("\n"));
+      if (Object.keys(archivos).length === 0) throw new Error("Sin archivos");
+      // El zip se carga solo cuando hace falta, no al abrir la pantalla.
+      const { zipSync } = await import("fflate");
+      // Nivel 0: un JPEG ya viene comprimido, apretarlo otra vez solo tarda.
+      const zip = zipSync(archivos, { level: 0 });
+      const hoy = new Date().toISOString().slice(0, 10);
+      bajar(new Blob([zip as BlobPart], { type: "application/zip" }), `${unidad?.slug ?? "posts"}-${red}-${formato.replace(":", "x")}-${hoy}.zip`);
+      setAviso(fallidas.length > 0
+        ? `Descargadas ${Object.keys(archivos).length - (textos.length > 0 ? 1 : 0)}; ${fallidas.length} no se pudieron preparar.`
+        : `${elegidas.length} ${elegidas.length === 1 ? "foto descargada" : "fotos descargadas"} en un zip.`);
+    } catch (causa) {
+      setAviso(reportSafeError(causa, "No se pudo preparar la descarga."));
+    } finally {
+      setPreparando(null);
+    }
+  }
+
+  function alternarSeleccion(id: string) {
+    setSeleccion((actual) => actual.includes(id) ? actual.filter((item) => item !== id) : [...actual, id]);
+  }
+
+  function salirDeSeleccion() {
+    setSeleccionando(false);
+    setSeleccion([]);
   }
 
   function bajar(contenido: Blob, nombre: string) {
@@ -475,6 +533,15 @@ export function PostPlanner() {
                 <span className="switch-track"><span className="switch-thumb" /></span>
               </span>
             </label>
+            {canEdit || posts.length > 0 ? (
+              <button
+                type="button"
+                className={seleccionando ? "button button-compact button-primary" : "button button-compact button-secondary"}
+                onClick={() => (seleccionando ? salirDeSeleccion() : setSeleccionando(true))}
+              >
+                {seleccionando ? "Salir de seleccionar" : "Seleccionar varias"}
+              </button>
+            ) : null}
             <label className="feed-switch">
               <span>Formato</span>
               <select value={formato} onChange={(event) => setFormato(event.target.value as Formato)}>
@@ -484,6 +551,23 @@ export function PostPlanner() {
             </label>
           </div>
         </div>
+
+        {seleccionando && posts.length > 0 ? (
+          <div className="feed-seleccion">
+            <strong>{seleccion.length === 0 ? "Ninguna seleccionada" : `${seleccion.length} ${seleccion.length === 1 ? "seleccionada" : "seleccionadas"}`}</strong>
+            <button type="button" className="button button-compact button-secondary" onClick={() => setSeleccion(posts.map((post) => post.id))}>Todas</button>
+            <button type="button" className="button button-compact button-secondary" disabled={seleccion.length === 0} onClick={() => setSeleccion([])}>Ninguna</button>
+            <button
+              type="button"
+              className="button button-compact button-primary"
+              disabled={seleccion.length === 0 || preparando !== null}
+              onClick={() => void descargarSeleccionadas()}
+            >
+              {preparando ? `Preparando… ${preparando}` : `Descargar ${seleccion.length || ""} en ${formato}`}
+            </button>
+            <small className="muted">Van numeradas en el orden del feed, y con su texto en un archivo aparte.</small>
+          </div>
+        ) : null}
 
         {posts.length === 0 ? (
           <div className="empty-state">
@@ -538,17 +622,24 @@ export function PostPlanner() {
                 <figure
                   key={post.id}
                   className={`feed-tile${moviendo === post.id ? " is-moving" : ""}${post.status === "pendiente" ? " is-pending" : ""}`}
-                  draggable={canEdit}
-                  onDragStart={() => canEdit && setMoviendo(post.id)}
+                  draggable={canEdit && !seleccionando}
+                  onDragStart={() => canEdit && !seleccionando && setMoviendo(post.id)}
                   onDragEnd={() => setMoviendo(null)}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={() => soltarSobre(post.id)}
                 >
-                  <button type="button" className="feed-tile-open" onClick={() => abrirFicha(post)} aria-label={`Abrir ${post.fileName ?? "la publicación"}`}>
+                  <button
+                    type="button"
+                    className="feed-tile-open"
+                    onClick={() => (seleccionando ? alternarSeleccion(post.id) : abrirFicha(post))}
+                    aria-label={seleccionando ? `Seleccionar ${post.fileName ?? "la publicación"}` : `Abrir ${post.fileName ?? "la publicación"}`}
+                    aria-pressed={seleccionando ? seleccion.includes(post.id) : undefined}
+                  >
                     {post.url
                       /* eslint-disable-next-line @next/next/no-img-element -- firmada por Supabase, no hay nada que optimizar */
                       ? <img src={post.url} alt={post.fileName ?? "Publicación preparada"} />
                       : <span className="feed-ilegible">No se pudo cargar esta foto</span>}
+                    {seleccionando ? <span className={seleccion.includes(post.id) ? "feed-marca is-on" : "feed-marca"} aria-hidden="true">{seleccion.includes(post.id) ? "✓" : ""}</span> : null}
                     {post.status === "pendiente" ? <span className="feed-tag">Por subir</span> : null}
                     {post.caption.trim() ? <span className="feed-tag feed-tag-copy" title={post.caption}>✎</span> : null}
                   </button>
