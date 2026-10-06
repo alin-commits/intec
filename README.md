@@ -81,3 +81,13 @@ npm run lint
 npm run typecheck
 npm run build
 ```
+
+Después de ejecutar una migración en Supabase:
+
+```bash
+npm run check:schema
+```
+
+Compara el esquema real con las migraciones del repositorio y con lo que lee el
+código, y dice qué falta. Solo lee: no escribe nada ni ejecuta funciones de la
+base. Necesita `.env.local` con la clave de servicio.
