@@ -13,10 +13,17 @@ import { Toast } from "@/components/ui/toast";
   donde dejar cosas— y por eso no hay ni base de datos ni almacenamiento por
   detrás. Tampoco se conecta con Instagram: lo que se ve es lo que tú subes.
 
-  Instagram pinta el perfil en tres columnas, cuadradas, recortadas por el
-  centro y con lo más nuevo arriba a la izquierda. Esta pantalla hace lo mismo,
-  así que lo que entra se pone al principio. El orden se cambia arrastrando o
-  con las flechas, que es lo que funciona en el móvil.
+  Instagram pinta el perfil en tres columnas, con lo más nuevo arriba a la
+  izquierda y los cuadros en 4:5 —verticales, no cuadrados: lo cambiaron en
+  2025 y es lo que descoloca a todo el mundo, porque una foto cuadrada sale
+  recortada por arriba y por abajo—. Esta pantalla hace lo mismo, con la
+  opción de verlo en 1:1 para los feeds antiguos. Lo que entra se pone al
+  principio, y el orden se cambia arrastrando o con las flechas, que es lo
+  que funciona en el móvil.
+
+  La cabecera del perfil está para que se vea en su sitio, como en el
+  teléfono. Los textos y las cifras se pueden escribir encima: tampoco se
+  guardan.
 */
 
 type Foto = {
@@ -39,7 +46,17 @@ export function FeedPreview() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [anchoMovil, setAnchoMovil] = useState(true);
   const [vistaLimpia, setVistaLimpia] = useState(false);
+  const [formato, setFormato] = useState<"4:5" | "1:1">("4:5");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [perfil, setPerfil] = useState({
+    nombre: "Suministros industriales | INTEC",
+    usuario: "suministrointec",
+    bio: "",
+    seguidores: "",
+    seguidos: "",
+  });
   const entradaRef = useRef<HTMLInputElement>(null);
+  const avatarRef = useRef<HTMLInputElement>(null);
   const urlsRef = useRef<string[]>([]);
 
   // Al salir de la pantalla se suelta la memoria que ocupaban las fotos.
@@ -85,9 +102,26 @@ export function FeedPreview() {
     setFotos((actuales) => actuales.filter((foto) => foto.id !== id));
   }
 
+  function ponerAvatar(lista: FileList | null | undefined) {
+    const archivo = Array.from(lista ?? []).find((f) => f.type.startsWith("image/"));
+    if (!archivo) return;
+    if (avatar) {
+      URL.revokeObjectURL(avatar);
+      urlsRef.current = urlsRef.current.filter((url) => url !== avatar);
+    }
+    const url = URL.createObjectURL(archivo);
+    urlsRef.current.push(url);
+    setAvatar(url);
+  }
+
+  function escribirPerfil(campo: keyof typeof perfil, valor: string) {
+    setPerfil((actual) => ({ ...actual, [campo]: valor }));
+  }
+
   function vaciar() {
-    for (const url of urlsRef.current) URL.revokeObjectURL(url);
-    urlsRef.current = [];
+    // La foto de perfil no se va: lo que se vacía es el feed.
+    for (const foto of fotos) URL.revokeObjectURL(foto.url);
+    urlsRef.current = urlsRef.current.filter((url) => url === avatar);
     setFotos([]);
     setAviso(null);
   }
@@ -183,7 +217,7 @@ export function FeedPreview() {
                 <p className="panel-subtitle">Pulsa una foto para quitarla del feed o volver a ponerla. La ✕ la descarta del todo.</p>
               </div>
             </div>
-            <div className="feed-tray">
+            <div className={formato === "1:1" ? "feed-tray is-square" : "feed-tray"}>
               {fotos.map((foto) => (
                 <div key={foto.id} className={foto.enElFeed ? "feed-tray-item is-in" : "feed-tray-item"}>
                   <button
@@ -211,7 +245,10 @@ export function FeedPreview() {
               <div>
                 <span className="eyebrow">Vista del perfil</span>
                 <h2>Así quedaría el feed</h2>
-                <p className="panel-subtitle">Arrastra una foto sobre otra para cambiar el orden, o usa las flechas.</p>
+                <p className="panel-subtitle">
+                  Arrastra una foto sobre otra para cambiar el orden, o usa las flechas. Instagram recorta en 4:5
+                  por el centro: lo que se ve aquí es lo que se verá allí.
+                </p>
               </div>
               <div className="feed-switches">
                 <label className="feed-switch">
@@ -228,6 +265,13 @@ export function FeedPreview() {
                     <span className="switch-track"><span className="switch-thumb" /></span>
                   </span>
                 </label>
+                <label className="feed-switch">
+                  <span>Formato</span>
+                  <select value={formato} onChange={(event) => setFormato(event.target.value as "4:5" | "1:1")}>
+                    <option value="4:5">4:5, como Instagram</option>
+                    <option value="1:1">1:1, cuadrado</option>
+                  </select>
+                </label>
               </div>
             </div>
 
@@ -237,46 +281,84 @@ export function FeedPreview() {
                 Pulsa arriba las que quieras ver publicadas.
               </div>
             ) : (
-              <div className={`feed-grid${anchoMovil ? " is-phone" : ""}${vistaLimpia ? " is-clean" : ""}`}>
-                {enElFeed.map((foto, posicion) => (
-                  <figure
-                    key={foto.id}
-                    className={moviendo === foto.id ? "feed-tile is-moving" : "feed-tile"}
-                    draggable
-                    onDragStart={() => setMoviendo(foto.id)}
-                    onDragEnd={() => setMoviendo(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => soltarSobre(foto.id)}
-                  >
-                    {foto.ilegible
-                      ? <span className="feed-ilegible">Esta foto no la puede abrir el navegador. Guárdala como JPG y vuelve a subirla.</span>
-                      /* eslint-disable-next-line @next/next/no-img-element -- ver arriba: la foto no sale de este navegador */
-                      : <img src={foto.url} alt={foto.nombre} onError={() => noSePuedePintar(foto.id)} />}
-                    <figcaption className="feed-tile-bar">
-                      <button
-                        type="button"
-                        className="feed-tile-button"
-                        onClick={() => mover(foto.id, -1)}
-                        disabled={posicion === 0}
-                        aria-label={`Mover ${foto.nombre} una posición antes`}
-                      >←</button>
-                      <span>{posicion + 1}</span>
-                      <button
-                        type="button"
-                        className="feed-tile-button"
-                        onClick={() => mover(foto.id, 1)}
-                        disabled={posicion === enElFeed.length - 1}
-                        aria-label={`Mover ${foto.nombre} una posición después`}
-                      >→</button>
-                      <button
-                        type="button"
-                        className="feed-tile-button"
-                        onClick={() => marcar(foto.id)}
-                        aria-label={`Quitar ${foto.nombre} del feed`}
-                      >✕</button>
-                    </figcaption>
-                  </figure>
-                ))}
+              <div className={anchoMovil ? "ig-phone" : "ig-phone is-wide"}>
+                <header className="ig-profile">
+                  <div className="ig-profile-top">
+                    <button type="button" className="ig-avatar" onClick={() => avatarRef.current?.click()} title="Cambiar la foto de perfil">
+                      {avatar
+                        /* eslint-disable-next-line @next/next/no-img-element -- ver arriba: la foto no sale de este navegador */
+                        ? <img src={avatar} alt="Foto de perfil" />
+                        : <span className="ig-avatar-empty">{perfil.usuario.slice(0, 1).toUpperCase() || "?"}</span>}
+                    </button>
+                    <input ref={avatarRef} type="file" accept="image/*" hidden onChange={(event) => { ponerAvatar(event.target.files); event.target.value = ""; }} />
+                    <div className="ig-stats">
+                      <div className="ig-stat"><strong>{enElFeed.length}</strong><span>publicaciones</span></div>
+                      <div className="ig-stat">
+                        <input className="ig-field" value={perfil.seguidores} placeholder="0" aria-label="Seguidores" onChange={(event) => escribirPerfil("seguidores", event.target.value)} />
+                        <span>seguidores</span>
+                      </div>
+                      <div className="ig-stat">
+                        <input className="ig-field" value={perfil.seguidos} placeholder="0" aria-label="Seguidos" onChange={(event) => escribirPerfil("seguidos", event.target.value)} />
+                        <span>seguidos</span>
+                      </div>
+                    </div>
+                  </div>
+                  <input className="ig-field ig-nombre" value={perfil.nombre} placeholder="Nombre del perfil" aria-label="Nombre del perfil" onChange={(event) => escribirPerfil("nombre", event.target.value)} />
+                  <input className="ig-field ig-usuario" value={perfil.usuario} placeholder="usuario" aria-label="Nombre de usuario" onChange={(event) => escribirPerfil("usuario", event.target.value)} />
+                  <textarea className="ig-field ig-bio" rows={2} value={perfil.bio} placeholder="La bio, si quieres verla aquí…" aria-label="Biografía" onChange={(event) => escribirPerfil("bio", event.target.value)} />
+                </header>
+                <nav className="ig-tabs" aria-hidden="true">
+                  <span className="is-active" title="Publicaciones">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M15 3v18M3 9h18M3 15h18" /></svg>
+                  </span>
+                  <span title="Reels">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="4" /><path d="M3 8h18M9 3l3 5M15 3l3 5" /><path d="M11 11.5v5l4-2.5z" fill="currentColor" stroke="none" /></svg>
+                  </span>
+                  <span title="Etiquetadas">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="10" r="2.6" /><path d="M7.5 18c.9-2.2 2.6-3.3 4.5-3.3s3.6 1.1 4.5 3.3" /></svg>
+                  </span>
+                </nav>
+                <div className={`feed-grid${formato === "1:1" ? " is-square" : ""}${vistaLimpia ? " is-clean" : ""}`}>
+                  {enElFeed.map((foto, posicion) => (
+                    <figure
+                      key={foto.id}
+                      className={moviendo === foto.id ? "feed-tile is-moving" : "feed-tile"}
+                      draggable
+                      onDragStart={() => setMoviendo(foto.id)}
+                      onDragEnd={() => setMoviendo(null)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => soltarSobre(foto.id)}
+                    >
+                      {foto.ilegible
+                        ? <span className="feed-ilegible">Esta foto no la puede abrir el navegador. Guárdala como JPG y vuelve a subirla.</span>
+                        /* eslint-disable-next-line @next/next/no-img-element -- ver arriba: la foto no sale de este navegador */
+                        : <img src={foto.url} alt={foto.nombre} onError={() => noSePuedePintar(foto.id)} />}
+                      <figcaption className="feed-tile-bar">
+                        <button
+                          type="button"
+                          className="feed-tile-button"
+                          onClick={() => mover(foto.id, -1)}
+                          disabled={posicion === 0}
+                          aria-label={`Mover ${foto.nombre} una posición antes`}
+                        >←</button>
+                        <span>{posicion + 1}</span>
+                        <button
+                          type="button"
+                          className="feed-tile-button"
+                          onClick={() => mover(foto.id, 1)}
+                          disabled={posicion === enElFeed.length - 1}
+                          aria-label={`Mover ${foto.nombre} una posición después`}
+                        >→</button>
+                        <button
+                          type="button"
+                          className="feed-tile-button"
+                          onClick={() => marcar(foto.id)}
+                          aria-label={`Quitar ${foto.nombre} del feed`}
+                        >✕</button>
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
               </div>
             )}
           </section>

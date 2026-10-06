@@ -2028,11 +2028,14 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 
 .feed-switches { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .feed-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.feed-switch select { min-height: 32px; border: 1px solid var(--border); border-radius: 8px; padding: 0 8px; background: white; color: var(--text); font-size: 12.5px; font-weight: 700; }
+.feed-switch select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 
 /* La bandeja: todo lo subido, marcado o no, en una fila que se desplaza. */
 .feed-tray { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; }
 .feed-tray-item { position: relative; flex: 0 0 auto; }
-.feed-tray-pick { display: block; width: 74px; height: 74px; padding: 0; border: 2px solid var(--border); border-radius: 10px; background: var(--surface-muted); overflow: hidden; cursor: pointer; }
+.feed-tray-pick { display: block; width: 66px; height: 82px; padding: 0; border: 2px solid var(--border); border-radius: 10px; background: var(--surface-muted); overflow: hidden; cursor: pointer; }
+.feed-tray.is-square .feed-tray-pick { width: 74px; height: 74px; }
 .feed-tray-pick img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .45; transition: opacity .15s ease; }
 .feed-tray-item.is-in .feed-tray-pick { border-color: var(--primary); }
 .feed-tray-item.is-in .feed-tray-pick img { opacity: 1; }
@@ -2041,11 +2044,37 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .feed-tray-remove { position: absolute; top: -5px; right: -5px; width: 19px; height: 19px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer; }
 .feed-tray-remove:hover { border-color: #fca5a5; background: #fee2e2; color: #991b1b; }
 
+/* El teléfono: la cabecera del perfil y la rejilla, a los 390px que mide la
+   pantalla de un móvil, para que los cuadros midan lo que van a medir. */
+.ig-phone { max-width: 390px; margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); overflow: hidden; }
+.ig-phone.is-wide { max-width: none; border: 0; border-radius: 0; }
+.ig-profile { display: grid; gap: 3px; padding: 14px 14px 10px; }
+.ig-profile-top { display: flex; align-items: center; gap: 16px; margin-bottom: 7px; }
+.ig-avatar { position: relative; flex: 0 0 auto; width: 76px; height: 76px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-muted); overflow: hidden; cursor: pointer; }
+.ig-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ig-avatar:hover { border-color: var(--primary); }
+.ig-avatar-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 28px; font-weight: 800; }
+.ig-stats { display: flex; flex: 1; gap: 4px; text-align: center; }
+.ig-stat { flex: 1 1 0; min-width: 0; }
+.ig-stat strong, .ig-stat .ig-field { display: block; font-size: 15px; font-weight: 800; text-align: center; }
+.ig-stat span { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.2; }
+/* Los textos del perfil se escriben encima, pero tienen que verse como texto. */
+.ig-field { width: 100%; padding: 1px 4px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; }
+.ig-field:hover { background: var(--surface-muted); }
+.ig-field:focus { outline: none; background: var(--surface-muted); box-shadow: 0 0 0 2px var(--ring); }
+.ig-field::placeholder { color: #cbd5e1; }
+.ig-nombre { font-size: 13.5px; font-weight: 800; }
+.ig-usuario { color: var(--muted); font-size: 12.5px; }
+.ig-bio { font-size: 13px; line-height: 1.35; resize: none; }
+.ig-tabs { display: flex; border-top: 1px solid var(--border); }
+.ig-tabs span { flex: 1; display: flex; align-items: center; justify-content: center; padding: 9px 0; color: #94a3b8; }
+.ig-tabs span.is-active { color: var(--text); box-shadow: inset 0 2px 0 var(--text); }
+.ig-tabs svg { width: 19px; height: 19px; }
+
 .feed-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
-/* Con el ancho del teléfono se enmarca, para que se entienda que ese hueco en
-   medio de la pantalla es a propósito y que los cuadros miden lo que medirían. */
-.feed-grid.is-phone { max-width: 390px; margin: 0 auto; padding: 5px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-muted); }
-.feed-tile { position: relative; margin: 0; aspect-ratio: 1; background: var(--surface-muted); overflow: hidden; cursor: grab; }
+/* 4:5, que es como Instagram enseña el perfil desde 2025. */
+.feed-tile { position: relative; margin: 0; aspect-ratio: 4 / 5; background: var(--surface-muted); overflow: hidden; cursor: grab; }
+.feed-grid.is-square .feed-tile { aspect-ratio: 1; }
 .feed-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .feed-tile.is-moving { opacity: .35; }
 .feed-tile-bar { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 3px; background: rgba(15, 23, 42, .62); color: white; font-size: 11px; font-weight: 800; }
@@ -2060,7 +2089,8 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 
 @media (max-width: 640px) {
   .feed-dropzone { padding: 16px; }
-  .feed-tray-pick { width: 62px; height: 62px; }
-  .feed-grid.is-phone { max-width: none; padding: 0; border: 0; border-radius: 0; background: none; }
+  .ig-phone { max-width: none; border: 0; border-radius: 0; }
+  .feed-tray-pick { width: 56px; height: 70px; }
+  .feed-tray.is-square .feed-tray-pick { width: 62px; height: 62px; }
   .feed-tile-bar { gap: 0; }
 }
