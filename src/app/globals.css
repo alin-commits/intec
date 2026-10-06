@@ -2103,9 +2103,6 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 
 /* La ficha: la foto a un lado y el texto al otro. */
 .post-ficha { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
-.post-ficha-foto { aspect-ratio: 4 / 5; border-radius: 12px; background: var(--surface-muted); overflow: hidden; }
-.post-ficha-foto.is-square { aspect-ratio: 1; }
-.post-ficha-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .post-ficha-datos { display: grid; align-content: start; gap: 8px; }
 .post-ficha-datos label { display: grid; gap: 6px; }
 .post-ficha-datos label > span { color: var(--muted); font-size: 12px; font-weight: 700; }
@@ -2116,7 +2113,7 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 
 @media (max-width: 760px) {
   .post-ficha { grid-template-columns: 1fr; }
-  .post-ficha-foto { max-width: 240px; margin: 0 auto; }
+  .post-ficha-fotos { max-width: 260px; margin: 0 auto; }
 }
 
 @media (max-width: 640px) {
@@ -2131,3 +2128,24 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .feed-seleccion small { flex: 1 1 220px; font-size: 11.5px; }
 .feed-marca { position: absolute; top: 0.4em; right: 0.4em; width: 1.5em; height: 1.5em; border: 2px solid white; border-radius: 50%; background: rgba(15, 23, 42, .35); color: white; font-size: 0.9em; font-weight: 800; line-height: 1.3em; text-align: center; box-shadow: 0 1px 3px rgba(15, 23, 42, .4); }
 .feed-marca.is-on { background: var(--primary); }
+
+/* La ficha: las fotos del carrusel a un lado y el texto por red al otro. */
+.post-ficha-fotos { display: grid; gap: 10px; align-content: start; }
+.post-ficha-foto { position: relative; width: 100%; padding: 0; border: 0; border-radius: 12px; background: var(--surface-muted); overflow: hidden; cursor: zoom-in; aspect-ratio: 4 / 5; }
+.post-ficha-foto.is-square { aspect-ratio: 1; }
+.post-ficha-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.post-ficha-ampliar { position: absolute; right: 8px; bottom: 8px; padding: 4px 9px; border-radius: 999px; background: rgba(15, 23, 42, .72); color: white; font-size: 11px; font-weight: 800; }
+.post-ficha-tira { display: flex; flex-wrap: wrap; gap: 6px; }
+.post-ficha-mini { position: relative; width: 52px; height: 65px; padding: 0; border: 2px solid var(--border); border-radius: 8px; background: var(--surface-muted); overflow: hidden; cursor: pointer; }
+.post-ficha-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.post-ficha-mini.is-on { border-color: var(--primary); }
+.post-ficha-mini i { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(15, 23, 42, .6); color: white; font-size: 10px; font-style: normal; font-weight: 800; text-align: center; }
+.post-ficha-mas { display: flex; align-items: center; justify-content: center; border-style: dashed; color: var(--muted); font-size: 20px; font-weight: 700; }
+.post-ficha-mas:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.post-ficha-orden { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Una pestaña por red: la misma foto, distinto texto. */
+.post-ficha-redes { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.post-ficha-red { position: relative; padding: 7px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; }
+.post-ficha-red.is-on { color: var(--text); border-bottom-color: var(--primary); }
+.post-ficha-red i { color: var(--primary); font-style: normal; }
+.feed-tag-carrusel { left: auto; right: 0.4em; background: rgba(15, 23, 42, .68); color: white; }
