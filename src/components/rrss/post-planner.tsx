@@ -354,10 +354,22 @@ export function PostPlanner() {
     }
   }
 
+  /**
+   * Una publicación ya subida no se mueve: su sitio en el perfil es un hecho,
+   * no un plan. Tampoco se la puede empujar moviendo a la de al lado, así que
+   * la regla mira las dos: la que se mueve y la de su destino.
+   */
+  const fijada = (post: Post | undefined) => post?.status === "subida";
+
+  function noSeMueve() {
+    setAviso("Esa publicación ya está subida y no se mueve del feed. Si de verdad quieres cambiarla de sitio, desmárcala antes.");
+  }
+
   function mover(id: string, hacia: -1 | 1) {
     const desde = posts.findIndex((post) => post.id === id);
     const hasta = desde + hacia;
     if (desde < 0 || hasta < 0 || hasta >= posts.length) return;
+    if (fijada(posts[desde]) || fijada(posts[hasta])) { noSeMueve(); return; }
     const copia = [...posts];
     [copia[desde], copia[hasta]] = [copia[hasta], copia[desde]];
     void guardarOrden(copia);
@@ -370,6 +382,7 @@ export function PostPlanner() {
     const desde = posts.findIndex((post) => post.id === idOrigen);
     const hasta = posts.findIndex((post) => post.id === idDestino);
     if (desde < 0 || hasta < 0) return;
+    if (fijada(posts[desde]) || fijada(posts[hasta])) { noSeMueve(); return; }
     const copia = [...posts];
     const [movida] = copia.splice(desde, 1);
     copia.splice(hasta, 0, movida);
@@ -773,15 +786,22 @@ export function PostPlanner() {
               {posts.map((post, posicion) => {
                 const portada = post.imagenes[0] ?? null;
                 const conTexto = redesDelCanal.some((red) => (post.captions[red] ?? "").trim());
+                const quieta = fijada(post);
+                const sePuedeArrastrar = canEdit && !seleccionando && !quieta;
+                const cabeAntes = canEdit && !quieta && posicion > 0 && !fijada(posts[posicion - 1]);
+                const cabeDespues = canEdit && !quieta && posicion < posts.length - 1 && !fijada(posts[posicion + 1]);
                 return (
                   <figure
                     key={post.id}
                     className={`feed-tile${moviendo === post.id ? " is-moving" : ""}${post.status === "pendiente" ? " is-pending" : ""}`}
-                    draggable={canEdit && !seleccionando}
-                    onDragStart={() => canEdit && !seleccionando && setMoviendo(post.id)}
+                    draggable={sePuedeArrastrar}
+                    onDragStart={() => sePuedeArrastrar && setMoviendo(post.id)}
                     onDragEnd={() => setMoviendo(null)}
-                    onDragOver={(event) => event.preventDefault()}
+                    // Sin preventDefault no se puede soltar: el cursor ya avisa
+                    // de que encima de una subida no vale.
+                    onDragOver={(event) => { if (!quieta && moviendo) event.preventDefault(); }}
                     onDrop={() => soltarSobre(post.id)}
+                    title={quieta ? "Ya está subida: desmárcala para poder moverla" : undefined}
                   >
                     <button
                       type="button"
@@ -802,9 +822,9 @@ export function PostPlanner() {
                     <figcaption className="feed-tile-bar">
                       {canEdit ? (
                         <>
-                          <button type="button" className="feed-tile-button" onClick={() => mover(post.id, -1)} disabled={posicion === 0} aria-label="Mover una posición antes">←</button>
+                          <button type="button" className="feed-tile-button" onClick={() => mover(post.id, -1)} disabled={!cabeAntes} aria-label="Mover una posición antes">←</button>
                           <span>{posicion + 1}</span>
-                          <button type="button" className="feed-tile-button" onClick={() => mover(post.id, 1)} disabled={posicion === posts.length - 1} aria-label="Mover una posición después">→</button>
+                          <button type="button" className="feed-tile-button" onClick={() => mover(post.id, 1)} disabled={!cabeDespues} aria-label="Mover una posición después">→</button>
                           <button
                             type="button"
                             className={post.status === "subida" ? "feed-tile-button is-on" : "feed-tile-button"}
