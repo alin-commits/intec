@@ -28,6 +28,24 @@ import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER } from "@/lib/leads/atencion";
 
 const STORAGE_KEY = "intec-demo-leads";
+
+type SortKey = "createdAt" | "unit" | "contact" | "campaign" | "status" | "owners" | "interest" | "value";
+type SortState = { key: SortKey; direction: "asc" | "desc" } | null;
+
+const SORTABLE_COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "createdAt", label: "Fecha" },
+  { key: "unit", label: "Unidad" },
+  { key: "contact", label: "Contacto / empresa" },
+  { key: "campaign", label: "Campaña" },
+  { key: "status", label: "Estado" },
+  { key: "owners", label: "Responsables" },
+  { key: "interest", label: "Interés" },
+  { key: "value", label: "Valor" },
+];
+/** Las fechas y los importes se leen mejor empezando por el más reciente y el mayor. */
+const DESC_FIRST: SortKey[] = ["createdAt", "value"];
+/** El estado no se ordena por alfabeto, sino por dónde está en el embudo. */
+const ORDEN_ESTADOS = Object.keys(leadStatusLabels) as LeadStatus[];
 /** Al pasar a estos estados se pide el importe: es el de su oferta o su venta en Consultas. */
 const VALUE_STATUSES: LeadStatus[] = ["offer_sent", "won"];
 
@@ -169,6 +187,8 @@ export function LeadsTable() {
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   /** Cómo se atendió: a tiempo, tarde, o todavía sin tocar. */
   const [atencionFilter, setAtencionFilter] = useState<"all" | "tarde" | "sin-atender">("all");
+  /** Null es el orden de siempre: lo más nuevo arriba. */
+  const [sort, setSort] = useState<SortState>(null);
   /**
    * El reloj de la última carga. Se guarda en vez de mirar la hora al pintar
    * porque React no deja llamar a `new Date()` durante el render; mientras está
@@ -225,6 +245,45 @@ export function LeadsTable() {
   }), [query, rows, status, unitId, dateFrom, dateTo, ownerFilter, currentUserId, atencionFilter, atencionPorLead]);
 
   const teamById = useMemo(() => new Map(team.map((member) => [member.id, member.fullName])), [team]);
+
+  /**
+   * La lista tal y como se ve: los filtros deciden qué sale y la cabecera, en
+   * qué orden. Es la misma que se exporta, para que el CSV y el PDF salgan como
+   * están en pantalla y no en otro orden que nadie pidió.
+   */
+  const sortedRows = useMemo(() => {
+    const nombreUnidad = (lead: Lead) => units.find((unit) => unit.id === lead.businessUnitId)?.name ?? "";
+    const responsables = (lead: Lead) => (lead.assignees ?? []).map((owner) => teamById.get(owner) ?? "").sort().join(" ");
+    // Sin orden elegido, el de siempre: lo más nuevo arriba.
+    const porDefecto = (a: Lead, b: Lead) => b.createdAt.localeCompare(a.createdAt) || a.contactName.localeCompare(b.contactName, "es");
+    return [...visibleRows].sort((a, b) => {
+      if (!sort) return porDefecto(a, b);
+      const factor = sort.direction === "asc" ? 1 : -1;
+      let resultado = 0;
+      switch (sort.key) {
+        case "createdAt": resultado = a.createdAt.localeCompare(b.createdAt); break;
+        case "unit": resultado = nombreUnidad(a).localeCompare(nombreUnidad(b), "es"); break;
+        case "contact": resultado = `${a.contactName} ${a.clientCompanyName}`.localeCompare(`${b.contactName} ${b.clientCompanyName}`, "es"); break;
+        case "campaign": resultado = (a.campaign || "General").localeCompare(b.campaign || "General", "es"); break;
+        case "status": resultado = ORDEN_ESTADOS.indexOf(a.status) - ORDEN_ESTADOS.indexOf(b.status); break;
+        case "owners": resultado = responsables(a).localeCompare(responsables(b), "es"); break;
+        case "interest": resultado = (a.productInterest ?? "").localeCompare(b.productInterest ?? "", "es"); break;
+        case "value": resultado = (a.saleValue ?? 0) - (b.saleValue ?? 0); break;
+      }
+      return resultado === 0 ? porDefecto(a, b) : resultado * factor;
+    });
+  }, [visibleRows, sort, units, teamById]);
+
+  function toggleSort(key: SortKey) {
+    setSort((actual) => {
+      const primero = DESC_FIRST.includes(key) ? "desc" : "asc";
+      if (!actual || actual.key !== key) return { key, direction: primero };
+      // Al tercer clic se vuelve al orden de siempre.
+      if (actual.direction === primero) return { key, direction: primero === "asc" ? "desc" : "asc" };
+      return null;
+    });
+  }
+
   const ownerName = (id: string) => teamById.get(id) ?? "Usuario inactivo";
   const recordOf = (lead: Lead) => leadRecord({
     createdAt: lead.createdAt,
@@ -518,7 +577,7 @@ export function LeadsTable() {
       { label: "Conversión (%)", value: visibleRows.length ? formatPercent((won.length / visibleRows.length) * 100) : "0,0 %" },
       { label: "Valor ganado (€)", value: totalValue },
     ];
-    downloadCsvReport(`informe_leads_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleRows, [
+    downloadCsvReport(`informe_leads_${new Date().toISOString().slice(0, 10)}.csv`, summary, sortedRows, [
       { header: "Fecha", value: (lead) => formatDate(lead.createdAt) },
       { header: "Unidad", value: (lead) => units.find((unit) => unit.id === lead.businessUnitId)?.name ?? "" },
       { header: "Contacto", value: (lead) => lead.contactName },
@@ -548,7 +607,7 @@ export function LeadsTable() {
         wonCount: won.length,
         conversionLabel: visibleRows.length ? formatPercent((won.length / visibleRows.length) * 100) : "0,0 %",
         wonValue: totalValue,
-        leads: visibleRows,
+        leads: sortedRows,
         units,
         ownerNames,
       });
@@ -642,8 +701,21 @@ export function LeadsTable() {
       <section className="panel table-panel">
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto / empresa</th><th>Campaña</th><th>Estado</th><th>Responsables</th><th>Interés</th><th>Valor</th><th>Acciones</th></tr></thead>
-            <tbody>{visibleRows.map((lead) => {
+            <thead><tr>
+              {SORTABLE_COLUMNS.map((column) => {
+                const activa = sort?.key === column.key;
+                return (
+                  <th key={column.key} aria-sort={activa ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className={activa ? "sort-header active" : "sort-header"} onClick={() => toggleSort(column.key)} title="Ordenar">
+                      {column.label}
+                      <span aria-hidden="true">{activa ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+                    </button>
+                  </th>
+                );
+              })}
+              <th>Acciones</th>
+            </tr></thead>
+            <tbody>{sortedRows.map((lead) => {
               const unit = units.find((item) => item.id === lead.businessUnitId);
               return (
                 <tr key={lead.id} className="table-row-clickable" onClick={() => openEdit(lead)}>
@@ -664,7 +736,7 @@ export function LeadsTable() {
                 </tr>
               );
             })}
-            {visibleRows.length === 0 ? <tr><td colSpan={9} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
+            {sortedRows.length === 0 ? <tr><td colSpan={9} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
             </tbody>
           </table>
         </div>
