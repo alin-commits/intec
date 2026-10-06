@@ -62,6 +62,8 @@ export async function GET(request: Request) {
 
   const elegidas = (cuentas ?? []).filter((cuenta) => !soloCuenta || cuenta.account_id === soloCuenta);
   const resumen: Record<string, string>[] = [];
+  /** Campañas de la aplicación que se dan por finalizadas porque Meta las archivó. */
+  let finalizadas = 0;
 
   for (const cuenta of elegidas) {
     const empezado = new Date().toISOString();
@@ -95,6 +97,11 @@ export async function GET(request: Request) {
 
       const campanas = await fetchCampaigns(cuenta.account_id, token);
       await guardarCampanas(campanas);
+      // Si Meta dice que una campaña está archivada, aquí se da por finalizada:
+      // en el panel no puede seguir saliendo "Activa" algo que ya no corre.
+      const { data: cerradas, error: errorEstado } = await admin.rpc("meta_sync_campaign_status");
+      if (errorEstado) console.warn("No se pudo poner al día el estado de las campañas:", errorEstado.message);
+      else if (Number(cerradas) > 0) finalizadas += Number(cerradas);
 
       for (const ventana of ventanas(desde, hasta)) {
         const datos = await fetchDailyInsights(cuenta.account_id, token, ventana.from, ventana.to);
@@ -171,5 +178,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ desde, hasta, cuentas: resumen, campanas, formularios });
+  return NextResponse.json({ desde, hasta, cuentas: resumen, campanas, formularios, finalizadas });
 }

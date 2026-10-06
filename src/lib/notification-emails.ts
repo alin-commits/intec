@@ -129,6 +129,34 @@ export function buildPendingTicketsEmail(input: { recipientName: string | null; 
   return { subject, html: emailShell("Tickets pendientes", body, "Intec Commercial Hub", 620) };
 }
 
+// ---------- Resumen semanal para dirección ----------
+
+export type WeeklyBlock = { title: string; rows: { label: string; value: string; note?: string }[] };
+
+/**
+ * El lunes por la mañana, cómo fue la semana pasada. Dirección no entra todos
+ * los días en el Hub: si hay que ir a buscar el dato, no se mira. Esto es lo
+ * necesario, no todo lo que hay.
+ */
+export function buildWeeklyDigestEmail(input: { recipientName: string | null; periodLabel: string; blocks: WeeklyBlock[]; url: string }): EmailContent {
+  const bloque = (b: WeeklyBlock) => `
+    <p style="margin:18px 0 0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#64748b;">${escapeHtml(b.title)}</p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:6px;">
+      ${b.rows.map((r) => `<tr>
+        <td style="${CELL}color:#64748b;">${escapeHtml(r.label)}${r.note ? `<br><span style="font-size:11px;color:#94a3b8;">${escapeHtml(r.note)}</span>` : ""}</td>
+        <td style="${CELL}text-align:right;font-weight:800;white-space:nowrap;">${escapeHtml(r.value)}</td>
+      </tr>`).join("")}
+    </table>`;
+
+  const body = `
+    <p>Hola${input.recipientName ? ` ${escapeHtml(input.recipientName)}` : ""},</p>
+    <p>Así fue <strong>${escapeHtml(input.periodLabel)}</strong>.</p>
+    ${input.blocks.map(bloque).join("")}
+    ${emailButton(input.url, "Abrir el panel")}
+  `;
+  return { subject: `Resumen de la semana — ${input.periodLabel}`, html: emailShell("Resumen semanal", body, "Intec Commercial Hub", 620) };
+}
+
 // ---------- Monthly report ----------
 
 export function buildMonthlyReportEmail(input: { monthLabel: string; stats: { label: string; value: string }[]; url: string }): EmailContent {

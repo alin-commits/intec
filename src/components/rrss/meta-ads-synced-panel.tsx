@@ -313,11 +313,15 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       // hace que la pestaña de Campañas vea este gasto.
       const actual = campanas.find((c) => c.meta_id === editando.id)?.campaign_id ?? "";
       if (enlace !== actual) {
-        // Lo que decide una persona manda: la sincronización de la mañana ya no
-        // vuelve a unir (ni a soltar) esta campaña por su cuenta.
-        const { error: errorEnlace } = await supabase.from("meta_campaigns")
-          .update({ campaign_id: enlace || null, link_locked: true, linked_by: "persona", updated_at: new Date().toISOString() })
-          .eq("meta_id", editando.id);
+        // Va por función y no por update: meta_campaigns la rellena la
+        // sincronización y no admite escritura desde el navegador, así que un
+        // update salía filtrado por RLS y respondía "todo bien" sin guardar.
+        // Lo que decide una persona manda: la lectura de la mañana ya no vuelve
+        // a unir (ni a soltar) esta campaña por su cuenta.
+        const { error: errorEnlace } = await supabase.rpc("meta_campaign_set_link", {
+          p_meta_id: editando.id,
+          p_campaign_id: enlace || null,
+        });
         if (errorEnlace) throw errorEnlace;
       }
       await cargar();
