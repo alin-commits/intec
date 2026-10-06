@@ -7,9 +7,10 @@ import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { dateKeyInMadrid, inDateKeyRange, madridMidnightIso, monthKey, monthKeyInMadrid, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, shiftDateKey, yearOfMonth, yearRange } from "@/lib/dates";
-import { reportSafeError } from "@/lib/errors";
+import { WriteBlockedError, reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { computeTicketDashboardCounts, mapTicketRow, OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES, ticketBlockingLevelLabels, ticketCategoryLabels, ticketPriorityLabels, ticketStatusLabels } from "@/lib/tickets/constants";
@@ -303,8 +304,7 @@ export function TicketsManager() {
       if (status === "resolved") patch.resolved_at = new Date().toISOString();
       if (status === "closed") patch.closed_at = new Date().toISOString();
       const supabase = createClient();
-      const { error } = await supabase.from("tickets").update(patch).eq("id", ticket.id);
-      if (error) throw error;
+      await writeRows(supabase.from("tickets").update(patch).eq("id", ticket.id), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       if (currentUserId) {
         await supabase.from("ticket_events").insert({ ticket_id: ticket.id, actor_id: currentUserId, event_type: "status_change", previous_value: ticket.status, new_value: status });
       }
@@ -343,8 +343,13 @@ export function TicketsManager() {
       const ids = Array.from(selectedIds);
       const supabase = createClient();
       if (pendingBulkAction === "archive") {
-        const { error } = await supabase.from("tickets").update({ archived_at: new Date().toISOString() }).in("id", ids);
-        if (error) throw error;
+        const archivados = await writeRows(
+          supabase.from("tickets").update({ archived_at: new Date().toISOString() }).in("id", ids),
+          "No se archivó ningún ticket. Comprueba que tu rol permite archivarlos.",
+        );
+        // Un archivado a medias hay que contarlo: la lista se vacía igual y si
+        // no se dice, parece que fueron todos.
+        if (archivados !== ids.length) throw new WriteBlockedError(`Solo se archivaron ${archivados} de ${ids.length} tickets. Recarga para ver cuáles siguen abiertos.`);
         if (currentUserId) {
           await supabase.from("ticket_events").insert(ids.map((id) => ({ ticket_id: id, actor_id: currentUserId, event_type: "archived", new_value: "archived" })));
         }
@@ -353,8 +358,11 @@ export function TicketsManager() {
         const { data: attachments } = await supabase.from("ticket_attachments").select("path").in("ticket_id", ids);
         const paths = (attachments ?? []).map((row) => row.path as string);
         if (paths.length > 0) await supabase.storage.from("ticket-attachments").remove(paths);
-        const { error } = await supabase.from("tickets").delete().in("id", ids);
-        if (error) throw error;
+        const borrados = await writeRows(
+          supabase.from("tickets").delete().in("id", ids),
+          "No se eliminó ningún ticket. Comprueba que tu rol permite borrarlos.",
+        );
+        if (borrados !== ids.length) throw new WriteBlockedError(`Solo se eliminaron ${borrados} de ${ids.length} tickets. Recarga para ver cuáles siguen ahí.`);
         setMessage(`${ids.length} ticket${ids.length === 1 ? "" : "s"} eliminado${ids.length === 1 ? "" : "s"}.`);
       }
       setTickets((current) => current.filter((ticket) => !ids.includes(ticket.id)));

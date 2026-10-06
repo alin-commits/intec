@@ -6,6 +6,7 @@ import { Modal } from "@/components/ui/modal";
 import { reportSafeError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import {
   cleanNoteContent,
   createBlock,
@@ -308,8 +309,10 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
       const payload = { title: title.slice(0, 200), category: draft.category, pinned: draft.pinned, content: cleanNoteContent(draft.content), updated_by: currentUserId };
       let noteId = draft.id;
       if (noteId) {
-        const { error } = await supabase.from("it_notes").update(payload).eq("id", noteId);
-        if (error) throw error;
+        await writeRows(
+          supabase.from("it_notes").update(payload).eq("id", noteId),
+          "No se pudo guardar la nota: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+        );
       } else {
         const { data, error } = await supabase.from("it_notes").insert({ ...payload, id: draft.noteId, created_by: currentUserId }).select("id").single();
         if (error) throw error;
@@ -360,9 +363,13 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
   }
 
   async function togglePinned(note: ItNote) {
-    const { error } = await createClient().from("it_notes").update({ pinned: !note.pinned }).eq("id", note.id);
-    if (error) {
-      onMessage(reportSafeError(error, "No se pudo fijar la nota."));
+    try {
+      await writeRows(
+        createClient().from("it_notes").update({ pinned: !note.pinned }).eq("id", note.id),
+        "No se pudo fijar la nota: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+      );
+    } catch (cause) {
+      onMessage(reportSafeError(cause, "No se pudo fijar la nota."));
       return;
     }
     setNotes((current) => current.map((item) => (item.id === note.id ? { ...item, pinned: !note.pinned } : item)));
@@ -375,8 +382,10 @@ export function ItNotesPanel({ canManage, currentUserId, onMessage }: {
       const supabase = createClient();
       const paths = (filesByNote.get(pendingDelete.id) ?? []).map((file) => file.path);
       if (paths.length > 0) await supabase.storage.from(IT_NOTES_BUCKET).remove(paths);
-      const { error } = await supabase.from("it_notes").delete().eq("id", pendingDelete.id);
-      if (error) throw error;
+      await writeRows(
+        supabase.from("it_notes").delete().eq("id", pendingDelete.id),
+        "No se pudo eliminar la nota. Comprueba que tu rol permite borrarla.",
+      );
       setNotes((current) => current.filter((note) => note.id !== pendingDelete.id));
       setFiles((current) => current.filter((file) => file.noteId !== pendingDelete.id));
       setViewingId(null);

@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { isValidIban } from "@/lib/confirming";
 import { BANK_NAMES, formatForBank, settingKey, type BankName, type BankSetting } from "@/lib/payments";
+import { reportSafeError } from "@/lib/errors";
 import { createClient } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { LoadFailed, Panel, useSageQuery } from "@/components/sales/sales-ui";
 import type { PaymentsContext } from "./payments-view";
 
@@ -101,26 +103,28 @@ export function BankSettingsTab({ ctx }: { ctx: PaymentsContext }) {
       return;
     }
     setSaving(key);
-    const { error } = await createClient().from("payment_bank_settings").upsert({
-      company_code: draft.company_code,
-      sage_bank_code: draft.sage_bank_code,
-      bank_name: draft.bank_name,
-      format: formatForBank(draft.bank_name),
-      contract: draft.contract.trim(),
-      suffix: draft.suffix.trim() || null,
-      charge_iban: draft.charge_iban.replace(/\s+/g, "").toUpperCase() || null,
-      modality: draft.modality,
-      deferral_days: draft.deferral_days.trim() ? Number(draft.deferral_days) : null,
-      write_charge_date: draft.write_charge_date,
-      fallback_email: draft.fallback_email.trim() || null,
-      active: draft.active,
-      updated_by: ctx.userId,
-    }, { onConflict: "company_code,sage_bank_code" });
-    setSaving(null);
-    if (error) {
-      console.error("No se pudo guardar el banco:", error);
-      ctx.notify("No se pudo guardar. Vuelve a intentarlo.");
+    try {
+      await writeRows(createClient().from("payment_bank_settings").upsert({
+        company_code: draft.company_code,
+        sage_bank_code: draft.sage_bank_code,
+        bank_name: draft.bank_name,
+        format: formatForBank(draft.bank_name),
+        contract: draft.contract.trim(),
+        suffix: draft.suffix.trim() || null,
+        charge_iban: draft.charge_iban.replace(/\s+/g, "").toUpperCase() || null,
+        modality: draft.modality,
+        deferral_days: draft.deferral_days.trim() ? Number(draft.deferral_days) : null,
+        write_charge_date: draft.write_charge_date,
+        fallback_email: draft.fallback_email.trim() || null,
+        active: draft.active,
+        updated_by: ctx.userId,
+      }, { onConflict: "company_code,sage_bank_code" }),
+        "No se pudo guardar la configuración del banco. Comprueba que tu rol permite cambiarla.");
+    } catch (cause) {
+      ctx.notify(reportSafeError(cause, "No se pudo guardar. Vuelve a intentarlo."));
       return;
+    } finally {
+      setSaving(null);
     }
     setDrafts((current) => {
       const next = { ...current };

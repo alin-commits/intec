@@ -15,6 +15,7 @@ import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
 import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { dateKeyInMadrid, dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, todayKey, yearOfMonth, yearRange } from "@/lib/dates";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
@@ -517,8 +518,10 @@ export function InquiryRegister() {
     setBusy(true);
     try {
       if (configured) {
-        const { error } = await createClient().from("inquiries").delete().eq("id", pendingDelete.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("inquiries").delete().eq("id", pendingDelete.id),
+          "No se pudo eliminar. Solo un admin, o quien la registró durante los 10 minutos siguientes, puede borrar una consulta.",
+        );
       }
       setRecords((current) => current.filter((record) => record.id !== pendingDelete.id));
       setMessage("Consulta eliminada.");
@@ -551,12 +554,14 @@ export function InquiryRegister() {
     setBusy(true);
     try {
       if (configured) {
-        const { error } = await createClient().from("inquiries").update({
-          business_unit_id: editDraft.businessUnitId,
-          inquiry_type: editDraft.inquiryType,
-          ...(editingRecord.entryMode === "weekly" ? { count } : {}),
-        }).eq("id", editingRecord.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("inquiries").update({
+            business_unit_id: editDraft.businessUnitId,
+            inquiry_type: editDraft.inquiryType,
+            ...(editingRecord.entryMode === "weekly" ? { count } : {}),
+          }).eq("id", editingRecord.id),
+          "No se pudo guardar la consulta: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+        );
       }
       setRecords((current) => current.map((item) => item.id === editingRecord.id
         ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType, count: editingRecord.entryMode === "weekly" ? count : item.count }
@@ -650,13 +655,15 @@ export function InquiryRegister() {
     setBusy(true);
     try {
       if (configured) {
-        const { error } = await createClient().from("sales_entries").update({
-          business_unit_id: saleEditDraft.businessUnitId,
-          sale_type: saleEditDraft.saleType,
-          value,
-          count,
-        }).eq("id", editingSale.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("sales_entries").update({
+            business_unit_id: saleEditDraft.businessUnitId,
+            sale_type: saleEditDraft.saleType,
+            value,
+            count,
+          }).eq("id", editingSale.id),
+          "No se pudo guardar la venta: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+        );
       }
       setSalesEntries((current) => current.map((entry) => entry.id === editingSale.id
         ? { ...entry, businessUnitId: saleEditDraft.businessUnitId, saleType: saleEditDraft.saleType, value, count }
@@ -675,8 +682,12 @@ export function InquiryRegister() {
     setBusy(true);
     try {
       if (configured) {
-        const { error } = await createClient().from("sales_entries").delete().eq("id", pendingDeleteSale.id);
-        if (error) throw error;
+        // Las ventas que vienen de un lead no se borran aquí: la política de la
+        // base las protege y el borrado se iría en silencio sin esta comprobación.
+        await writeRows(
+          createClient().from("sales_entries").delete().eq("id", pendingDeleteSale.id),
+          "No se pudo eliminar esta venta. Si viene de un lead, se quita desde el lead; si no, solo un admin o quien la registró hace menos de 10 minutos puede borrarla.",
+        );
       }
       setSalesEntries((current) => current.filter((entry) => entry.id !== pendingDeleteSale.id));
       setMessage("Venta eliminada.");

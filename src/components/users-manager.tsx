@@ -5,6 +5,7 @@ import { USER_MANAGER_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Toast } from "@/components/ui/toast";
 import type { AppRole, Profile } from "@/lib/types";
@@ -194,12 +195,17 @@ export function UsersManager() {
     const dbPatch: Record<string, unknown> = {};
     if (patch.roles) dbPatch.roles = patch.roles;
     if (typeof patch.isActive === "boolean") dbPatch.is_active = patch.isActive;
-    const { error } = await createClient().from("profiles").update(dbPatch).eq("id", id);
-    if (error) setMessage(reportSafeError(error, "No se pudo actualizar el usuario."));
-    else {
-      setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
-      setMessage("Usuario actualizado correctamente.");
+    try {
+      await writeRows(
+        createClient().from("profiles").update(dbPatch).eq("id", id),
+        "No se pudo actualizar el usuario: puede que su ficha ya no exista o que tu rol no permita cambiarla.",
+      );
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo actualizar el usuario."));
+      return;
     }
+    setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
+    setMessage("Usuario actualizado correctamente.");
   }
 
   async function confirmDeleteUser() {

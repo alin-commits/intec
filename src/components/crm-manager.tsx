@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "
 import { CRM_EDIT_ROLES, CRM_ROLES, hasAnyRole } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoCrmContacts } from "@/lib/demo-data";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { displayName, formatDate, formatDateTime } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -311,10 +312,15 @@ export function CrmManager() {
         origin: draft.origin.trim() || null,
         status: draft.status,
       };
-      const result = editingId
-        ? await supabase.from("crm_contacts").update(payload).eq("id", editingId)
-        : await supabase.from("crm_contacts").insert(payload);
-      if (result.error) throw result.error;
+      if (editingId) {
+        await writeRows(
+          supabase.from("crm_contacts").update(payload).eq("id", editingId),
+          "No se pudo guardar el contacto: puede que alguien lo haya borrado o que tu rol no permita cambiarlo.",
+        );
+      } else {
+        const { error } = await supabase.from("crm_contacts").insert(payload);
+        if (error) throw error;
+      }
       await loadRealData();
       setMessage(editingId ? "Contacto actualizado correctamente." : "Contacto creado correctamente.");
       setEditorOpen(false);
@@ -345,10 +351,15 @@ export function CrmManager() {
     const changedAt = new Date().toISOString();
     setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status, statusChangedAt: changedAt } : item));
     if (!configured) return;
-    const { error } = await createClient().from("crm_contacts").update({ status }).eq("id", contact.id);
-    if (error) {
+    try {
+      await writeRows(
+        createClient().from("crm_contacts").update({ status }).eq("id", contact.id),
+        "No se pudo cambiar el estado: puede que alguien haya borrado el contacto o que tu rol no permita cambiarlo.",
+      );
+    } catch (cause) {
+      // La tabla ya enseña el estado nuevo; si la base no lo acepta, se vuelve atrás.
       setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status: previous, statusChangedAt: contact.statusChangedAt } : item));
-      setMessage(reportSafeError(error, "No se pudo cambiar el estado."));
+      setMessage(reportSafeError(cause, "No se pudo cambiar el estado."));
       return;
     }
     setMessage(`${contact.fullName}: ${statusInfo(status).label}.`);
@@ -366,8 +377,10 @@ export function CrmManager() {
         return;
       }
       const supabase = createClient();
-      const { error } = await supabase.from("crm_contacts").delete().eq("id", pendingDelete.id);
-      if (error) throw error;
+      await writeRows(
+        supabase.from("crm_contacts").delete().eq("id", pendingDelete.id),
+        "No se pudo eliminar el contacto. Comprueba que tu rol permite borrarlo.",
+      );
       setContacts((current) => current.filter((contact) => contact.id !== pendingDelete.id));
       setMessage("Contacto eliminado correctamente.");
       setPendingDelete(null);

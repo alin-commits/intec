@@ -8,6 +8,7 @@ import { MyBusinessCards } from "@/components/my-business-cards";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { CARDS_ROLES, hasAnyRole } from "@/lib/constants";
 import { businessUnits as demoBusinessUnits, demoBusinessCards, demoProfiles } from "@/lib/demo-data";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { BusinessCard, BusinessUnit } from "@/lib/types";
@@ -279,10 +280,15 @@ export function BusinessCardsManager() {
       }
 
       const supabase = createClient();
-      const result = editingId
-        ? await supabase.from("business_cards").update(payload).eq("id", editingId)
-        : await supabase.from("business_cards").insert(payload);
-      if (result.error) throw result.error;
+      if (editingId) {
+        await writeRows(
+          supabase.from("business_cards").update(payload).eq("id", editingId),
+          "No se pudo guardar la tarjeta: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+        );
+      } else {
+        const { error } = await supabase.from("business_cards").insert(payload);
+        if (error) throw error;
+      }
       await loadRealData();
       setMessage(editingId ? "Tarjeta actualizada correctamente." : "Tarjeta creada correctamente.");
       setEditorOpen(false);
@@ -304,8 +310,10 @@ export function BusinessCardsManager() {
         setPendingDelete(null);
         return;
       }
-      const { error } = await createClient().from("business_cards").delete().eq("id", pendingDelete.id);
-      if (error) throw error;
+      await writeRows(
+        createClient().from("business_cards").delete().eq("id", pendingDelete.id),
+        "No se pudo eliminar la tarjeta. Comprueba que tu rol permite borrarla.",
+      );
       setCards((current) => current.filter((card) => card.id !== pendingDelete.id));
       setMessage("Tarjeta eliminada correctamente.");
       setPendingDelete(null);

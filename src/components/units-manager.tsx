@@ -11,6 +11,7 @@ import { monthKey, monthRange } from "@/lib/dates";
 import { reportSafeError } from "@/lib/errors";
 import { formatPercent } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit } from "@/lib/types";
 import { PageLoader } from "@/components/ui/page-loader";
@@ -219,10 +220,15 @@ export function UnitsManager() {
         visible_in_leads: draft.visibleInLeads,
         ...(editingId ? {} : { sort_order: units.length }),
       };
-      const result = editingId
-        ? await supabase.from("business_units").update(payload).eq("id", editingId)
-        : await supabase.from("business_units").insert(payload);
-      if (result.error) throw result.error;
+      if (editingId) {
+        await writeRows(
+          supabase.from("business_units").update(payload).eq("id", editingId),
+          "No se pudo guardar la unidad: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+        );
+      } else {
+        const { error } = await supabase.from("business_units").insert(payload);
+        if (error) throw error;
+      }
       await loadRealData();
       setMessage(editingId ? "Unidad actualizada correctamente." : "Unidad creada correctamente.");
       setEditorOpen(false);
@@ -246,12 +252,15 @@ export function UnitsManager() {
     }));
     if (!configured) return;
     const supabase = createClient();
-    const [a, b] = await Promise.all([
-      supabase.from("business_units").update({ sort_order: other.sortOrder }).eq("id", unit.id),
-      supabase.from("business_units").update({ sort_order: unit.sortOrder }).eq("id", other.id),
-    ]);
-    if (a.error || b.error) {
-      setMessage(reportSafeError(a.error ?? b.error, "No se pudo reordenar la unidad."));
+    try {
+      // El orden ya se ha movido en pantalla; si la base no lo acepta, se
+      // recarga para no dejar una lista que no es la de verdad.
+      await Promise.all([
+        writeRows(supabase.from("business_units").update({ sort_order: other.sortOrder }).eq("id", unit.id), "No se pudo reordenar la unidad."),
+        writeRows(supabase.from("business_units").update({ sort_order: unit.sortOrder }).eq("id", other.id), "No se pudo reordenar la unidad."),
+      ]);
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo reordenar la unidad."));
       await loadRealData();
     }
   }
@@ -279,8 +288,10 @@ export function UnitsManager() {
         setPendingDelete(null);
         return;
       }
-      const { error } = await supabase.from("business_units").delete().eq("id", pendingDelete.id);
-      if (error) throw error;
+      await writeRows(
+        supabase.from("business_units").delete().eq("id", pendingDelete.id),
+        "No se pudo eliminar la unidad. Comprueba que tu rol permite borrarla.",
+      );
       if (pendingDelete.logo?.includes(`/${LOGO_BUCKET}/`)) {
         const logoPath = pendingDelete.logo.split(`/${LOGO_BUCKET}/`)[1];
         if (logoPath) await supabase.storage.from(LOGO_BUCKET).remove([logoPath]);

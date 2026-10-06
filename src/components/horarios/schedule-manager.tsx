@@ -9,6 +9,7 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { SCHEDULE_EDIT_ROLES, SCHEDULE_ROLES, hasAnyRole } from "@/lib/constants";
 import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { exportSchedulePdf } from "@/lib/horarios/schedule-pdf";
 import {
@@ -329,7 +330,7 @@ export function ScheduleManager() {
         if (error) throw error;
       }
       if (aPoner.length) {
-        const { error } = await supabase.from("staff_exceptions").upsert(aPoner.map((c) => ({
+        await writeRows(supabase.from("staff_exceptions").upsert(aPoner.map((c) => ({
           member_id: c.memberId,
           day: c.day,
           kind: c.pincel,
@@ -338,8 +339,7 @@ export function ScheduleManager() {
           afternoon_start: c.shift?.afternoon?.start ?? null,
           afternoon_end: c.shift?.afternoon?.end ?? null,
           updated_at: new Date().toISOString(),
-        })), { onConflict: "member_id,day" });
-        if (error) throw error;
+        })), { onConflict: "member_id,day" }), "No se pudieron guardar los cambios del cuadrante. Tu rol no permite escribirlos.");
       }
       setPendientes(new Map());
       await load(month);
@@ -409,10 +409,17 @@ export function ScheduleManager() {
   async function saveNote(semana: string, note: string) {
     try {
       const supabase = createClient();
-      const { error } = note.trim()
-        ? await supabase.from("staff_week_notes").upsert({ week_start: semana, note: note.trim(), updated_at: new Date().toISOString() }, { onConflict: "week_start" })
-        : await supabase.from("staff_week_notes").delete().eq("week_start", semana);
-      if (error) throw error;
+      if (note.trim()) {
+        await writeRows(
+          supabase.from("staff_week_notes").upsert({ week_start: semana, note: note.trim(), updated_at: new Date().toISOString() }, { onConflict: "week_start" }),
+          "No se pudo guardar el aviso de la semana. Tu rol no permite escribirlo.",
+        );
+      } else {
+        // Vaciar un aviso que no estaba puesto no afecta a ninguna fila, y eso
+        // está bien: no se comprueba el número.
+        const { error } = await supabase.from("staff_week_notes").delete().eq("week_start", semana);
+        if (error) throw error;
+      }
       await load(month);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo guardar el aviso."));
@@ -448,8 +455,10 @@ export function ScheduleManager() {
     try {
       // Se desactiva en vez de borrarse: los meses pasados tienen que seguir
       // contando lo que ocurrió de verdad.
-      const { error } = await createClient().from("staff_members").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", borrando.id);
-      if (error) throw error;
+      await writeRows(
+        createClient().from("staff_members").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", borrando.id),
+        "No se pudo quitar: puede que ya la hayan quitado o que tu rol no permita cambiar el cuadrante.",
+      );
       setBorrando(null);
       await load(month);
       setMessage("Persona quitada del cuadrante.");

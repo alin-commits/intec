@@ -9,6 +9,7 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { downloadCsvReport } from "@/lib/csv-export";
 import { formatDate, currencyFormatter } from "@/lib/format";
 import { formatEuroForPdf, generatePdfReport } from "@/lib/pdf-report";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { todayKey } from "@/lib/dates";
 import { billingPeriodLabels, expenseCategoryColors, expenseCategoryLabels, type BillingPeriod, type ExpenseCategory, type MarketingExpense } from "@/lib/expenses";
@@ -309,10 +310,14 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
       }
       let savedId = editingId;
       if (editingId) {
-        const { error } = await supabase.from("marketing_invoices").update(payload).eq("id", editingId);
-        if (error) {
+        try {
+          await writeRows(
+            supabase.from("marketing_invoices").update(payload).eq("id", editingId),
+            "No se pudo guardar la factura: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+          );
+        } catch (cause) {
           if (createdExpenseId) await supabase.from("marketing_expenses").delete().eq("id", createdExpenseId);
-          throw error;
+          throw cause;
         }
       } else {
         const { data: created, error } = await supabase.from("marketing_invoices").insert(payload).select("id").single();
@@ -340,8 +345,10 @@ export function InvoicesPanel({ invoices, allInvoices, expenses, units, canEdit,
     setBusy(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("marketing_invoices").delete().eq("id", pendingDelete.id);
-      if (error) throw error;
+      await writeRows(
+        supabase.from("marketing_invoices").delete().eq("id", pendingDelete.id),
+        "No se pudo eliminar la factura. Comprueba que tu rol permite borrarla.",
+      );
       if (pendingDelete.filePath) await supabase.storage.from(INVOICE_BUCKET).remove([pendingDelete.filePath]);
       setPendingDelete(null);
       setEditorOpen(false);

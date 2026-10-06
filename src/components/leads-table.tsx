@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "
 import { LEADS_ROLES, LEAD_ASSIGN_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatDateTime, formatPercent, numberFormatter } from "@/lib/format";
 import { leadRecord, leadRecordText } from "@/lib/lead-log";
@@ -395,8 +396,10 @@ export function LeadsTable() {
         const supabase = createClient();
         let leadId = editingId;
         if (editingId) {
-          const { error } = await supabase.from("leads").update(payload).eq("id", editingId);
-          if (error) throw error;
+          await writeRows(
+            supabase.from("leads").update(payload).eq("id", editingId),
+            "No se pudo guardar el lead: puede que alguien lo haya borrado o que tu rol no permita cambiarlo.",
+          );
         } else {
           const { data, error } = await supabase.from("leads").insert(payload).select("id").single();
           if (error) throw error;
@@ -466,8 +469,10 @@ export function LeadsTable() {
         } : lead);
         persistDemo(next);
       } else {
-        const { error } = await createClient().from("leads").update(withValue ? { status: pendingStatus.status, sale_value: saleValue } : { status: pendingStatus.status }).eq("id", pendingStatus.lead.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("leads").update(withValue ? { status: pendingStatus.status, sale_value: saleValue } : { status: pendingStatus.status }).eq("id", pendingStatus.lead.id),
+          "No se pudo cambiar el estado: puede que alguien haya borrado el lead o que tu rol no permita cambiarlo.",
+        );
         await loadRealData();
       }
       setMessage(`Estado actualizado a ${leadStatusLabels[pendingStatus.status]}.`);

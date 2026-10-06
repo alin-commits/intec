@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Toast } from "@/components/ui/toast";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import type { BusinessCard, BusinessUnit } from "@/lib/types";
 
 export function MyBusinessCards({ cards, units, currentUserId }: { cards: BusinessCard[]; units: BusinessUnit[]; currentUserId: string }) {
@@ -33,8 +34,10 @@ export function MyBusinessCards({ cards, units, currentUserId }: { cards: Busine
         return;
       }
       const supabase = createClient();
-      const { error } = await supabase.from("business_card_preferences").upsert({ user_id: currentUserId, card_id: cardId });
-      if (error) throw error;
+      await writeRows(
+        supabase.from("business_card_preferences").upsert({ user_id: currentUserId, card_id: cardId }),
+        "No se pudo guardar la preferencia.",
+      );
       setPreferredId(cardId);
       setMessage("Preferencia guardada.");
     } catch {

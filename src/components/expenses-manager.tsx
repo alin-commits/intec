@@ -16,6 +16,7 @@ import { EXPENSES_EDIT_ROLES, EXPENSES_ROLES, hasAnyRole } from "@/lib/constants
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits } from "@/lib/demo-data";
 import { currencyFormatter, formatDate } from "@/lib/format";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { todayKey } from "@/lib/dates";
 import { exportExpenseReportPdf, type ExpenseReportRow } from "@/lib/expense-report-pdf";
@@ -393,8 +394,15 @@ export function ExpensesManager() {
         persistDemo(editingId ? expenses.map((expense) => (expense.id === editingId ? saved : expense)) : [saved, ...expenses]);
       } else {
         const supabase = createClient();
-        const { error } = editingId ? await supabase.from("marketing_expenses").update(payload).eq("id", editingId) : await supabase.from("marketing_expenses").insert(payload);
-        if (error) throw error;
+        if (editingId) {
+          await writeRows(
+            supabase.from("marketing_expenses").update(payload).eq("id", editingId),
+            "No se pudo guardar el gasto: puede que alguien lo haya borrado o que tu rol no permita cambiarlo.",
+          );
+        } else {
+          const { error } = await supabase.from("marketing_expenses").insert(payload);
+          if (error) throw error;
+        }
         await loadRealData();
       }
       setMessage(editingId ? "Gasto actualizado." : "Gasto añadido.");
@@ -413,8 +421,10 @@ export function ExpensesManager() {
       if (!configured) {
         persistDemo(expenses.map((expense) => (expense.id === pendingCancel.id ? { ...expense, status: "cancelled", cancelledOn: today } : expense)));
       } else {
-        const { error } = await createClient().from("marketing_expenses").update({ status: "cancelled", cancelled_on: today }).eq("id", pendingCancel.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("marketing_expenses").update({ status: "cancelled", cancelled_on: today }).eq("id", pendingCancel.id),
+          "No se pudo dar de baja: puede que alguien lo haya borrado o que tu rol no permita cambiarlo.",
+        );
         await loadRealData();
       }
       setMessage(`"${pendingCancel.name}" dado de baja. Se conserva en el historial.`);
@@ -433,8 +443,10 @@ export function ExpensesManager() {
       if (!configured) {
         persistDemo(expenses.filter((expense) => expense.id !== pendingDelete.id));
       } else {
-        const { error } = await createClient().from("marketing_expenses").delete().eq("id", pendingDelete.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("marketing_expenses").delete().eq("id", pendingDelete.id),
+          "No se pudo eliminar el gasto. Comprueba que tu rol permite borrarlo.",
+        );
         await loadRealData();
       }
       setMessage(`"${pendingDelete.name}" eliminado.`);

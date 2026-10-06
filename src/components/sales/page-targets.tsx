@@ -7,6 +7,7 @@ import { TrophyIcon, EuroIcon, CalendarIcon } from "@/components/icons";
 import { formatPercent } from "@/lib/format";
 import { euros, filterRows, groupRows, monthLongNames, monthNames, targetsFor, targetToDate, type SummaryRow } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import type { SalesContext } from "./sales-context";
 import { Panel } from "./sales-ui";
 
@@ -103,16 +104,21 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
       const current = byMonth.get(index + 1);
       if (value === null) {
         if (current) {
-          const { error } = await supabase.from("sales_targets").delete().eq("id", current.id);
-          if (error) errors.push(monthLongNames[index]);
+          try {
+            await writeRows(supabase.from("sales_targets").delete().eq("id", current.id), "No se pudo quitar el objetivo.");
+          } catch { errors.push(monthLongNames[index]); }
         }
         continue;
       }
       if (current && Number(current.amount) === value) continue;
-      const { error } = current
-        ? await supabase.from("sales_targets").update({ amount: value }).eq("id", current.id)
-        : await supabase.from("sales_targets").insert({ year: shownYear, month: index + 1, company_code: filters.company, rep_key: filters.repKey, amount: value });
-      if (error) errors.push(monthLongNames[index]);
+      try {
+        if (current) {
+          await writeRows(supabase.from("sales_targets").update({ amount: value }).eq("id", current.id), "No se pudo guardar el objetivo.");
+        } else {
+          const { error } = await supabase.from("sales_targets").insert({ year: shownYear, month: index + 1, company_code: filters.company, rep_key: filters.repKey, amount: value });
+          if (error) throw error;
+        }
+      } catch { errors.push(monthLongNames[index]); }
     }
     setSaving(false);
     ctx.reloadTargets();

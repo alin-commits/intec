@@ -8,6 +8,7 @@ import { Toast } from "@/components/ui/toast";
 import { hasAnyRole } from "@/lib/constants";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { mapTicketRow } from "@/lib/tickets/map";
 import { TICKET_MANAGER_ROLES, TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import type { Ticket, TicketNote, TicketNoteType, TicketPriority, TicketStatus } from "@/lib/tickets/types";
@@ -113,8 +114,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       const patch: Record<string, unknown> = { status };
       if (status === "resolved") patch.resolved_at = new Date().toISOString();
       if (status === "closed") patch.closed_at = new Date().toISOString();
-      const { error } = await createClient().from("tickets").update(patch).eq("id", ticketId);
-      if (error) throw error;
+      await writeRows(createClient().from("tickets").update(patch).eq("id", ticketId), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       await logEvent("status_change", ticket.status, status);
       await loadTicket();
       setMessage("Estado actualizado.");
@@ -147,8 +147,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     if (!ticket || priority === ticket.priority) return;
     setBusy(true);
     try {
-      const { error } = await createClient().from("tickets").update({ priority }).eq("id", ticketId);
-      if (error) throw error;
+      await writeRows(createClient().from("tickets").update({ priority }).eq("id", ticketId), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       await logEvent("priority_change", ticket.priority, priority);
       await loadTicket();
       setMessage("Prioridad actualizada.");
@@ -163,8 +162,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     if (!ticket) return;
     setBusy(true);
     try {
-      const { error } = await createClient().from("tickets").update({ resolution_time: resolutionTime.trim() || null }).eq("id", ticketId);
-      if (error) throw error;
+      await writeRows(createClient().from("tickets").update({ resolution_time: resolutionTime.trim() || null }).eq("id", ticketId), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       await loadTicket();
       setMessage("Tiempo empleado actualizado.");
     } catch (cause) {
@@ -209,8 +207,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
         category: draft.category,
         description: draft.description.trim(),
       };
-      const { error } = await createClient().from("tickets").update(patch).eq("id", ticketId);
-      if (error) throw error;
+      await writeRows(createClient().from("tickets").update(patch).eq("id", ticketId), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       await logEvent("details_edit", null, null);
       await loadTicket();
       setEditing(false);
@@ -239,8 +236,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   async function archiveTicket() {
     setBusy(true);
     try {
-      const { error } = await createClient().from("tickets").update({ archived_at: new Date().toISOString() }).eq("id", ticketId);
-      if (error) throw error;
+      await writeRows(createClient().from("tickets").update({ archived_at: new Date().toISOString() }).eq("id", ticketId), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       router.push("/tickets");
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo archivar el ticket."));
@@ -251,8 +247,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   async function deleteTicket() {
     setBusy(true);
     try {
-      const { error } = await createClient().from("tickets").delete().eq("id", ticketId);
-      if (error) throw error;
+      await writeRows(createClient().from("tickets").delete().eq("id", ticketId), "No se pudo eliminar el ticket. Comprueba que tu rol permite borrarlo.");
       router.push("/tickets");
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo eliminar el ticket."));

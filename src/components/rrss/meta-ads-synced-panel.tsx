@@ -12,7 +12,9 @@ import { EuroIcon, LeadsIcon, ConversionIcon, HeartIcon, UsuariosIcon } from "@/
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { currencyFormatter, numberFormatter, formatPercent } from "@/lib/format";
 import { generatePdfReport } from "@/lib/pdf-report";
+import { reportSafeError } from "@/lib/errors";
 import { createClient } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit } from "@/lib/types";
 
@@ -300,15 +302,14 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
     setGuardando(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("meta_campaign_extras").upsert({
+      await writeRows(supabase.from("meta_campaign_extras").upsert({
         meta_campaign_id: editando.id,
         revenue: borrador.revenue,
         qualified_leads: borrador.qualified_leads,
         followers_gained: borrador.followers_gained,
         notes: borrador.notes?.trim() || null,
         updated_at: new Date().toISOString(),
-      }, { onConflict: "meta_campaign_id" });
-      if (error) throw error;
+      }, { onConflict: "meta_campaign_id" }), "No se pudieron guardar los datos a mano. Tu rol no permite escribirlos.");
       // El enlace vive en la ficha de la campaña, no en los extras: es lo que
       // hace que la pestaña de Campañas vea este gasto.
       const actual = campanas.find((c) => c.meta_id === editando.id)?.campaign_id ?? "";
@@ -327,8 +328,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       await cargar();
       setEditando(null);
     } catch (causa) {
-      console.error("No se pudo guardar:", causa);
-      setAviso("No se pudo guardar. Revisa tu conexión y prueba otra vez.");
+      setAviso(reportSafeError(causa, "No se pudo guardar. Revisa tu conexión y prueba otra vez."));
     } finally {
       setGuardando(false);
     }
@@ -344,11 +344,15 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       // Se marca primero y se suma después: si fallara al revés, la entrada
       // seguiría saliendo en la lista con su dinero ya sumado y el siguiente
       // clic lo sumaría otra vez.
-      const { error: errorMarca } = await supabase.from("meta_ads_entries")
-        .update({ placed_into: destino, placed_at: new Date().toISOString() })
-        .eq("id", suelta.id)
-        .is("placed_into", null);
-      if (errorMarca) throw errorMarca;
+      // Si no marca ninguna fila, esa entrada ya la colocó otra persona: hay
+      // que parar aquí o se sumaría su dinero por segunda vez.
+      await writeRows(
+        supabase.from("meta_ads_entries")
+          .update({ placed_into: destino, placed_at: new Date().toISOString() })
+          .eq("id", suelta.id)
+          .is("placed_into", null),
+        "Esa entrada ya estaba colocada. Recarga la pestaña para ver cómo ha quedado.",
+      );
       const previo = extraDe.get(destino);
       const { error } = await supabase.from("meta_campaign_extras").upsert({
         meta_campaign_id: destino,
@@ -369,8 +373,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       setAsignando((actual) => ({ ...actual, [suelta.id]: "" }));
       setAviso(`"${suelta.campaign_name}" colocada. Sus ingresos y cualificados ya suman en esa campaña.`);
     } catch (causa) {
-      console.error("No se pudo asignar:", causa);
-      setAviso("No se pudo asignar esa entrada.");
+      setAviso(reportSafeError(causa, "No se pudo asignar esa entrada."));
     } finally {
       setGuardando(false);
     }

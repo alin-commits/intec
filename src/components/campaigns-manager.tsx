@@ -17,6 +17,7 @@ import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-report-pdf";
 import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeRows } from "@/lib/supabase/write";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
@@ -341,8 +342,10 @@ export function CampaignsManager() {
         const previousStatus = editingId ? campaigns.find((campaign) => campaign.id === editingId)?.status ?? null : null;
         let savedId = editingId;
         if (editingId) {
-          const { error } = await supabase.from("campaigns").update(payload).eq("id", editingId);
-          if (error) throw error;
+          await writeRows(
+            supabase.from("campaigns").update(payload).eq("id", editingId),
+            "No se pudo guardar la campaña: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+          );
         } else {
           const { data, error } = await supabase.from("campaigns").insert(payload).select("id").single();
           if (error) throw error;
@@ -409,8 +412,10 @@ export function CampaignsManager() {
       if (!configured) {
         persistDemo(campaigns.map((campaign) => campaign.id === pendingArchive.id ? { ...campaign, status: "archived" } : campaign));
       } else {
-        const { error } = await createClient().from("campaigns").update({ status: "archived" }).eq("id", pendingArchive.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from("campaigns").update({ status: "archived" }).eq("id", pendingArchive.id),
+          "No se pudo archivar la campaña: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+        );
         if (pendingArchive.status !== "archived") notifyCampaignStatus(pendingArchive.id);
         await loadRealData();
       }

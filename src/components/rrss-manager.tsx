@@ -29,6 +29,7 @@ import {
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { exportMailingReportPdf, exportSocialReportPdf } from "@/lib/rrss-report-pdf";
 import { inDateKeyRange, monthKey, monthLabel, monthShortLabel, previousDateRange, previousMonthKey, todayKey, yearOfMonth } from "@/lib/dates";
+import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -270,8 +271,10 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
         if (pendingDelete.table === "social_media_stats") persistSocial(socialStats.filter((row) => row.id !== pendingDelete.id));
         if (pendingDelete.table === "mailing_campaigns") persistMailing(mailingCampaigns.filter((row) => row.id !== pendingDelete.id));
       } else {
-        const { error } = await createClient().from(pendingDelete.table).delete().eq("id", pendingDelete.id);
-        if (error) throw error;
+        await writeRows(
+          createClient().from(pendingDelete.table).delete().eq("id", pendingDelete.id),
+          "No se pudo eliminar. Solo un admin, o quien lo creó durante los 10 minutos siguientes, puede borrar un registro.",
+        );
         await loadRealData();
       }
       setMessage(`"${pendingDelete.label}" eliminado.`);
@@ -359,6 +362,10 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
   const [monthFrom, setMonthFrom] = useState("");
   const [monthTo, setMonthTo] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
+  // Qué fila se está editando. Sin esto el guardado iba por marca+red+mes, y
+  // cambiar cualquiera de los tres creaba otro registro dejando intacto el que
+  // tenías delante: "le doy a guardar y no cambia nada".
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [rowsExpanded, setRowsExpanded] = useState(false);
   const [sortAsc, setSortAsc] = useState(false);
   const [draft, setDraft] = useState<SocialDraft>(() => blankSocialDraft(units));
@@ -434,12 +441,14 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     }), [stats, unitFilter, networkFilter, sortAsc, monthFrom, monthTo]);
 
   function openNew() {
+    setEditingId(null);
     setDraft(blankSocialDraft(units));
     setEditorOpen(true);
     setMessage(null);
   }
 
   function openEdit(row: SocialMediaStat) {
+    setEditingId(row.id);
     setDraft({
       businessUnitId: row.businessUnitId,
       network: row.network,
@@ -472,7 +481,9 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     setMessage(null);
     try {
       if (!configured) {
-        const existing = stats.find((row) => row.businessUnitId === draft.businessUnitId && row.network === draft.network && row.periodMonth === draft.periodMonth);
+        const existing = editingId
+          ? stats.find((row) => row.id === editingId)
+          : stats.find((row) => row.businessUnitId === draft.businessUnitId && row.network === draft.network && row.periodMonth === draft.periodMonth);
         const nextRow: SocialMediaStat = { ...draft, id: existing?.id ?? `SMS-${Date.now()}`, createdBy: existing?.createdBy ?? "demo-admin", createdAt: existing?.createdAt ?? new Date().toISOString() };
         const next = existing ? stats.map((row) => row.id === existing.id ? nextRow : row) : [nextRow, ...stats];
         persist(next);
@@ -492,10 +503,29 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
           leads: draft.leads,
           notes: draft.notes?.trim() || null,
         };
-        const { error } = await createClient().from("social_media_stats").upsert(payload, { onConflict: "business_unit_id,network,period_month" });
-        if (error) throw error;
+        const mismoMes = stats.find((row) => row.businessUnitId === draft.businessUnitId
+          && row.network === draft.network && row.periodMonth === draft.periodMonth);
+        if (editingId) {
+          // Solo hay un registro por marca, red y mes: si ya existe otro con
+          // esa combinación, guardar aquí pisaría sus datos sin avisar.
+          if (mismoMes && mismoMes.id !== editingId) {
+            setMessage(`Ya hay un registro de ${socialNetworkLabels[draft.network]} para esa marca en ${monthLabel(draft.periodMonth)}. Edita ese registro o elige otro mes.`);
+            return;
+          }
+          await writeRows(
+            createClient().from("social_media_stats").update(payload).eq("id", editingId),
+            "No se pudo guardar el registro: puede que alguien lo haya borrado o que tu rol no permita cambiarlo.",
+          );
+        } else {
+          await writeRows(
+            createClient().from("social_media_stats").upsert(payload, { onConflict: "business_unit_id,network,period_month" }),
+            "No se pudo guardar el registro. Tu rol no permite escribir las métricas de redes sociales.",
+          );
+        }
         await refresh();
-        setMessage("Datos del mes guardados correctamente.");
+        setMessage(editingId ? "Registro actualizado correctamente."
+          : mismoMes ? "Ya había un registro de ese mes y se han actualizado sus datos."
+          : "Datos del mes guardados correctamente.");
       }
       setEditorOpen(false);
     } catch (cause) {
@@ -701,7 +731,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         </>
       )}
 
-      <Modal open={editorOpen} title="Registrar mes" eyebrow="Redes sociales" onClose={() => setEditorOpen(false)}>
+      <Modal open={editorOpen} title={editingId ? "Editar mes" : "Registrar mes"} eyebrow="Redes sociales" onClose={() => setEditorOpen(false)}>
         <form className="lead-editor-form" onSubmit={saveEntry}>
           <div className="form-grid">
             <label><span>Marca *</span><select value={draft.businessUnitId} disabled={!canEdit} onChange={(event) => updateDraft("businessUnitId", event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
@@ -833,8 +863,15 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
           notes: draft.notes?.trim() || null,
         };
         const supabase = createClient();
-        const result = editingId ? await supabase.from("mailing_campaigns").update(payload).eq("id", editingId) : await supabase.from("mailing_campaigns").insert(payload);
-        if (result.error) throw result.error;
+        if (editingId) {
+          await writeRows(
+            supabase.from("mailing_campaigns").update(payload).eq("id", editingId),
+            "No se pudo guardar la campaña: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
+          );
+        } else {
+          const { error } = await supabase.from("mailing_campaigns").insert(payload);
+          if (error) throw error;
+        }
         await refresh();
         setMessage(editingId ? "Campaña actualizada correctamente." : "Campaña creada correctamente.");
       }
