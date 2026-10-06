@@ -23,8 +23,9 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { KpiCard } from "@/components/kpi-card";
 import { MetaFreshness } from "@/components/meta-freshness";
-import { ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/components/icons";
+import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
+import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER } from "@/lib/leads/atencion";
 
 const STORAGE_KEY = "intec-demo-leads";
 /** Al pasar a estos estados se pide el importe: es el de su oferta o su venta en Consultas. */
@@ -166,6 +167,14 @@ export function LeadsTable() {
   /** false mientras no se haya aplicado la migración de lead_assignees. */
   const [asignacionesOk, setAsignacionesOk] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
+  /** Cómo se atendió: a tiempo, tarde, o todavía sin tocar. */
+  const [atencionFilter, setAtencionFilter] = useState<"all" | "tarde" | "sin-atender">("all");
+  /**
+   * El reloj de la última carga. Se guarda en vez de mirar la hora al pintar
+   * porque React no deja llamar a `new Date()` durante el render; mientras está
+   * vacío, los que siguen en "Nuevo" no se marcan todavía.
+   */
+  const [cargadoEn, setCargadoEn] = useState("");
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
   const urlOwner = searchParams.get("owner") ?? "";
@@ -197,6 +206,12 @@ export function LeadsTable() {
   }, [configured]);
 
   const filteredCampaigns = useMemo(() => campaignOptions.filter((campaign) => !draft.businessUnitId || campaign.businessUnitId === draft.businessUnitId), [campaignOptions, draft.businessUnitId]);
+  // Cuánto tardaron en dar la primera señal a cada lead.
+  const atencionPorLead = useMemo(
+    () => new Map(rows.map((lead) => [lead.id, atencionDeLead(lead, cargadoEn)])),
+    [rows, cargadoEn],
+  );
+
   const visibleRows = useMemo(() => rows.filter((lead) => {
     const matchesQuery = `${lead.contactName} ${lead.clientCompanyName} ${lead.productInterest} ${lead.phone} ${lead.email}`.toLowerCase().includes(query.toLowerCase());
     const matchesDates = inDateKeyRange(lead.createdAt, dateFrom, dateTo);
@@ -205,8 +220,9 @@ export function LeadsTable() {
       || (ownerFilter === "mine"
         ? Boolean(currentUserId) && owners.includes(currentUserId as string)
         : ownerFilter === "unassigned" ? owners.length === 0 : owners.includes(ownerFilter));
-    return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status) && matchesDates && matchesOwner;
-  }), [query, rows, status, unitId, dateFrom, dateTo, ownerFilter, currentUserId]);
+    const matchesAtencion = atencionFilter === "all" || atencionPorLead.get(lead.id)?.estado === atencionFilter;
+    return matchesQuery && (unitId === "all" || lead.businessUnitId === unitId) && (status === "all" || lead.status === status) && matchesDates && matchesOwner && matchesAtencion;
+  }), [query, rows, status, unitId, dateFrom, dateTo, ownerFilter, currentUserId, atencionFilter, atencionPorLead]);
 
   const teamById = useMemo(() => new Map(team.map((member) => [member.id, member.fullName])), [team]);
   const ownerName = (id: string) => teamById.get(id) ?? "Usuario inactivo";
@@ -245,8 +261,13 @@ export function LeadsTable() {
       won: won.length,
       conversion: visibleRows.length ? (won.length / visibleRows.length) * 100 : 0,
       value: won.reduce((sum, lead) => sum + (lead.saleValue ?? 0), 0),
+      tarde: visibleRows.filter((lead) => atencionPorLead.get(lead.id)?.estado === "tarde").length,
+      atendidos: visibleRows.filter((lead) => {
+        const estado = atencionPorLead.get(lead.id)?.estado;
+        return estado === "tarde" || estado === "a-tiempo";
+      }).length,
     };
-  }, [visibleRows]);
+  }, [visibleRows, atencionPorLead]);
 
   function firstLoad() {
     setLoadFailed(false);
@@ -272,6 +293,7 @@ export function LeadsTable() {
       setLoadFailed(true);
       return;
     }
+    setCargadoEn(new Date().toISOString());
     const mappedUnits: BusinessUnit[] = (unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true }));
     setUnits(mappedUnits);
     setUnitId((current) => (current === "all" || mappedUnits.some((unit) => unit.id === current)) ? current : (mappedUnits[0]?.id ?? "all"));
@@ -577,8 +599,8 @@ export function LeadsTable() {
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
       <CollapsibleFilters
-        hasActiveFilters={query !== "" || status !== "all" || ownerFilter !== "all" || dateFrom !== "" || dateTo !== ""}
-        onClear={() => { setQuery(""); setStatus("all"); setOwnerFilter("all"); setDateFrom(""); setDateTo(""); }}
+        hasActiveFilters={query !== "" || status !== "all" || ownerFilter !== "all" || dateFrom !== "" || dateTo !== "" || atencionFilter !== "all"}
+        onClear={() => { setQuery(""); setStatus("all"); setOwnerFilter("all"); setDateFrom(""); setDateTo(""); setAtencionFilter("all"); }}
         resultCount={visibleRows.length}
         resultLabel="Leads"
       >
@@ -591,6 +613,11 @@ export function LeadsTable() {
             <option value="unassigned">Sin asignar</option>
             {team.filter((member) => member.roles.includes("commercial")).map((member) => <option key={member.id} value={member.id}>{member.fullName}</option>)}
           </select></label>
+          <label><span>Atención</span><select value={atencionFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setAtencionFilter(event.target.value as "all" | "tarde" | "sin-atender")}>
+            <option value="all">Todos</option>
+            <option value="tarde">Atendidos tarde</option>
+            <option value="sin-atender">Sin atender todavía</option>
+          </select></label>
           <label><span>Desde</span><DateField value={dateFrom} onChange={(value) => setDateFrom(value)} /></label>
           <label><span>Hasta</span><DateField value={dateTo} onChange={(value) => setDateTo(value)} /></label>
         </div>
@@ -598,6 +625,17 @@ export function LeadsTable() {
       <section className="kpi-grid">
         <KpiCard label="Leads" value={numberFormatter.format(leadSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<LeadsIcon />} tone="sky" onClick={filtrarPorEstado("all")} actionLabel="Ver todos" active={status === "all"} />
         <KpiCard label="Sin contactar" value={numberFormatter.format(leadSummary.fresh)} delta="Sin comparación" helper="en estado nuevo" icon={<PlusCircleIcon />} tone={leadSummary.fresh > 0 ? "rose" : "indigo"} onClick={filtrarPorEstado("new")} actionLabel={status === "new" ? "Quitar filtro" : "Ver los nuevos"} active={status === "new"} />
+        <KpiCard
+          label="Atendidos tarde"
+          value={numberFormatter.format(leadSummary.tarde)}
+          delta="Sin comparación"
+          helper={`de ${numberFormatter.format(leadSummary.atendidos)} atendidos · más de ${HORAS_PARA_ATENDER} h laborables`}
+          icon={<ClockIcon />}
+          tone={leadSummary.tarde > 0 ? "amber" : "indigo"}
+          onClick={() => setAtencionFilter((actual) => (actual === "tarde" ? "all" : "tarde"))}
+          actionLabel={atencionFilter === "tarde" ? "Quitar filtro" : "Ver cuáles"}
+          active={atencionFilter === "tarde"}
+        />
         <KpiCard label="Conversión" value={formatPercent(leadSummary.conversion)} delta="Sin comparación" helper={`${numberFormatter.format(leadSummary.won)} ganados`} icon={<ConversionIcon />} tone="emerald" onClick={filtrarPorEstado("won")} actionLabel={status === "won" ? "Quitar filtro" : "Ver los ganados"} active={status === "won"} />
         <KpiCard label="Valor ganado" value={currencyFormatter.format(leadSummary.value)} delta="Sin comparación" helper="de los leads ganados" icon={<EuroIcon />} tone="amber" onClick={filtrarPorEstado("won")} actionLabel={status === "won" ? "Quitar filtro" : "Ver los ganados"} active={status === "won"} />
       </section>
@@ -613,7 +651,12 @@ export function LeadsTable() {
                   <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
                   <td><strong>{lead.contactName || "Sin contacto"}</strong><small>{lead.clientCompanyName || "—"}</small></td>
                   <td>{lead.campaign || "General"}</td>
-                  <td onClick={(event) => event.stopPropagation()}>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}</td>
+                  <td onClick={(event) => event.stopPropagation()}>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}{(() => {
+                    const atencion = atencionPorLead.get(lead.id);
+                    if (atencion?.estado === "tarde") return <small className="lead-atencion is-tarde" title={`Pasó ${horasEnPalabras(atencion.horas)} hasta que alguien lo tocó`}>Atendido tarde · {horasEnPalabras(atencion.horas)}</small>;
+                    if (atencion?.estado === "sin-atender") return <small className="lead-atencion is-sin-atender" title="Sigue en Nuevo y ya se pasó el plazo">Sin atender · {horasEnPalabras(atencion.horas)}</small>;
+                    return null;
+                  })()}</td>
                   <td className={(lead.assignees ?? []).length ? undefined : "muted"}>{ownerNames(lead)}</td>
                   <td>{lead.productInterest || "—"}</td>
                   <td>{lead.saleValue ? currencyFormatter.format(lead.saleValue) : "—"}</td>

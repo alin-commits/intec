@@ -2149,3 +2149,8 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .post-ficha-red.is-on { color: var(--text); border-bottom-color: var(--primary); }
 .post-ficha-red i { color: var(--primary); font-style: normal; }
 .feed-tag-carrusel { left: auto; right: 0.4em; background: rgba(15, 23, 42, .68); color: white; }
+
+/* Cuánto se tardó en atender un lead: va debajo de su estado, en la lista. */
+.lead-atencion { display: block; margin-top: 4px; font-size: 11px; font-weight: 800; }
+.lead-atencion.is-tarde { color: #b45309; }
+.lead-atencion.is-sin-atender { color: #b91c1c; }

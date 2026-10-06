@@ -3,6 +3,7 @@ import { appOrigin } from "@/lib/app-origin";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildWeeklyDigestEmail, type WeeklyBlock } from "@/lib/notification-emails";
+import { HORAS_PARA_ATENDER, atencionDeLead } from "@/lib/leads/atencion";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 
@@ -69,6 +70,21 @@ export async function GET(request: Request) {
 
   const nuevos = leads.data;
   const sinContactar = nuevos.filter((lead) => lead.status === "new").length;
+
+  // Cuánto tardaron en dar la primera señal a los que entraron esa semana. Es
+  // la diferencia entre "no entraron leads" y "entraron y nadie los cogió", que
+  // desde arriba se confunden y no son lo mismo ni de lejos.
+  const { data: historial } = nuevos.length === 0
+    ? { data: [] }
+    : await admin.from("lead_status_history").select("lead_id, new_status, changed_at").in("lead_id", nuevos.map((lead) => lead.id));
+  const cambios = (historial ?? []) as { lead_id: string; new_status: string; changed_at: string }[];
+  const atenciones = nuevos.map((lead) => atencionDeLead({
+    createdAt: lead.created_at,
+    status: lead.status,
+    statusHistory: cambios.filter((cambio) => cambio.lead_id === lead.id).map((cambio) => ({ newStatus: cambio.new_status, changedAt: cambio.changed_at })),
+  }, finDia));
+  const atendidosTarde = atenciones.filter((atencion) => atencion.estado === "tarde").length;
+  const atendidos = atenciones.filter((atencion) => atencion.estado === "tarde" || atencion.estado === "a-tiempo").length;
   const ganados = nuevos.filter((lead) => lead.status === "won");
   const consultasSemana = consultas.data.reduce((total, fila) => total + Number(fila.count ?? 1), 0);
 
@@ -93,6 +109,7 @@ export async function GET(request: Request) {
         { label: "Entraron", value: numero(nuevos.length) },
         { label: "Siguen sin contactar", value: numero(sinContactar), note: `${porcentaje(sinContactar, nuevos.length)} de los que entraron` },
         { label: "Ganados", value: numero(ganados.length), note: ganados.length ? euros(ganados.reduce((t, l) => t + Number(l.sale_value ?? 0), 0)) : undefined },
+        { label: "Atendidos tarde", value: numero(atendidosTarde), note: `de ${numero(atendidos)} atendidos · más de ${HORAS_PARA_ATENDER} h laborables desde que entraron` },
         { label: "Sin contactar desde hace más de 3 días", value: numero(pendientesTotal ?? 0), note: "de cualquier fecha" },
       ],
     },
@@ -113,5 +130,5 @@ export async function GET(request: Request) {
     if (ok) sent++;
   }
 
-  return NextResponse.json({ sent, desde, hasta, ventas: ventasSemana, leads: nuevos.length, consultas: consultasSemana });
+  return NextResponse.json({ sent, desde, hasta, ventas: ventasSemana, leads: nuevos.length, atendidosTarde, consultas: consultasSemana });
 }
