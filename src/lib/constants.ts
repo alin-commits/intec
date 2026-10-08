@@ -1,4 +1,6 @@
 import type {
+  CrmStatus,
+  InquiryStatus,
   AppRole,
   CampaignStatus,
   InquiryType,
@@ -134,6 +136,42 @@ export const campaignStatusLabels: Record<CampaignStatus, string> = {
   finished: "Finalizada",
   archived: "Archivada",
 };
+
+/*
+  En qué punto está un contacto, una consulta o un lead. Es el mismo embudo
+  visto desde tres puertas distintas —una campaña, una llamada, una feria—, así
+  que el vocabulario se escribe una sola vez y lo usan las tres pantallas. Los
+  colores son los de los estados equivalentes de un lead, para que una "oferta
+  enviada" se vea igual en todas partes.
+*/
+export const contactStatusLabels: Record<InquiryStatus, string> = {
+  sin_contactar: "Sin contactar",
+  contactado: "Contactado",
+  oferta_enviada: "Oferta enviada",
+  seguimiento: "Seguimiento",
+  interesado: "Interesado",
+  ganado: "Ganado",
+  perdido: "Perdido",
+};
+
+export const contactStatusBadges: Record<InquiryStatus, string> = {
+  sin_contactar: "new",
+  contactado: "contacted",
+  oferta_enviada: "offer_sent",
+  seguimiento: "interested",
+  interesado: "interested",
+  ganado: "won",
+  perdido: "lost",
+};
+
+/** El orden en que se avanza, para el CRM. */
+export const crmStatusOrder: CrmStatus[] = ["sin_contactar", "contactado", "oferta_enviada", "interesado", "ganado", "perdido"];
+
+/**
+ * El de las consultas no empieza en "sin contactar": la consulta la apunta el
+ * comercial que ya la está atendiendo, no entra sola a una bandeja esperando.
+ */
+export const inquiryStatusOrder: InquiryStatus[] = ["contactado", "oferta_enviada", "seguimiento", "interesado", "ganado", "perdido"];
 
 export const saleTypeOrder: SaleType[] = ["oferta", "seguimiento", "pedido", "perdido"];
 

@@ -23,8 +23,9 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { KpiCard } from "@/components/kpi-card";
 import { MetaFreshness } from "@/components/meta-freshness";
-import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon } from "@/components/icons";
+import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon, SearchIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER } from "@/lib/leads/atencion";
 
 const STORAGE_KEY = "intec-demo-leads";
@@ -189,6 +190,8 @@ export function LeadsTable() {
   const [atencionFilter, setAtencionFilter] = useState<"all" | "tarde" | "sin-atender">("all");
   /** Null es el orden de siempre: lo más nuevo arriba. */
   const [sort, setSort] = useState<SortState>(null);
+  /** Diez por página: una lista más larga no se lee, se busca. */
+  const [pagina, setPagina] = useState(0);
   /**
    * El reloj de la última carga. Se guarda en vez de mirar la hora al pintar
    * porque React no deja llamar a `new Date()` durante el render; mientras está
@@ -273,6 +276,11 @@ export function LeadsTable() {
       return resultado === 0 ? porDefecto(a, b) : resultado * factor;
     });
   }, [visibleRows, sort, units, teamById]);
+
+  const LEADS_POR_PAGINA = 10;
+  const paginasLeads = Math.max(1, Math.ceil(sortedRows.length / LEADS_POR_PAGINA));
+  const paginaLeads = Math.min(pagina, paginasLeads - 1);
+  const leadsDeLaPagina = sortedRows.slice(paginaLeads * LEADS_POR_PAGINA, paginaLeads * LEADS_POR_PAGINA + LEADS_POR_PAGINA);
 
   function toggleSort(key: SortKey) {
     setSort((actual) => {
@@ -664,7 +672,6 @@ export function LeadsTable() {
         resultLabel="Leads"
       >
         <div className="filter-bar lead-filters">
-          <label><span>Buscar</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Nombre, empresa, teléfono o producto" /></label>
           <label><span>Estado</span><select value={status} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStatus(event.target.value)}><option value="all">Todos</option>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label><span>Responsable</span><select value={ownerFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setOwnerFilter(event.target.value)}>
             <option value="all">Todos</option>
@@ -699,6 +706,18 @@ export function LeadsTable() {
         <KpiCard label="Valor ganado" value={currencyFormatter.format(leadSummary.value)} delta="Sin comparación" helper="de los leads ganados" icon={<EuroIcon />} tone="amber" onClick={filtrarPorEstado("won")} actionLabel={status === "won" ? "Quitar filtro" : "Ver los ganados"} active={status === "won"} />
       </section>
       <section className="panel table-panel">
+        {/* El buscador, a la vista: estaba dentro de «Filtros», que arranca
+            cerrado, así que para buscar un lead había que descubrirlo antes. */}
+        <label className="list-search">
+          <span className="sr-only">Buscar leads</span>
+          <SearchIcon />
+          <input
+            type="search"
+            value={query}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => { setPagina(0); setQuery(event.target.value); }}
+            placeholder="Buscar por nombre, empresa, teléfono, correo o producto"
+          />
+        </label>
         <div className="table-scroll">
           <table>
             <thead><tr>
@@ -715,7 +734,7 @@ export function LeadsTable() {
               })}
               <th>Acciones</th>
             </tr></thead>
-            <tbody>{sortedRows.map((lead) => {
+            <tbody>{leadsDeLaPagina.map((lead) => {
               const unit = units.find((item) => item.id === lead.businessUnitId);
               return (
                 <tr key={lead.id} className="table-row-clickable" onClick={() => openEdit(lead)}>
@@ -736,10 +755,11 @@ export function LeadsTable() {
                 </tr>
               );
             })}
-            {sortedRows.length === 0 ? <tr><td colSpan={9} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
+            {leadsDeLaPagina.length === 0 ? <tr><td colSpan={9} className="muted">Sin leads que coincidan con los filtros seleccionados.</td></tr> : null}
             </tbody>
           </table>
         </div>
+        <TablePagination page={paginaLeads} pageCount={paginasLeads} total={sortedRows.length} label="leads" onChange={setPagina} />
       </section>
 
       <ConfirmationDialog

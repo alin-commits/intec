@@ -45,6 +45,13 @@ export type BusinessCard = {
 
 export type CrmStatus = "sin_contactar" | "contactado" | "oferta_enviada" | "interesado" | "ganado" | "perdido";
 
+/**
+ * El de una consulta: el mismo embudo del CRM más "seguimiento", que aquí sí se
+ * usa —se manda la oferta y después se persigue— y en el CRM no. Tampoco
+ * empieza en "sin contactar": la apunta el comercial que ya la está atendiendo.
+ */
+export type InquiryStatus = CrmStatus | "seguimiento";
+
 export type CrmContact = {
   id: string;
   businessUnitId: string;
@@ -130,6 +137,15 @@ export type InquiryRecord = {
   count: number;
   createdAt: string;
   createdBy?: string | null;
+  /* La ficha de quien pregunta. Vacía en las altas semanales, que solo cuentan. */
+  contactName?: string | null;
+  companyName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  productInterest?: string | null;
+  notes?: string | null;
+  /** En qué quedó. El vocabulario del CRM más "seguimiento". */
+  status?: InquiryStatus;
 };
 
 export type SaleType = "oferta" | "seguimiento" | "pedido" | "perdido";

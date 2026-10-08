@@ -5,14 +5,14 @@ import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
-import { CalendarIcon, CheckCircleIcon, ConsultasIcon, DocumentIcon, PhoneIcon, RefreshIcon, TrophyIcon, XCircleIcon } from "@/components/icons";
+import { CalendarIcon, CheckCircleIcon, ConsultasIcon, DocumentIcon, PhoneIcon, RefreshIcon, SearchIcon, TrophyIcon, XCircleIcon } from "@/components/icons";
 import { KpiCard, type KpiTone } from "@/components/kpi-card";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { CONSULTAS_ROLES, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { CONSULTAS_ROLES, contactStatusBadges, contactStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, inquiryStatusOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
 import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { writeRows } from "@/lib/supabase/write";
@@ -22,8 +22,9 @@ import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@
 import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { AppRole, BusinessUnit, InquiryRecord, InquiryType, SaleType, SalesEntry } from "@/lib/types";
+import type { AppRole, BusinessUnit, InquiryRecord, InquiryStatus, InquiryType, SaleType, SalesEntry } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
+import { TablePagination } from "@/components/ui/table-pagination";
 
 type ViewMode = "month" | "year";
 
@@ -45,6 +46,8 @@ const compareModeHelpers: Record<CompareMode, string> = {
   none: "sin periodo de comparación",
 };
 
+const FICHA_VACIA = { contactName: "", companyName: "", phone: "", email: "", productInterest: "", notes: "" };
+
 function mapInquiry(row: Record<string, unknown>): InquiryRecord {
   return {
     id: String(row.id),
@@ -55,6 +58,13 @@ function mapInquiry(row: Record<string, unknown>): InquiryRecord {
     count: Number(row.count ?? 1),
     createdAt: String(row.created_at),
     createdBy: row.created_by ? String(row.created_by) : null,
+    contactName: row.contact_name ? String(row.contact_name) : null,
+    companyName: row.company_name ? String(row.company_name) : null,
+    phone: row.phone ? String(row.phone) : null,
+    email: row.email ? String(row.email) : null,
+    productInterest: row.product_interest ? String(row.product_interest) : null,
+    notes: row.notes ? String(row.notes) : null,
+    status: (row.status as InquiryRecord["status"]) ?? "contactado",
   };
 }
 
@@ -139,8 +149,21 @@ export function InquiryRegister() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [assignedUnitIds, setAssignedUnitIds] = useState<string[] | null>(null);
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
+  /** Los datos de quien pregunta, al registrar una consulta individual. Todo opcional. */
+  const [fichaNueva, setFichaNueva] = useState(FICHA_VACIA);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
-  const [editDraft, setEditDraft] = useState<{ businessUnitId: string; inquiryType: InquiryType; count: string }>({ businessUnitId: "", inquiryType: "phone", count: "1" });
+  const [editDraft, setEditDraft] = useState<{
+    businessUnitId: string;
+    inquiryType: InquiryType;
+    count: string;
+    status: InquiryStatus;
+    contactName: string;
+    companyName: string;
+    phone: string;
+    email: string;
+    productInterest: string;
+    notes: string;
+  }>({ businessUnitId: "", inquiryType: "phone", count: "1", status: "contactado", ...FICHA_VACIA });
   const [weeklyInquiryOpen, setWeeklyInquiryOpen] = useState(false);
   const [weeklyInquiryUnitId, setWeeklyInquiryUnitId] = useState("");
   const [weeklyInquiryDate, setWeeklyInquiryDate] = useState(() => todayKey());
@@ -158,7 +181,8 @@ export function InquiryRegister() {
   const [weeklyDraft, setWeeklyDraft] = useState(() => blankWeeklyDraft());
   const [editingSale, setEditingSale] = useState<SalesEntry | null>(null);
   const [saleEditDraft, setSaleEditDraft] = useState<{ businessUnitId: string; saleType: SaleType; value: string; count: string }>({ businessUnitId: "", saleType: "pedido", value: "", count: "1" });
-  const [inquiriesExpanded, setInquiriesExpanded] = useState(false);
+  const [paginaConsultas, setPaginaConsultas] = useState(0);
+  const [busquedaConsultas, setBusquedaConsultas] = useState("");
   const [salesExpanded, setSalesExpanded] = useState(false);
   const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
@@ -211,7 +235,7 @@ export function InquiryRegister() {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-        fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at, lead_id, notes").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
         supabase.auth.getUser(),
       ]);
@@ -409,7 +433,19 @@ export function InquiryRegister() {
 
   const recentSales = useMemo(() => filteredSales.slice().sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt)).slice(0, 30), [filteredSales]);
 
-  const recentInquiries = useMemo(() => filtered.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30), [filtered]);
+  const recentInquiries = useMemo(() => {
+    const texto = busquedaConsultas.trim().toLowerCase();
+    return filtered
+      .filter((record) => !texto || [record.contactName, record.companyName, record.phone, record.email, record.productInterest, record.notes]
+        .some((campo) => (campo ?? "").toLowerCase().includes(texto)))
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [filtered, busquedaConsultas]);
+  /** Diez por página: una lista más larga no se lee, se busca. */
+  const CONSULTAS_POR_PAGINA = 10;
+  const paginasConsultas = Math.max(1, Math.ceil(recentInquiries.length / CONSULTAS_POR_PAGINA));
+  const paginaConsultasActual = Math.min(paginaConsultas, paginasConsultas - 1);
+  const consultasDeLaPagina = recentInquiries.slice(paginaConsultasActual * CONSULTAS_POR_PAGINA, paginaConsultasActual * CONSULTAS_POR_PAGINA + CONSULTAS_POR_PAGINA);
 
   const salesByInquiry = useMemo(() => {
     const map = new Map<string, SalesEntry[]>();
@@ -455,12 +491,25 @@ export function InquiryRegister() {
           count: 1,
           createdAt: new Date().toISOString(),
           createdBy: "demo-admin",
+          contactName: fichaNueva.contactName.trim() || null,
+          companyName: fichaNueva.companyName.trim() || null,
+          phone: fichaNueva.phone.trim() || null,
+          email: fichaNueva.email.trim() || null,
+          productInterest: fichaNueva.productInterest.trim() || null,
+          notes: fichaNueva.notes.trim() || null,
+          status: "contactado",
         };
       } else {
         const { data, error } = await createClient().from("inquiries").insert({
           business_unit_id: pending.unit.id,
           inquiry_type: pending.type,
-        }).select("id, business_unit_id, inquiry_type, created_by, created_at").single();
+          contact_name: fichaNueva.contactName.trim() || null,
+          company_name: fichaNueva.companyName.trim() || null,
+          phone: fichaNueva.phone.trim() || null,
+          email: fichaNueva.email.trim() || null,
+          product_interest: fichaNueva.productInterest.trim() || null,
+          notes: fichaNueva.notes.trim() || null,
+        }).select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, created_by, created_at").single();
         if (error) throw error;
         newRecord = mapInquiry(data as Record<string, unknown>);
       }
@@ -502,6 +551,7 @@ export function InquiryRegister() {
       const saleSuffix = pendingSaleType !== "none" ? ` con una venta de tipo ${saleTypeLabels[pendingSaleType]}` : "";
       setMessage(`Consulta ${channelLabel} registrada correctamente para ${pending.unit.name}${saleSuffix}.`);
       setPending(null);
+      setFichaNueva(FICHA_VACIA);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo registrar la consulta."));
     } finally {
@@ -533,9 +583,40 @@ export function InquiryRegister() {
     }
   }
 
+  /**
+   * Cambiar el estado desde la lista, sin abrir la ficha. No arrastra ninguna
+   * venta: aquí los apuntes se llevan a mano, que pueden ser varios por consulta.
+   */
+  async function cambiarEstadoConsulta(record: InquiryRecord, status: InquiryStatus) {
+    const anterior = record.status ?? "contactado";
+    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status } : item));
+    if (!configured) return;
+    try {
+      await writeRows(
+        createClient().from("inquiries").update({ status }).eq("id", record.id),
+        "No se pudo cambiar el estado: puede que alguien haya borrado la consulta o que tu rol no permita cambiarla.",
+      );
+      setMessage(`${record.contactName || "La consulta"}: ${contactStatusLabels[status]}.`);
+    } catch (cause) {
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: anterior } : item));
+      setMessage(reportSafeError(cause, "No se pudo cambiar el estado de la consulta."));
+    }
+  }
+
   function openEditRecord(record: InquiryRecord) {
     setEditingRecord(record);
-    setEditDraft({ businessUnitId: record.businessUnitId, inquiryType: record.inquiryType, count: String(record.count) });
+    setEditDraft({
+      businessUnitId: record.businessUnitId,
+      inquiryType: record.inquiryType,
+      count: String(record.count),
+      status: record.status ?? "contactado",
+      contactName: record.contactName ?? "",
+      companyName: record.companyName ?? "",
+      phone: record.phone ?? "",
+      email: record.email ?? "",
+      productInterest: record.productInterest ?? "",
+      notes: record.notes ?? "",
+    });
     setNewSaleDraft({ saleType: "pedido", value: "" });
     setMessage(null);
   }
@@ -558,13 +639,35 @@ export function InquiryRegister() {
           createClient().from("inquiries").update({
             business_unit_id: editDraft.businessUnitId,
             inquiry_type: editDraft.inquiryType,
-            ...(editingRecord.entryMode === "weekly" ? { count } : {}),
+            ...(editingRecord.entryMode === "weekly" ? { count } : {
+              status: editDraft.status,
+              contact_name: editDraft.contactName.trim() || null,
+              company_name: editDraft.companyName.trim() || null,
+              phone: editDraft.phone.trim() || null,
+              email: editDraft.email.trim() || null,
+              product_interest: editDraft.productInterest.trim() || null,
+              notes: editDraft.notes.trim() || null,
+            }),
           }).eq("id", editingRecord.id),
           "No se pudo guardar la consulta: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
         );
       }
       setRecords((current) => current.map((item) => item.id === editingRecord.id
-        ? { ...item, businessUnitId: editDraft.businessUnitId, inquiryType: editDraft.inquiryType, count: editingRecord.entryMode === "weekly" ? count : item.count }
+        ? {
+          ...item,
+          businessUnitId: editDraft.businessUnitId,
+          inquiryType: editDraft.inquiryType,
+          count: editingRecord.entryMode === "weekly" ? count : item.count,
+          ...(editingRecord.entryMode === "weekly" ? {} : {
+            status: editDraft.status,
+            contactName: editDraft.contactName.trim() || null,
+            companyName: editDraft.companyName.trim() || null,
+            phone: editDraft.phone.trim() || null,
+            email: editDraft.email.trim() || null,
+            productInterest: editDraft.productInterest.trim() || null,
+            notes: editDraft.notes.trim() || null,
+          }),
+        }
         : item));
       setMessage("Consulta actualizada.");
       setEditingRecord(null);
@@ -953,6 +1056,12 @@ export function InquiryRegister() {
       { header: "Fecha", value: (record) => formatDate(record.createdAt) },
       { header: "Unidad", value: (record) => units.find((unit) => unit.id === record.businessUnitId)?.name ?? "" },
       { header: "Canal", value: (record) => inquiryChannelLabels[record.inquiryType] },
+      { header: "Contacto", value: (record) => record.contactName ?? "" },
+      { header: "Empresa", value: (record) => record.companyName ?? "" },
+      { header: "Teléfono", value: (record) => record.phone ?? "" },
+      { header: "Correo", value: (record) => record.email ?? "" },
+      { header: "Qué pide", value: (record) => record.productInterest ?? "" },
+      { header: "Estado", value: (record) => record.entryMode === "weekly" ? "" : contactStatusLabels[record.status ?? "contactado"] },
       { header: "Origen", value: (record) => record.entryMode === "weekly" ? "Semanal" : "Individual" },
       { header: "Cantidad", value: (record) => record.count },
       { header: "Venta asociada (€)", value: (record) => (salesByInquiry.get(record.id) ?? []).reduce((sum, entry) => sum + entry.value, 0) },
@@ -1037,6 +1146,63 @@ export function InquiryRegister() {
           )}
         </>
       ) : <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes analizar las consultas, pero no registrar nuevas.</span></div>}
+
+      <section className="panel table-panel recent-inquiries">
+        <div className="panel-heading">
+          <div><span className="eyebrow">Control</span><h2>Consultas del periodo</h2><p className="panel-subtitle">Las individuales llevan ficha y estado; las semanales son un recuento y no tienen nombre.</p></div>
+          <div className="panel-heading-trailing">
+            <span className="muted">Pulsa Editar para ver o cambiar la ficha, el estado y sus ventas</span>
+            <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
+          </div>
+        </div>
+        <label className="list-search">
+          <span className="sr-only">Buscar consultas</span>
+          <SearchIcon />
+          <input
+            type="search"
+            value={busquedaConsultas}
+            onChange={(event) => { setPaginaConsultas(0); setBusquedaConsultas(event.target.value); }}
+            placeholder="Buscar por nombre, empresa, teléfono, correo o lo que pide"
+          />
+        </label>
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto</th><th>Canal</th><th>Estado</th><th>Origen</th><th>Cantidad</th><th>Ventas</th><th></th></tr></thead><tbody>{consultasDeLaPagina.map((record) => {
+          const unit = units.find((item) => item.id === record.businessUnitId);
+          const recordSales = salesByInquiry.get(record.id) ?? [];
+          const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
+          return (
+            <tr key={record.id}>
+              <td>{formatDate(record.createdAt)}</td>
+              <td>{unit?.name ?? "—"}</td>
+              <td>
+                {record.entryMode === "weekly"
+                  ? <span className="muted">—</span>
+                  : <><strong>{record.contactName || "Sin nombre"}</strong><small>{[record.companyName, record.productInterest].filter(Boolean).join(" · ") || "—"}</small></>}
+              </td>
+              <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
+              <td>
+                {record.entryMode === "weekly" ? <span className="muted">—</span> : canRegister ? (
+                  <select
+                    className={`table-select badge-select badge-${contactStatusBadges[record.status ?? "contactado"]}`}
+                    value={record.status ?? "contactado"}
+                    aria-label={`Estado de la consulta de ${record.contactName || "sin nombre"}`}
+                    onChange={(event) => void cambiarEstadoConsulta(record, event.target.value as InquiryStatus)}
+                  >
+                    {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
+                  </select>
+                ) : <span className={`badge badge-${contactStatusBadges[record.status ?? "contactado"]}`}>{contactStatusLabels[record.status ?? "contactado"]}</span>}
+              </td>
+              <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
+              <td>{numberFormatter.format(record.count)}</td>
+              <td>{recordSalesTotal ? currencyFormatter.format(recordSalesTotal) : "—"}</td>
+              <td className="recent-inquiries-actions">
+                {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
+                {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
+              </td>
+            </tr>
+          );
+        })}</tbody></table></div>
+        <TablePagination page={paginaConsultasActual} pageCount={paginasConsultas} total={recentInquiries.length} label="consultas" onChange={setPaginaConsultas} />
+      </section>
 
       <section className="section-heading inquiries-dashboard-heading">
         <div><span className="eyebrow">Estadísticas de consultas</span><h2>Dashboard de consultas</h2><p>Elige vista mensual o anual, filtra por unidad y canal. Las tablas se pueden ordenar pulsando sus encabezados.</p></div>
@@ -1207,42 +1373,6 @@ export function InquiryRegister() {
 
       <section className="panel table-panel recent-inquiries">
         <div className="panel-heading">
-          <div><span className="eyebrow">Control</span><h2>Últimos registros del periodo</h2></div>
-          <div className="panel-heading-trailing">
-            <span className="muted">Corrige un error editando el registro (unidad, canal o ventas asociadas), o elimínalo si no debía existir</span>
-            <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
-          </div>
-        </div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Canal</th><th>Origen</th><th>Cantidad</th><th>Ventas</th><th></th></tr></thead><tbody>{recentInquiries.slice(0, inquiriesExpanded ? recentInquiries.length : 5).map((record) => {
-          const unit = units.find((item) => item.id === record.businessUnitId);
-          const recordSales = salesByInquiry.get(record.id) ?? [];
-          const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
-          return (
-            <tr key={record.id}>
-              <td>{formatDate(record.createdAt)}</td>
-              <td>{unit?.name ?? "—"}</td>
-              <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
-              <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
-              <td>{numberFormatter.format(record.count)}</td>
-              <td>{recordSalesTotal ? currencyFormatter.format(recordSalesTotal) : "—"}</td>
-              <td className="recent-inquiries-actions">
-                {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
-                {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
-              </td>
-            </tr>
-          );
-        })}</tbody></table></div>
-        {recentInquiries.length > 5 ? (
-          <div className="table-panel-footer">
-            <button type="button" className="button button-secondary button-compact" onClick={() => setInquiriesExpanded((current) => !current)}>
-              {inquiriesExpanded ? "Mostrar menos" : `Mostrar más (${recentInquiries.length - 5} más)`}
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading">
           <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
           <div className="panel-heading-trailing">
             <span className="muted">Incluye ventas por consulta, bloques semanales y las de los leads. Corrige un error editando la venta, o elimínala si no debía existir; las de un lead se cambian desde el lead</span>
@@ -1288,7 +1418,7 @@ export function InquiryRegister() {
         title={pending ? `¿Quieres registrar ${pending.type === "phone" ? "una consulta telefónica" : `una consulta de ${inquiryChannelLabels[pending.type]}`} para ${pending.unit.name}?` : "¿Quieres registrar la consulta?"}
         confirmLabel="Registrar consulta"
         busy={busy}
-        onCancel={() => setPending(null)}
+        onCancel={() => { setPending(null); setFichaNueva(FICHA_VACIA); }}
         onConfirm={() => void confirmRegistration()}
       >
         {pending ? (
@@ -1305,6 +1435,16 @@ export function InquiryRegister() {
                 <label><span>Valor (€)</span><input type="number" min="0" step="0.01" placeholder="0,00" value={pendingSaleValue} onChange={(event) => setPendingSaleValue(event.target.value)} /></label>
               ) : null}
             </div>
+            {/* Quién pregunta. Todo opcional: si se exige, se deja de apuntar. */}
+            <div className="form-grid inquiry-ficha">
+              <label><span>Contacto</span><input value={fichaNueva.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setFichaNueva((actual) => ({ ...actual, contactName: event.target.value }))} /></label>
+              <label><span>Empresa</span><input value={fichaNueva.companyName} onChange={(event) => setFichaNueva((actual) => ({ ...actual, companyName: event.target.value }))} /></label>
+              <label><span>Teléfono</span><input value={fichaNueva.phone} onChange={(event) => setFichaNueva((actual) => ({ ...actual, phone: event.target.value }))} /></label>
+              <label><span>Correo</span><input type="email" value={fichaNueva.email} onChange={(event) => setFichaNueva((actual) => ({ ...actual, email: event.target.value }))} /></label>
+              <label className="form-field-wide"><span>Qué pide</span><input value={fichaNueva.productInterest} placeholder="Producto o servicio por el que pregunta" onChange={(event) => setFichaNueva((actual) => ({ ...actual, productInterest: event.target.value }))} /></label>
+              <label className="form-field-wide"><span>Notas</span><textarea rows={2} value={fichaNueva.notes} onChange={(event) => setFichaNueva((actual) => ({ ...actual, notes: event.target.value }))} /></label>
+            </div>
+            <p className="muted">Los datos son opcionales: sin ellos la consulta cuenta igual, pero con ellos se le puede hacer seguimiento.</p>
           </>
         ) : null}
       </ConfirmationDialog>
@@ -1337,7 +1477,21 @@ export function InquiryRegister() {
             <label><span>Cantidad</span>
               <input type="number" min="1" step="1" value={editDraft.count} onChange={(event) => setEditDraft((current) => ({ ...current, count: event.target.value }))} />
             </label>
-          ) : null}
+          ) : (
+            <>
+              <label><span>Estado</span>
+                <select value={editDraft.status} onChange={(event) => setEditDraft((current) => ({ ...current, status: event.target.value as InquiryStatus }))}>
+                  {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
+                </select>
+              </label>
+              <label><span>Contacto</span><input value={editDraft.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setEditDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
+              <label><span>Empresa</span><input value={editDraft.companyName} onChange={(event) => setEditDraft((current) => ({ ...current, companyName: event.target.value }))} /></label>
+              <label><span>Teléfono</span><input value={editDraft.phone} onChange={(event) => setEditDraft((current) => ({ ...current, phone: event.target.value }))} /></label>
+              <label><span>Correo</span><input type="email" value={editDraft.email} onChange={(event) => setEditDraft((current) => ({ ...current, email: event.target.value }))} /></label>
+              <label className="form-field-wide"><span>Qué pide</span><input value={editDraft.productInterest} onChange={(event) => setEditDraft((current) => ({ ...current, productInterest: event.target.value }))} /></label>
+              <label className="form-field-wide"><span>Notas</span><textarea rows={3} value={editDraft.notes} onChange={(event) => setEditDraft((current) => ({ ...current, notes: event.target.value }))} /></label>
+            </>
+          )}
         </div>
         {editingRecord?.entryMode === "weekly" ? <p className="muted">Este registro representa varias consultas de una semana ({formatDate(editingRecord.createdAt)}).</p> : null}
 

@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { CRM_EDIT_ROLES, CRM_ROLES, hasAnyRole } from "@/lib/constants";
+import { CRM_EDIT_ROLES, CRM_ROLES, contactStatusBadges, contactStatusLabels, crmStatusOrder, hasAnyRole } from "@/lib/constants";
 import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoCrmContacts } from "@/lib/demo-data";
 import { writeRows } from "@/lib/supabase/write";
@@ -13,6 +13,7 @@ import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit, CrmContact, CrmStatus } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { Modal } from "@/components/ui/modal";
 import { Toast } from "@/components/ui/toast";
 import { KpiCard } from "@/components/kpi-card";
@@ -33,15 +34,12 @@ type ContactDraft = {
   saleValue: string;
 };
 
-/** Los estados de un contacto, en el orden en que se avanza. El color es el de los leads equivalentes. */
-const CRM_STATUSES: { value: CrmStatus; label: string; badge: string }[] = [
-  { value: "sin_contactar", label: "Sin contactar", badge: "new" },
-  { value: "contactado", label: "Contactado", badge: "contacted" },
-  { value: "oferta_enviada", label: "Oferta enviada", badge: "offer_sent" },
-  { value: "interesado", label: "Interesado", badge: "interested" },
-  { value: "ganado", label: "Ganado", badge: "won" },
-  { value: "perdido", label: "Perdido", badge: "lost" },
-];
+/** Los estados, del vocabulario común: los mismos que usan las consultas. */
+const CRM_STATUSES: { value: CrmStatus; label: string; badge: string }[] = crmStatusOrder.map((value) => ({
+  value,
+  label: contactStatusLabels[value],
+  badge: contactStatusBadges[value],
+}));
 /** Al pasar a estos estados se pregunta por cuánto, igual que en los leads. */
 const VALUE_STATUSES: CrmStatus[] = ["oferta_enviada", "ganado"];
 
@@ -132,6 +130,8 @@ export function CrmManager() {
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
   const [loadFailed, setLoadFailed] = useState(false);
+  /** Diez por página: una lista más larga no se lee, se busca. */
+  const [pagina, setPagina] = useState(0);
   const [pendingStatus, setPendingStatus] = useState<{ contact: CrmContact; status: CrmStatus } | null>(null);
   const [pendingValue, setPendingValue] = useState("");
   const [pendingDelete, setPendingDelete] = useState<CrmContact | null>(null);
@@ -233,6 +233,11 @@ export function CrmManager() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- unitName solo depende de units
   }, [contacts, query, unitFilter, originFilter, statusFilter, sort, units]);
+
+  const PAGINA = 10;
+  const paginasContactos = Math.max(1, Math.ceil(visibleContacts.length / PAGINA));
+  const paginaActual = Math.min(pagina, paginasContactos - 1);
+  const contactosDeLaPagina = visibleContacts.slice(paginaActual * PAGINA, paginaActual * PAGINA + PAGINA);
 
   function toggleSort(key: SortKey) {
     // La fecha empieza por lo más reciente; el texto, de la A a la Z.
@@ -529,14 +534,15 @@ export function CrmManager() {
       </section>
 
       <section className="panel table-panel">
-        <label className="crm-search">
+        <label className="list-search">
           <span className="sr-only">Buscar contactos</span>
           <SearchIcon />
           <input
             type="search"
             value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => { setPagina(0); setQuery(event.target.value); }}
             placeholder="Buscar por nombre, empresa, teléfono, correo, población, origen o notas"
+            onFocus={() => setPagina(0)}
           />
         </label>
         <div className="table-scroll">
@@ -554,7 +560,7 @@ export function CrmManager() {
               </tr>
             </thead>
             <tbody>
-              {visibleContacts.map((contact) => {
+              {contactosDeLaPagina.map((contact) => {
                 const unit = units.find((item) => item.id === contact.businessUnitId);
                 return (
                   <tr key={contact.id} className="table-row-clickable" onClick={() => openDetail(contact)}>
@@ -584,6 +590,7 @@ export function CrmManager() {
             </tbody>
           </table>
         </div>
+        <TablePagination page={paginaActual} pageCount={paginasContactos} total={visibleContacts.length} label="contactos" onChange={setPagina} />
       </section>
 
       <Modal open={editorOpen} title={editingId ? "Editar contacto" : "Nuevo contacto"} eyebrow="CRM" onClose={() => setEditorOpen(false)}>
