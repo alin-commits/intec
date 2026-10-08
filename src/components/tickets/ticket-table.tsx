@@ -15,6 +15,8 @@ type TicketTableProps = {
   onQuickStatusChange: (ticket: Ticket, status: TicketStatus) => void;
   quickEditingId: string | null;
   canManage: boolean;
+  /** El nombre de quien resolvió cada ticket; null si no consta. */
+  resolverName?: (ticket: Ticket) => string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (id: string) => void;
   onToggleSelectAll?: () => void;
@@ -26,7 +28,7 @@ const sortLabels: Record<TicketSortColumn, string> = {
   updatedAt: "Última actualización",
 };
 
-export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickEditingId, canManage, selectedIds, onToggleSelect, onToggleSelectAll }: TicketTableProps) {
+export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickEditingId, canManage, resolverName, selectedIds, onToggleSelect, onToggleSelectAll }: TicketTableProps) {
   const selectable = canManage && Boolean(selectedIds && onToggleSelect && onToggleSelectAll);
   const allSelected = selectable && tickets.length > 0 && tickets.every((ticket) => selectedIds!.has(ticket.id));
 
@@ -75,6 +77,9 @@ export function TicketTable({ tickets, sort, onSort, onQuickStatusChange, quickE
                     {ticketStatusOrder.map((value) => <option key={value} value={value}>{ticketStatusLabels[value]}</option>)}
                   </select>
                 ) : <TicketStatusBadge status={ticket.status} />}
+                {/* Quién lo resolvió va aquí y no en su columna: solo importa
+                    cuando está resuelto, y la tabla ya tiene columnas de sobra. */}
+                {resolverName?.(ticket) ? <small className="ticket-resuelto-por">Resuelto por {resolverName(ticket)}</small> : null}
               </td>
               <td>{formatDate(ticket.updatedAt)}</td>
               <td><Link href={`/tickets/${ticket.id}`} className="button button-compact button-secondary">Ver</Link></td>

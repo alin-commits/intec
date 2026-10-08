@@ -61,15 +61,22 @@ export function TicketsManager() {
    * pulsar "Exportar": se pedía un PDF creyendo que era de un mes y salía del
    * año entero. Ahora se pregunta antes de generarlo.
    */
+  const [nombres, setNombres] = useState<Record<string, string>>({});
   const [exportTarget, setExportTarget] = useState<"csv" | "pdf" | null>(null);
   const [exportMode, setExportMode] = useState<"mes" | "rango" | "actual">("mes");
   const [exportMonth, setExportMonth] = useState(() => monthKey());
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
 
+  const quienResolvio = (ticket: Ticket) => (ticket.resolvedBy ? nombres[ticket.resolvedBy] ?? "Alguien que ya no está" : null);
+
   async function loadTickets() {
     const supabase = createClient();
-    const { data, error } = await fetchAllPages((from, to) => supabase.from("tickets").select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, closed_at, archived_at").is("archived_at", null).order("created_at", { ascending: false }).order("id").range(from, to));
+    // Los nombres de quien resuelve, para no enseñar un identificador.
+    supabase.from("profiles").select("id, full_name").then(({ data }) => {
+      setNombres(Object.fromEntries((data ?? []).map((fila) => [String(fila.id), String(fila.full_name ?? "Sin nombre")])));
+    });
+    const { data, error } = await fetchAllPages((from, to) => supabase.from("tickets").select("id, ticket_number, reporter_name, reporter_phone, reporter_email, department, title, category, description, started_at, blocking_level, restarted, has_error_message, error_message, priority, status, created_at, updated_at, resolved_at, resolved_by, closed_at, archived_at").is("archived_at", null).order("created_at", { ascending: false }).order("id").range(from, to));
     if (error) {
       setMessage(reportSafeError(error, "No se pudieron cargar los tickets."));
       return;
@@ -258,6 +265,7 @@ export function TicketsManager() {
       { header: "Estado", value: (ticket) => ticketStatusLabels[ticket.status] },
       { header: "Tiempo empleado", value: (ticket) => ticket.resolutionTime ?? "" },
       { header: "Resuelto", value: (ticket) => ticket.resolvedAt ? formatDate(ticket.resolvedAt) : "" },
+      { header: "Resuelto por", value: (ticket) => quienResolvio(ticket) ?? "" },
       { header: "Cerrado", value: (ticket) => ticket.closedAt ? formatDate(ticket.closedAt) : "" },
       { header: "Descripción", value: (ticket) => ticket.description },
     ]);
@@ -271,6 +279,7 @@ export function TicketsManager() {
         counts: computeTicketDashboardCounts(visibleTickets, exportSelection.period, tickets),
         tickets: exportSelectionTickets,
         fileSlug: exportSelection.slug,
+        resolverName: quienResolvio,
       });
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
@@ -476,6 +485,7 @@ export function TicketsManager() {
               onQuickStatusChange={(ticket, status) => void handleQuickStatusChange(ticket, status)}
               quickEditingId={quickEditingId}
               canManage={canManage}
+              resolverName={quienResolvio}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               onToggleSelectAll={() => toggleSelectAll(activeTickets.slice(0, activeExpanded ? activeTickets.length : PAGE_SIZE).map((t) => t.id))}
@@ -507,6 +517,7 @@ export function TicketsManager() {
               onQuickStatusChange={(ticket, status) => void handleQuickStatusChange(ticket, status)}
               quickEditingId={quickEditingId}
               canManage={canManage}
+              resolverName={quienResolvio}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               onToggleSelectAll={() => toggleSelectAll(completedPageTickets.map((t) => t.id))}

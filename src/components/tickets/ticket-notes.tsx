@@ -13,7 +13,7 @@ export type TicketEventItem = {
 
 type TimelineEntry =
   | { kind: "note"; id: string; createdAt: string; authorName: string; noteType: TicketNoteType; content: string }
-  | { kind: "event"; id: string; createdAt: string; actorName: string; label: string };
+  | { kind: "event"; id: string; createdAt: string; actorName: string | null; label: string };
 
 function labelForValue(field: "status" | "priority", value: string | null): string {
   if (!value) return "—";
@@ -21,8 +21,15 @@ function labelForValue(field: "status" | "priority", value: string | null): stri
   return ticketPriorityLabels[value as TicketPriority] ?? value;
 }
 
+/**
+ * Un ticket entra por dos sitios: el formulario público, que lo rellena quien
+ * tiene la avería y no lleva a nadie detrás, o el propio Hub, cuando informática
+ * lo apunta por lo que le han contado por teléfono. Decirlo todo "desde el
+ * formulario público" era mentira en el segundo caso, y además salía con el
+ * nombre de quien lo tecleó al lado, que parecía que era quien tenía el problema.
+ */
 function eventLabel(event: TicketEventItem): string {
-  if (event.eventType === "created") return "Ticket creado desde el formulario público";
+  if (event.eventType === "created") return event.actorId ? "Ticket creado por informática" : "Ticket creado desde el formulario público";
   if (event.eventType === "status_change") return `Estado: ${labelForValue("status", event.previousValue)} → ${labelForValue("status", event.newValue)}`;
   if (event.eventType === "priority_change") return `Prioridad: ${labelForValue("priority", event.previousValue)} → ${labelForValue("priority", event.newValue)}`;
   if (event.eventType === "details_edit") return "Datos del ticket editados";
@@ -49,7 +56,11 @@ export function TicketNotes({ notes, events, authorNames }: TicketNotesProps) {
       kind: "event",
       id: event.id,
       createdAt: event.createdAt,
-      actorName: event.actorId ? (authorNames[event.actorId] ?? "Administrador") : "Formulario público",
+      // Quién creó el ticket no se firma con su nombre: lo pone la etiqueta,
+      // y el que tiene la avería es el solicitante, que ya sale en la ficha.
+      actorName: event.eventType === "created"
+        ? null
+        : event.actorId ? (authorNames[event.actorId] ?? "Administrador") : "Formulario público",
       label: eventLabel(event),
     })),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -72,7 +83,7 @@ export function TicketNotes({ notes, events, authorNames }: TicketNotesProps) {
               <small>{entry.authorName}</small>
             </>
           ) : (
-            <p className="ticket-timeline-event"><strong>{entry.label}</strong> · {entry.actorName}</p>
+            <p className="ticket-timeline-event"><strong>{entry.label}</strong>{entry.actorName ? ` · ${entry.actorName}` : ""}</p>
           )}
         </div>
       ))}

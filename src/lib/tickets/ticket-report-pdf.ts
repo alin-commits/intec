@@ -18,7 +18,11 @@ const STATUS_COLORS: Record<Ticket["status"], ReportBadge> = {
   closed: { bg: [241, 245, 249], text: [71, 85, 105] },
 };
 
-const COLUMNS: ReportColumn<Ticket>[] = [
+/**
+ * Las columnas se construyen con los nombres a mano porque el ticket guarda el
+ * id de quien lo resolvió, no su nombre: en el repositorio no hay nombres.
+ */
+const columnas = (quienResolvio: (ticket: Ticket) => string | null): ReportColumn<Ticket>[] => [
   { header: "Nº", value: (t) => t.ticketNumber, width: 16 },
   { header: "Fecha", value: (t) => formatDate(t.createdAt), width: 20 },
   { header: "Solicitante", value: (t) => t.reporterName, width: 24 },
@@ -29,6 +33,7 @@ const COLUMNS: ReportColumn<Ticket>[] = [
   { header: "Prioridad", value: (t) => ticketPriorityLabels[t.priority], width: 18, align: "center", badge: (t) => PRIORITY_COLORS[t.priority] },
   { header: "Estado", value: (t) => ticketStatusLabels[t.status], width: 18, align: "center", badge: (t) => STATUS_COLORS[t.status] },
   { header: "Resuelto", value: (t) => (t.resolvedAt ? formatDate(t.resolvedAt) : "—"), width: 20 },
+  { header: "Resuelto por", value: (t) => quienResolvio(t) ?? "—", width: 24 },
 ];
 
 type TicketReportOptions = {
@@ -37,9 +42,11 @@ type TicketReportOptions = {
   tickets: Ticket[];
   /** Va en el nombre del fichero, para que dos periodos no se llamen igual. */
   fileSlug?: string;
+  /** El nombre de quien resolvió cada ticket; sin esto, la columna sale vacía. */
+  resolverName?: (ticket: Ticket) => string | null;
 };
 
-function ticketReportOptions({ periodLabel, counts, tickets, fileSlug }: TicketReportOptions): ReportOptions<Ticket> {
+function ticketReportOptions({ periodLabel, counts, tickets, fileSlug, resolverName }: TicketReportOptions): ReportOptions<Ticket> {
   const stats: ReportStat[] = [
     { label: "Nuevos", value: String(counts.newCount) },
     { label: "Abiertos", value: String(counts.openCount) },
@@ -59,7 +66,7 @@ function ticketReportOptions({ periodLabel, counts, tickets, fileSlug }: TicketR
     subtitle: `Periodo: ${periodLabel}  ·  Generado el ${generatedAt}  ·  ${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`,
     stats,
     sectionTitle: "Detalle de tickets",
-    columns: COLUMNS,
+    columns: columnas(resolverName ?? (() => null)),
     rows: tickets,
     filename: `informe_tickets_${fileSlug ?? new Date().toISOString().slice(0, 10)}.pdf`,
   };

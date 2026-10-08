@@ -50,6 +50,8 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
   const [notes, setNotes] = useState<TicketNote[]>([]);
   const [events, setEvents] = useState<TicketEventItem[]>([]);
   const [authorNames, setAuthorNames] = useState<Record<string, string>>({});
+  /** Quién puede figurar como el que resolvió: informática y administración. */
+  const [resolvers, setResolvers] = useState<{ id: string; name: string }[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       supabase.from("tickets").select("*").eq("id", ticketId).maybeSingle(),
       supabase.from("ticket_notes").select("*").eq("ticket_id", ticketId),
       supabase.from("ticket_events").select("*").eq("ticket_id", ticketId),
-      supabase.from("profiles").select("id, full_name"),
+      supabase.from("profiles").select("id, full_name, roles, is_active"),
     ]);
     if (ticketError) {
       setMessage(reportSafeError(ticketError, "No se pudo cargar el ticket. Recarga la página para reintentarlo."));
@@ -80,6 +82,13 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
     setNotes((noteRows ?? []).map((row) => mapNoteRow(row as Record<string, unknown>)));
     setEvents((eventRows ?? []).map((row) => mapEventRow(row as Record<string, unknown>)));
     setAuthorNames(Object.fromEntries((profileRows ?? []).map((row) => [String(row.id), String(row.full_name ?? "Administrador")])));
+    // En la lista van los que llevan tickets. Si quien lo resolvió ya no está
+    // en ese grupo, se le deja igualmente para no borrarlo de su propio ticket.
+    const yaPuesto = (ticketRow as Record<string, unknown>).resolved_by;
+    setResolvers((profileRows ?? [])
+      .filter((row) => (row.is_active && hasAnyRole(row.roles, TICKET_MANAGER_ROLES)) || String(row.id) === String(yaPuesto ?? ""))
+      .map((row) => ({ id: String(row.id), name: String(row.full_name ?? "Sin nombre") }))
+      .sort((uno, otro) => uno.name.localeCompare(otro.name, "es")));
     setAccess("allowed");
   }, [ticketId]);
 
@@ -114,6 +123,9 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       const patch: Record<string, unknown> = { status };
       if (status === "resolved") patch.resolved_at = new Date().toISOString();
       if (status === "closed") patch.closed_at = new Date().toISOString();
+      // Al darlo por resuelto se firma solo con quien lo está marcando, que es
+      // lo normal; si lo arregló otro, se cambia en el desplegable de al lado.
+      if ((status === "resolved" || status === "closed") && !ticket.resolvedBy && currentUserId) patch.resolved_by = currentUserId;
       await writeRows(createClient().from("tickets").update(patch).eq("id", ticketId), "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.");
       await logEvent("status_change", ticket.status, status);
       await loadTicket();
@@ -153,6 +165,23 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       setMessage("Prioridad actualizada.");
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo actualizar la prioridad."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateResolvedBy(resolvedBy: string) {
+    if (!ticket) return;
+    setBusy(true);
+    try {
+      await writeRows(
+        createClient().from("tickets").update({ resolved_by: resolvedBy || null }).eq("id", ticketId),
+        "No se pudo guardar: puede que alguien haya borrado el ticket o que tu rol no permita cambiarlo.",
+      );
+      await loadTicket();
+      setMessage(resolvedBy ? `Resuelto por ${authorNames[resolvedBy] ?? "esa persona"}.` : "Se ha quitado quién lo resolvió.");
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo guardar quién lo resolvió."));
     } finally {
       setBusy(false);
     }
@@ -326,6 +355,9 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
             onStatusChange={(status) => void updateStatus(status)}
             onPriorityChange={(priority) => void updatePriority(priority)}
             onResolutionTimeChange={(resolutionTime) => void updateResolutionTime(resolutionTime)}
+            resolvers={resolvers}
+            resolverName={ticket.resolvedBy ? authorNames[ticket.resolvedBy] ?? "Alguien que ya no está" : null}
+            onResolvedByChange={(id) => void updateResolvedBy(id)}
           />
         </section>
 

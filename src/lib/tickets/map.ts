@@ -22,6 +22,7 @@ export function mapTicketRow(row: Record<string, unknown>): Ticket {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     resolvedAt: row.resolved_at ? String(row.resolved_at) : null,
+    resolvedBy: row.resolved_by ? String(row.resolved_by) : null,
     closedAt: row.closed_at ? String(row.closed_at) : null,
     archivedAt: row.archived_at ? String(row.archived_at) : null,
   };

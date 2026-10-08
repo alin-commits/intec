@@ -25,6 +25,8 @@ export type Ticket = {
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
+  /** Quién lo resolvió: el id de su ficha, no su nombre. */
+  resolvedBy: string | null;
   closedAt: string | null;
   archivedAt: string | null;
 };

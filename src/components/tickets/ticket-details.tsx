@@ -50,9 +50,14 @@ type TicketDetailsProps = {
   onStatusChange: (status: TicketStatus) => void;
   onPriorityChange: (priority: TicketPriority) => void;
   onResolutionTimeChange: (resolutionTime: string) => void;
+  /** Quién puede figurar como el que lo resolvió. */
+  resolvers: { id: string; name: string }[];
+  /** El nombre de quien lo resolvió, ya resuelto desde su ficha. */
+  resolverName: string | null;
+  onResolvedByChange: (resolvedBy: string) => void;
 };
 
-export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraftChange, onStatusChange, onPriorityChange, onResolutionTimeChange }: TicketDetailsProps) {
+export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraftChange, onStatusChange, onPriorityChange, onResolutionTimeChange, resolvers, resolverName, onResolvedByChange }: TicketDetailsProps) {
   const editable = canManage && editing;
 
   function update<K extends keyof TicketDetailsDraft>(key: K, value: TicketDetailsDraft[K]) {
@@ -130,12 +135,19 @@ export function TicketDetails({ ticket, busy, canManage, editing, draft, onDraft
           <label><span>Tiempo empleado</span>
             <ResolutionTimeInput ticket={ticket} busy={busy} onCommit={onResolutionTimeChange} />
           </label>
+          <label><span>Resuelto por</span>
+            <select value={ticket.resolvedBy ?? ""} disabled={busy} onChange={(event) => onResolvedByChange(event.target.value)}>
+              <option value="">Sin asignar</option>
+              {resolvers.map((persona) => <option key={persona.id} value={persona.id}>{persona.name}</option>)}
+            </select>
+          </label>
         </div>
       ) : (
         <div className="ticket-details-grid">
           <div><span>Estado</span><strong>{ticketStatusLabels[ticket.status]}</strong></div>
           <div><span>Prioridad</span><strong>{ticketPriorityLabels[ticket.priority]}</strong></div>
           <div><span>Tiempo empleado</span><strong>{ticket.resolutionTime || "—"}</strong></div>
+          <div><span>Resuelto por</span><strong>{resolverName ?? "—"}</strong></div>
         </div>
       )}
     </div>
