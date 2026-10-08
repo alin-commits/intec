@@ -11,7 +11,7 @@ import { reportSafeError } from "@/lib/errors";
 import { currencyFormatter, formatDate, formatDateTime, formatPercent, numberFormatter } from "@/lib/format";
 import { leadRecord, leadRecordText } from "@/lib/lead-log";
 import { exportLeadReportPdf } from "@/lib/lead-report-pdf";
-import { inDateKeyRange } from "@/lib/dates";
+import { dateKeyInMadrid, inDateKeyRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, Lead, LeadStatus } from "@/lib/types";
@@ -22,6 +22,8 @@ import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { KpiCard } from "@/components/kpi-card";
+import { calcularCostePorLead, EXPLICACION_COSTE_POR_LEAD, textoCostePorLead } from "@/lib/publicidad/coste-por-lead";
+import { loadAdsSpendByMonth, type AdsSpendRow } from "@/lib/publicidad/gasto-por-mes";
 import { FrescuraPublicidad } from "@/components/frescura-publicidad";
 import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon, SearchIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
@@ -117,6 +119,7 @@ function mapLeadRow(row: Record<string, unknown>, asignados: Map<string, string[
     source: String(row.source ?? ""),
     notes: String(row.notes ?? ""),
     saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
+    metaLeadId: row.meta_lead_id ? String(row.meta_lead_id) : null,
     assignees: asignados.get(String(row.id)) ?? [],
     statusHistory: historyValue.map((item) => {
       const history = item as Record<string, unknown>;
@@ -159,6 +162,7 @@ function initialDemoLeads(configured: boolean): Lead[] {
 export function LeadsTable() {
   const configured = isSupabaseConfigured();
   const [rows, setRows] = useState<Lead[]>(() => initialDemoLeads(configured));
+  const [gastoEnPublicidad, setGastoEnPublicidad] = useState<AdsSpendRow[]>([]);
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>(demoCampaigns.map((campaign) => ({ id: campaign.id, name: campaign.name, businessUnitId: campaign.businessUnitId })));
   const [query, setQuery] = useState("");
@@ -337,6 +341,25 @@ export function LeadsTable() {
     setStatus((actual) => (destino !== "all" && actual === destino ? "all" : destino));
   };
 
+  /**
+   * Lo que cuesta traer un lead, con la misma definición que en Inicio y en el
+   * panel de Ads. El denominador son los leads de la marca y las fechas
+   * elegidas, sin mirar el estado ni el buscador: así el coste no se dispara
+   * por filtrar "ganados", que serían cuatro leads y el mismo gasto.
+   */
+  const leadsDelPeriodo = useMemo(() => rows.filter((lead) =>
+    (unitId === "all" || lead.businessUnitId === unitId) && inDateKeyRange(lead.createdAt, dateFrom, dateTo)),
+  [rows, unitId, dateFrom, dateTo]);
+  const gastoDelPeriodo = useMemo(() => gastoEnPublicidad.filter((fila) =>
+    (unitId === "all" || fila.businessUnitId === unitId)
+    && (!dateFrom || fila.month >= dateFrom.slice(0, 7))
+    && (!dateTo || fila.month <= dateTo.slice(0, 7))),
+  [gastoEnPublicidad, unitId, dateFrom, dateTo]);
+  const costePorLead = textoCostePorLead(
+    calcularCostePorLead(gastoDelPeriodo, leadsDelPeriodo, rows, (iso) => dateKeyInMadrid(iso).slice(0, 7)),
+    (valor) => currencyFormatter.format(valor),
+  );
+
   const leadSummary = useMemo(() => {
     const won = visibleRows.filter((lead) => lead.status === "won");
     return {
@@ -366,7 +389,7 @@ export function LeadsTable() {
     const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }, { data: asignadosData, error: asignadosError }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("campaigns").select("id, name, business_unit_id").neq("status", "archived").order("name"),
-      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at, changed_by), lead_log(id, created_at, kind, text)").order("created_at", { ascending: false }).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, meta_lead_id, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at, changed_by), lead_log(id, created_at, kind, text)").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
       // En consulta aparte y no anidada en la de leads: si la migración de
       // responsables no está aplicada todavía, la página sigue funcionando.
@@ -390,6 +413,9 @@ export function LeadsTable() {
     }
     setAsignacionesOk(!asignadosError);
     setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>, asignados)));
+    // El gasto es un extra: si falla, la lista de leads se enseña igual.
+    const { rows: gasto } = await loadAdsSpendByMonth(supabase);
+    setGastoEnPublicidad(gasto);
     const user = authData.user;
     if (user) {
       const [{ data: profile }, { data: teamData }] = await Promise.all([
@@ -706,7 +732,19 @@ export function LeadsTable() {
         </div>
       </CollapsibleFilters>
       <section className="kpi-grid">
-        <KpiCard label="Leads" value={numberFormatter.format(leadSummary.total)} delta="Sin comparación" helper="según los filtros" icon={<LeadsIcon />} tone="sky" onClick={filtrarPorEstado("all")} actionLabel="Ver todos" active={status === "all"} />
+        <KpiCard
+          label="Leads"
+          value={numberFormatter.format(leadSummary.total)}
+          delta="Sin comparación"
+          helper="según los filtros"
+          icon={<LeadsIcon />}
+          tone="sky"
+          sub={costePorLead}
+          subTitle={EXPLICACION_COSTE_POR_LEAD}
+          onClick={filtrarPorEstado("all")}
+          actionLabel="Ver todos"
+          active={status === "all"}
+        />
         <KpiCard label="Sin contactar" value={numberFormatter.format(leadSummary.fresh)} delta="Sin comparación" helper="en estado nuevo" icon={<PlusCircleIcon />} tone={leadSummary.fresh > 0 ? "rose" : "indigo"} onClick={filtrarPorEstado("new")} actionLabel={status === "new" ? "Quitar filtro" : "Ver los nuevos"} active={status === "new"} />
         <KpiCard
           label="Atendidos tarde"

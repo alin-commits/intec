@@ -106,6 +106,8 @@ export type Lead = {
   /** Comerciales que llevan el lead. Vive en lead_assignees, lo pone administración. */
   assignees?: string[];
   statusHistory?: LeadStatusEvent[];
+  /** De qué anuncio vino, si vino de uno. Lo usa el coste por lead. */
+  metaLeadId?: string | null;
   /** Su registro (lead_log): lo que llegó de Meta, cambios de estado y asignaciones. Nadie lo puede tocar. */
   log?: { id: string; createdAt: string; kind: string; text: string }[];
 };

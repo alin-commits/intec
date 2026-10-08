@@ -11,7 +11,8 @@ import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format"
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { loadAdsSpendByMonth } from "@/lib/publicidad/gasto-por-mes";
-import { plataformaDeLead, type AdsPlatform } from "@/lib/publicidad/plataformas";
+import { calcularCostePorLead, EXPLICACION_COSTE_POR_LEAD, textoCostePorLead } from "@/lib/publicidad/coste-por-lead";
+import type { AdsPlatform } from "@/lib/publicidad/plataformas";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
@@ -580,38 +581,9 @@ export function DashboardClient() {
    * creados en él, y en un mes con pocos leads nuevos y muchos cierres antiguos
    * la conversión pasaba del 100 %.
    */
-  /**
-   * Lo que cuesta traer un lead de campañas.
-   *
-   * Lo difícil aquí no es dividir, es decidir qué gasto entra. Hay meses con
-   * gasto de los que no queda ni un lead en la aplicación, porque la conexión
-   * con la plataforma todavía no existía: en abril de 2026 Meta contó 186 leads
-   * y aquí no entró ninguno. Meter ese gasto en la cuenta carga meses enteros
-   * sobre los leads de las últimas semanas y dispara el coste.
-   *
-   * Así que de cada plataforma solo cuenta el gasto desde el mes en que empezó
-   * a dejar leads aquí. A partir de ahí entra todo, también los meses malos: si
-   * se gasta y no entra nada, tiene que notarse. Y el día que LinkedIn empiece,
-   * su gasto entra solo, desde su primer lead, sin tocar esto.
-   */
-  const primerMesConLeads = new Map<AdsPlatform, string>();
-  for (const lead of campaignLeads) {
-    const plataforma = plataformaDeLead(lead);
-    if (!plataforma) continue;
-    const mes = monthKeyOf(lead.createdAt);
-    const actual = primerMesConLeads.get(plataforma);
-    if (!actual || mes < actual) primerMesConLeads.set(plataforma, mes);
-  }
-  const gastoComparable = rrssAdsFiltered.reduce((suma, fila) => {
-    const desde = primerMesConLeads.get(fila.platform);
-    return desde && fila.month >= desde ? suma + fila.amountSpent : suma;
-  }, 0);
-  const leadsDeCampanas = periodLeads.filter((lead) => plataformaDeLead(lead) !== null).length;
-  const costePorLead = gastoComparable <= 0
-    ? undefined
-    : leadsDeCampanas <= 0
-      ? `${currencyFormatter.format(gastoComparable)} en publicidad`
-      : `${currencyFormatter.format(gastoComparable)} · ${currencyFormatter.format(gastoComparable / leadsDeCampanas)} por lead`;
+  // La misma cuenta que en Leads y en el panel de Ads: una sola definición.
+  const coste = calcularCostePorLead(rrssAdsFiltered, periodLeads, campaignLeads, monthKeyOf);
+  const costePorLead = textoCostePorLead(coste, (valor) => currencyFormatter.format(valor));
 
   const conversionOf = (leads: CampaignLeadStub[]) => (leads.length ? (leads.filter((lead) => lead.status === "won").length / leads.length) * 100 : 0);
   const conversion = conversionOf(periodLeads);
@@ -750,7 +722,7 @@ export function DashboardClient() {
           tone="sky"
           sparkline={sparkLeads}
           sub={costePorLead}
-          subTitle="Lo gastado en publicidad dividido entre los leads que llegaron de campañas. Solo cuenta el gasto desde que cada plataforma empezó a dejar sus leads aquí: lo anterior se gastó cuando no se recogía nada y mezclarlo dispararía el coste."
+          subTitle={EXPLICACION_COSTE_POR_LEAD}
           {...deltaProps(leadsDelta)}
           onClick={goTo(canSeeLeads, "/leads")}
           actionLabel="Ver leads"

@@ -11,6 +11,8 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { EuroIcon, LeadsIcon, ConversionIcon, HeartIcon, UsuariosIcon } from "@/components/icons";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { currencyFormatter, numberFormatter, formatPercent } from "@/lib/format";
+import { dateKeyInMadrid } from "@/lib/dates";
+import { calcularCostePorLead, EXPLICACION_COSTE_POR_LEAD } from "@/lib/publicidad/coste-por-lead";
 import { generatePdfReport } from "@/lib/pdf-report";
 import { reportSafeError } from "@/lib/errors";
 import { createClient } from "@/lib/supabase/client";
@@ -88,6 +90,7 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
   const [cuentas, setCuentas] = useState<Cuenta[]>([]);
   const [campanas, setCampanas] = useState<Campana[]>([]);
   const [dias, setDias] = useState<Dia[]>([]);
+  const [leadsDeLaApp, setLeadsDeLaApp] = useState<{ createdAt: string; metaLeadId: string | null }[]>([]);
   const [extras, setExtras] = useState<Extra[]>([]);
   const [sueltas, setSueltas] = useState<Suelta[]>([]);
   const [campanasApp, setCampanasApp] = useState<CampanaApp[]>([]);
@@ -114,7 +117,7 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
 
   async function cargar() {
     const supabase = createClient();
-    const [cuentasRes, campanasRes, diasRes, extrasRes, sueltasRes, runRes, primeroRes, appRes] = await Promise.all([
+    const [cuentasRes, campanasRes, diasRes, extrasRes, sueltasRes, runRes, primeroRes, appRes, leadsRes] = await Promise.all([
       supabase.from("meta_ad_accounts").select("account_id, name, business_unit_id, is_active"),
       supabase.from("meta_campaigns").select("meta_id, account_id, name, status, objective, campaign_id"),
       // Por páginas: una fila por campaña y día pasa pronto de las 1000 que da la base de golpe.
@@ -126,6 +129,9 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
       supabase.from("ads_sync_runs").select("started_at, ok, message, account_id").eq("platform", "meta").order("started_at", { ascending: false }).limit(60),
       supabase.from("meta_insights_daily").select("day").order("day", { ascending: true }).limit(1),
       supabase.from("campaigns").select("id, name, business_unit_id").order("name"),
+      // Los leads que llegaron aquí de verdad: Meta cuenta los suyos, y no son
+      // los mismos. De abril a junio contó 290 que nunca entraron.
+      supabase.from("leads").select("created_at, meta_lead_id"),
     ]);
     const fallosLeadsRes = await supabase.from("meta_lead_events").select("received_at, message").eq("ok", false)
       .gte("received_at", new Date(Date.now() - 7 * 86_400_000).toISOString()).order("received_at", { ascending: false }).limit(5);
@@ -141,6 +147,7 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
     setCuentas((cuentasRes.data ?? []) as Cuenta[]);
     setCampanas((campanasRes.data ?? []) as Campana[]);
     setDias((diasRes.data ?? []) as Dia[]);
+    setLeadsDeLaApp((leadsRes.data ?? []).map((fila) => ({ createdAt: String(fila.created_at), metaLeadId: fila.meta_lead_id ? String(fila.meta_lead_id) : null })));
     setExtras((extrasRes.data ?? []) as Extra[]);
     setSueltas((sueltasRes.data ?? []) as Suelta[]);
     setManualDisponible(!extrasRes.error);
@@ -386,6 +393,18 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
   const filasVisibles = filas.slice(paginaActual * POR_PAGINA, paginaActual * POR_PAGINA + POR_PAGINA);
 
   const cpl = totales.leads > 0 ? totales.gasto / totales.leads : 0;
+  /**
+   * El otro coste por lead: el de los leads que llegan a la aplicación, no el de
+   * los que cuenta Meta. Los dos sirven, pero miden cosas distintas y conviene
+   * verlos juntos: si se separan mucho es que se están perdiendo leads por el
+   * camino. Misma definición que en Inicio y en la pestaña de Leads.
+   */
+  const costeNuestro = calcularCostePorLead(
+    dias.map((d) => ({ platform: "meta" as const, month: String(d.day).slice(0, 7), amountSpent: Number(d.spend ?? 0) })),
+    leadsDeLaApp.filter((lead) => dateKeyInMadrid(lead.createdAt) >= desde && dateKeyInMadrid(lead.createdAt) <= hasta),
+    leadsDeLaApp,
+    (iso) => dateKeyInMadrid(iso).slice(0, 7),
+  );
   const roas = totales.gasto > 0 ? totales.ingresos / totales.gasto : 0;
   const ctr = totales.impresiones > 0 ? (totales.clics / totales.impresiones) * 100 : 0;
   const periodoTexto = `${desde} a ${hasta}`;
@@ -549,7 +568,17 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
         <KpiCard label="Ingresos" value={currencyFormatter.format(totales.ingresos)} helper="escritos a mano" icon={<EuroIcon />} tone="emerald" delta="" />
         <KpiCard label="Leads" value={numberFormatter.format(totales.leads)} helper={totales.cualificados > 0 ? `${numberFormatter.format(totales.cualificados)} cualificados` : "sin cualificar todavía"} icon={<LeadsIcon />} tone="sky" delta="" />
         <KpiCard label="Seguidores ganados" value={numberFormatter.format(totales.seguidores)} helper="escritos a mano" icon={<HeartIcon />} tone="rose" delta="" />
-        <KpiCard label="CPL medio" value={totales.leads > 0 ? currencyFormatter.format(cpl) : "—"} helper="coste por lead" icon={<ConversionIcon />} tone="amber" delta="" />
+        <KpiCard label="CPL según Meta" value={totales.leads > 0 ? currencyFormatter.format(cpl) : "—"} helper={`${numberFormatter.format(totales.leads)} leads que cuenta Meta`} icon={<ConversionIcon />} tone="amber" delta="" />
+        <KpiCard
+          label="Coste por lead"
+          value={costeNuestro.euros === null ? "—" : currencyFormatter.format(costeNuestro.euros)}
+          helper={`${numberFormatter.format(costeNuestro.leads)} que llegaron aquí`}
+          icon={<LeadsIcon />}
+          tone="indigo"
+          delta=""
+          sub={costeNuestro.gasto > 0 ? `sobre ${currencyFormatter.format(costeNuestro.gasto)}` : undefined}
+          subTitle={EXPLICACION_COSTE_POR_LEAD}
+        />
         <KpiCard label="ROAS medio" value={totales.gasto > 0 ? `${roas.toFixed(2).replace(".", ",")}x` : "—"} helper="ingreso por euro gastado" icon={<UsuariosIcon />} tone="emerald" delta="" />
       </div>
 
