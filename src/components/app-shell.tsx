@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
+import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
@@ -57,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured();
   // Sin roles hasta saberlos: suponer "admin" enseñaba el menú entero, "Usuarios"
   // incluido, durante la carga de cada recarga dura.
-  const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[]; isPreview: boolean }>(() => ({ fullName: "", roles: [], isPreview: false }));
+  const [profile, setProfile] = useState<{ id: string; fullName: string; roles: AppRole[]; isPreview: boolean }>(() => ({ id: "", fullName: "", roles: [], isPreview: false }));
   // Las cuentas de prueba solo las pide quien puede usarlas.
   const [cuentasDePrueba, setCuentasDePrueba] = useState<CuentaDePrueba[]>([]);
   const [hasAssignedCard, setHasAssignedCard] = useState(false);
@@ -74,7 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     async function loadProfile() {
       const current = await loadCurrentProfile();
       if (!current || !active) return;
-      setProfile({ fullName: displayName(current.fullName), roles: current.roles, isPreview: current.isPreview });
+      setProfile({ id: current.id, fullName: displayName(current.fullName), roles: current.roles, isPreview: current.isPreview });
       const supabase = createClient();
       const { data: assignedCard } = await supabase.from("business_cards").select("id").eq("assigned_user_id", current.id).limit(1).maybeSingle();
       if (!active) return;
@@ -171,6 +172,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <main className="main-content">
         {profile.isPreview ? <PreviewBanner fullName={profile.fullName} roles={profile.roles} /> : null}
+        {/* Los leads sin tocar se le recuerdan a quien los lleva, no a quien mira. */}
+        {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <PendingLeadsNotice userId={profile.id} /> : null}
         <header className="topbar">
           {isDashboard ? (
             <div className="topbar-title">

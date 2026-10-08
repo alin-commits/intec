@@ -203,9 +203,11 @@ export function LeadsTable() {
   const urlOwner = searchParams.get("owner") ?? "";
   // Desde Inicio se llega con un estado ya elegido (las tarjetas de conversión y valor ganado).
   const urlStatus = searchParams.get("status") ?? "";
-  const urlKey = `${urlQuery}|${urlOwner}|${urlStatus}`;
-  const [appliedUrlKey, setAppliedUrlKey] = useState("||");
-  if (urlKey !== "||" && urlKey !== appliedUrlKey) {
+  // El aviso de entrada trae aquí con los suyos sin atender ya filtrados.
+  const urlAtencion = searchParams.get("atencion") ?? "";
+  const urlKey = `${urlQuery}|${urlOwner}|${urlStatus}|${urlAtencion}`;
+  const [appliedUrlKey, setAppliedUrlKey] = useState("|||");
+  if (urlKey !== "|||" && urlKey !== appliedUrlKey) {
     setAppliedUrlKey(urlKey);
     setUnitId("all");
     if (urlQuery) setQuery(urlQuery);
@@ -214,6 +216,7 @@ export function LeadsTable() {
       setStatus("new");
     }
     if (urlStatus in leadStatusLabels) setStatus(urlStatus);
+    if (urlAtencion === "tarde" || urlAtencion === "sin-atender") setAtencionFilter(urlAtencion);
   }
   // Nuevos leads solo ofrecen unidades marcadas visibleInLeads; al editar uno
   // existente se mantienen todas para no perder su marca si se ocultó después.
