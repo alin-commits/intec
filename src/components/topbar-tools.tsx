@@ -12,12 +12,12 @@ import { ANNOUNCEMENT_SENDER_ROLES, CRM_ROLES, EXPENSES_EDIT_ROLES, LEADS_ROLES,
 import { todayKey } from "@/lib/dates";
 import { daysBetween, nextRenewal, type BillingPeriod } from "@/lib/expenses";
 import { createClient } from "@/lib/supabase/client";
+import { atencionDeLead, horasEnPalabras, type CambioDeEstado } from "@/lib/leads/atencion";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { sanitizeSearchTerm } from "@/lib/search-term";
 import type { AppRole } from "@/lib/types";
 
-const STALE_LEAD_DAYS = 3;
 const STALE_TICKET_DAYS = 3;
 const SEARCH_LIMIT = 5;
 const RENEWAL_ALERT_DAYS = 7;
@@ -29,6 +29,30 @@ const RENEWAL_ALERT_DAYS = 7;
 // back as soon as its signature changes (something new to deal with).
 type Alert = { key: string; label: string; count: number; href: string; icon: ReactNode; urgent: boolean; signature: string };
 type HiddenAlerts = Record<string, string>;
+
+/**
+ * La firma de un aviso es "dia|lo que hay pendiente". Se guarda al ocultarlo
+ * y se compara asi:
+ *
+ *   - Otro dia: vuelve a salir, porque sigue pendiente y hay que recordarlo.
+ *   - El mismo dia con lo mismo, o con menos porque se resolvio algo: callado.
+ *   - El mismo dia con algo nuevo: vuelve a salir, que es lo que no hacia.
+ *
+ * Antes la firma era "dia|cuantos", asi que resolver un ticket cambiaba el
+ * numero y el aviso que acababas de ocultar reaparecia al instante.
+ */
+function firmaDe(dia: string, cosas: string[]): string {
+  return `${dia}|${[...cosas].sort().join(",")}`;
+}
+
+function sigueOculto(firmaActual: string, firmaOculta: string | undefined): boolean {
+  if (!firmaOculta) return false;
+  const [diaActual, listaActual = ""] = firmaActual.split("|");
+  const [diaOculto, listaOculta = ""] = firmaOculta.split("|");
+  if (diaActual !== diaOculto) return false;
+  const vistas = new Set(listaOculta.split(",").filter(Boolean));
+  return listaActual.split(",").filter(Boolean).every((cosa) => vistas.has(cosa));
+}
 
 const HIDDEN_ALERTS_KEY = "intec-hidden-alerts";
 
@@ -102,20 +126,23 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
       const canLeads = hasAnyRole(alertRoles, LEADS_ROLES);
       const canTickets = hasAnyRole(alertRoles, TICKET_VIEW_ROLES);
       const canExpenses = hasAnyRole(alertRoles, EXPENSES_EDIT_ROLES);
-      const leadsBefore = new Date(Date.now() - STALE_LEAD_DAYS * 86400000).toISOString();
       const ticketsBefore = new Date(Date.now() - STALE_TICKET_DAYS * 86400000).toISOString();
       // A pure commercial is alerted about the leads they own; everyone else sees all of them.
       const onlyOwnLeads = alertRoles.includes("commercial") && !hasAnyRole(alertRoles, ["admin", "viewer", "marketing"]);
       const { data: { user } } = await supabase.auth.getUser();
       // Los leads de un comercial se cuentan desde la tabla de responsables,
       // porque un lead puede llevarlo más de uno.
+      // No se puede preguntar por "horas laborables" en SQL: se traen los que
+      // siguen en "Nuevo" —son pocos— y el plazo lo decide la misma función que
+      // pinta la insignia de la tabla y llena el aviso de entrada.
+      const camposLead = "id, status, created_at, lead_status_history(new_status, changed_at)";
       const staleLeadsQuery = onlyOwnLeads && user
-        ? supabase.from("lead_assignees").select("lead_id, leads!inner(status, created_at)", { count: "exact", head: true }).eq("profile_id", user.id).eq("leads.status", "new").lt("leads.created_at", leadsBefore)
-        : supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "new").lt("created_at", leadsBefore);
+        ? supabase.from("lead_assignees").select(`leads!inner(${camposLead})`).eq("profile_id", user.id).eq("leads.status", "new")
+        : supabase.from("leads").select(camposLead).eq("status", "new");
       const [staleLeads, urgentTickets, staleTickets, received, subscriptions] = await Promise.all([
         canLeads ? staleLeadsQuery : null,
-        canTickets ? supabase.from("tickets").select("id", { count: "exact", head: true }).eq("priority", "high").in("status", OPEN_TICKET_STATUSES).is("archived_at", null) : null,
-        canTickets ? supabase.from("tickets").select("id", { count: "exact", head: true }).in("status", OPEN_TICKET_STATUSES).is("archived_at", null).lt("created_at", ticketsBefore) : null,
+        canTickets ? supabase.from("tickets").select("id").eq("priority", "high").in("status", OPEN_TICKET_STATUSES).is("archived_at", null) : null,
+        canTickets ? supabase.from("tickets").select("id").in("status", OPEN_TICKET_STATUSES).is("archived_at", null).lt("created_at", ticketsBefore) : null,
         user
           ? supabase
             .from("announcements")
@@ -133,17 +160,47 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
         setHiddenAlerts(readHiddenAlerts(user.id));
       }
       const today = todayKey();
-      // Pending work reminds again the next day while it is still pending.
-      const daily = (count: number) => `${today}|${count}`;
+      const ahora = new Date().toISOString();
       const next: Alert[] = [];
-      if (staleLeads?.count) next.push({ key: "leads", label: `${onlyOwnLeads ? "Tus leads" : "Leads"} sin contactar desde hace más de ${STALE_LEAD_DAYS} días`, count: staleLeads.count, href: onlyOwnLeads ? "/leads?owner=mine" : "/leads", icon: <LeadsIcon />, urgent: false, signature: daily(staleLeads.count) });
-      if (urgentTickets?.count) next.push({ key: "urgent", label: "Tickets de prioridad alta abiertos", count: urgentTickets.count, href: "/tickets", icon: <TicketsIcon />, urgent: true, signature: daily(urgentTickets.count) });
-      if (staleTickets?.count) next.push({ key: "stale", label: `Tickets abiertos desde hace más de ${STALE_TICKET_DAYS} días`, count: staleTickets.count, href: "/tickets", icon: <ClockIcon />, urgent: false, signature: daily(staleTickets.count) });
+
+      // Las filas vienen de dos consultas distintas: la del comercial trae el
+      // lead colgando de su asignación, la de los demás lo trae suelto.
+      const parados = ((staleLeads?.data ?? []) as Record<string, unknown>[])
+        .map((fila) => (fila.leads ?? fila) as Record<string, unknown>)
+        .filter((lead) => Boolean(lead?.id))
+        .map((lead) => {
+          const historia = (Array.isArray(lead.lead_status_history) ? lead.lead_status_history : []) as Record<string, unknown>[];
+          return {
+            id: String(lead.id),
+            atencion: atencionDeLead({
+              createdAt: String(lead.created_at),
+              status: String(lead.status),
+              statusHistory: historia.map((cambio): CambioDeEstado => ({ newStatus: String(cambio.new_status), changedAt: String(cambio.changed_at) })),
+            }, ahora),
+          };
+        })
+        .filter((lead) => lead.atencion.estado === "sin-atender");
+      if (parados.length) {
+        const elQueMasLleva = Math.max(...parados.map((lead) => lead.atencion.horas));
+        next.push({
+          key: "leads",
+          label: `${onlyOwnLeads ? "Tus leads" : "Leads"} sin contactar · el más antiguo lleva ${horasEnPalabras(elQueMasLleva)}`,
+          count: parados.length,
+          href: onlyOwnLeads ? "/leads?owner=mine&atencion=sin-atender" : "/leads?atencion=sin-atender",
+          icon: <LeadsIcon />,
+          urgent: false,
+          signature: firmaDe(today, parados.map((lead) => lead.id)),
+        });
+      }
+      const urgentIds = (urgentTickets?.data ?? []).map((fila) => String(fila.id));
+      const staleIds = (staleTickets?.data ?? []).map((fila) => String(fila.id));
+      if (urgentIds.length) next.push({ key: "urgent", label: "Tickets de prioridad alta abiertos", count: urgentIds.length, href: "/tickets", icon: <TicketsIcon />, urgent: true, signature: firmaDe(today, urgentIds) });
+      if (staleIds.length) next.push({ key: "stale", label: `Tickets abiertos desde hace más de ${STALE_TICKET_DAYS} días`, count: staleIds.length, href: "/tickets", icon: <ClockIcon />, urgent: false, signature: firmaDe(today, staleIds) });
       // Each upcoming charge (subscription + date) is acknowledged once; only a new one brings the alert back.
       const renewingSoon = (subscriptions?.data ?? [])
         .map((row) => ({ id: row.id, date: nextRenewal({ id: row.id, name: row.name, amount: Number(row.amount), billingPeriod: row.billing_period as BillingPeriod, startDate: row.start_date, kind: "subscription", status: "active", category: "software", provider: null, cancelledOn: null, businessUnitId: null, paymentMethod: null, url: null, notes: null }, today) }))
         .filter((item): item is { id: string; date: string } => item.date !== null && daysBetween(today, item.date) <= RENEWAL_ALERT_DAYS);
-      if (renewingSoon.length) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon.length, href: "/marketing?p=gastos", icon: <WalletIcon />, urgent: false, signature: renewingSoon.map((item) => `${item.id}@${item.date}`).sort().join(",") });
+      if (renewingSoon.length) next.push({ key: "renewals", label: `Suscripciones que se renuevan en los próximos ${RENEWAL_ALERT_DAYS} días`, count: renewingSoon.length, href: "/marketing?p=gastos", icon: <WalletIcon />, urgent: false, signature: firmaDe(today, renewingSoon.map((item) => `${item.id}@${item.date}`)) });
       setAlerts(next);
       const rows = (received?.data ?? []) as { id: string; title: string; body: string; sender_name: string; created_at: string; announcement_recipients: { read_at: string | null }[] }[];
       setMessages(rows.map((row) => ({
@@ -159,7 +216,7 @@ export function NotificationsBell({ roles }: { roles: AppRole[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rolesKey stands in for roles
   }, [rolesKey, pathname, pollTick]);
 
-  const visibleAlerts = alerts.filter((alert) => hiddenAlerts[alert.key] !== alert.signature);
+  const visibleAlerts = alerts.filter((alert) => !sigueOculto(alert.signature, hiddenAlerts[alert.key]));
   const unreadIds = messages.filter((message) => message.unread).map((message) => message.id);
   const total = visibleAlerts.reduce((sum, alert) => sum + alert.count, 0) + unreadIds.length;
 

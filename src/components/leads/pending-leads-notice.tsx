@@ -15,6 +15,10 @@ import { todayKey } from "@/lib/dates";
  * los dos días, y lo que se persigue aquí es justo lo contrario: que la primera
  * vez que entras por la mañana sepas a quién llamar antes que a nadie.
  *
+ * "Una vez al día" cuenta los leads, no las veces: si por la tarde se pasa de
+ * plazo otro, vuelve a salir con ese. Lo que ya se ha visto y sigue igual se
+ * queda callado hasta mañana.
+ *
  * El retraso se cuenta en horas laborables, sin fines de semana, con las mismas
  * reglas que la insignia "Sin atender" de la tabla de leads: una sola fuente
  * para las dos cosas, para que nunca digan cosas distintas del mismo lead.
@@ -28,19 +32,32 @@ function clave(userId: string) {
   return `intec.leads-sin-atender.${userId}`;
 }
 
-/** Ya se avisó hoy a esta persona en este navegador. */
-function yaVistoHoy(userId: string): boolean {
+/** Lo que se guardó al cerrarlo: el día y los leads que ya se enseñaron. */
+function loVisto(userId: string): { dia: string; ids: string[] } {
   try {
-    return window.localStorage.getItem(clave(userId)) === todayKey();
+    const crudo = window.localStorage.getItem(clave(userId));
+    if (!crudo) return { dia: "", ids: [] };
+    const valor = JSON.parse(crudo) as { dia?: string; ids?: string[] };
+    return { dia: valor.dia ?? "", ids: Array.isArray(valor.ids) ? valor.ids : [] };
   } catch {
     // Sin almacén se avisa en cada carga: molesta menos que callarse.
-    return false;
+    return { dia: "", ids: [] };
   }
 }
 
-function apuntarVisto(userId: string) {
+/** Ya se enseñaron hoy estos mismos leads (o más): no hay nada nuevo que decir. */
+function yaSeVieron(userId: string, ids: string[]): boolean {
+  const visto = loVisto(userId);
+  if (visto.dia !== todayKey()) return false;
+  const vistos = new Set(visto.ids);
+  return ids.every((id) => vistos.has(id));
+}
+
+function apuntarVisto(userId: string, ids: string[]) {
   try {
-    window.localStorage.setItem(clave(userId), todayKey());
+    const visto = loVisto(userId);
+    const juntos = visto.dia === todayKey() ? [...new Set([...visto.ids, ...ids])] : ids;
+    window.localStorage.setItem(clave(userId), JSON.stringify({ dia: todayKey(), ids: juntos }));
   } catch {
     // Nada que hacer: el aviso volverá a salir, que es el lado seguro.
   }
@@ -51,7 +68,6 @@ export function PendingLeadsNotice({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (yaVistoHoy(userId)) return;
     let activo = true;
     void (async () => {
       // Un lead puede llevarlo más de una persona: los suyos salen de la tabla
@@ -85,13 +101,15 @@ export function PendingLeadsNotice({ userId }: { userId: string }) {
       if (!activo || tarde.length === 0) return;
       tarde.sort((a, b) => b.horas - a.horas);
       setPendientes(tarde);
-      setOpen(true);
+      // Lo que ya se enseñó hoy se carga igual —para el botón de la lista—
+      // pero sin volver a abrir el diálogo.
+      if (!yaSeVieron(userId, tarde.map((lead) => lead.id))) setOpen(true);
     })();
     return () => { activo = false; };
   }, [userId]);
 
   function cerrar() {
-    apuntarVisto(userId);
+    apuntarVisto(userId, pendientes.map((lead) => lead.id));
     setOpen(false);
   }
 
