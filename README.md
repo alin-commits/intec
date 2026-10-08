@@ -91,3 +91,21 @@ npm run check:schema
 Compara el esquema real con las migraciones del repositorio y con lo que lee el
 código, y dice qué falta. Solo lee: no escribe nada ni ejecuta funciones de la
 base. Necesita `.env.local` con la clave de servicio.
+
+### Ver la aplicación como cada rol
+
+El chip de la esquina abre las cuentas de prueba —una por rol— y entra en ellas
+de un clic, para mirar lo que ve un comercial o dirección sin pedirle a nadie su
+contraseña. Solo lo ve quien es dueño o admin, y una franja fija recuerda en qué
+cuenta estás.
+
+Las cuentas se crean (o se ponen al día) con:
+
+```bash
+npm run cuentas:prueba
+```
+
+Son cuentas de verdad con permisos de verdad, así que están marcadas con
+`profiles.is_preview`: se esconden de todos los listados de personas —repartos,
+asignaciones y correos automáticos— y son las únicas cuya sesión puede entregar
+`/api/preview-accounts/session`.
