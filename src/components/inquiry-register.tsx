@@ -590,6 +590,8 @@ export function InquiryRegister() {
         );
       }
       setRecords((current) => current.filter((record) => record.id !== pendingDelete.id));
+      // Su venta se va con ella en la base: aquí también, sin recargar.
+      setSalesEntries((current) => current.filter((entry) => entry.inquiryId !== pendingDelete.id));
       setMessage("Consulta eliminada.");
       setPendingDelete(null);
     } catch (cause) {
