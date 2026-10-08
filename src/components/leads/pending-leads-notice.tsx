@@ -5,19 +5,17 @@ import { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER, type CambioDeEstado } from "@/lib/leads/atencion";
 import { createClient } from "@/lib/supabase/client";
-import { todayKey } from "@/lib/dates";
 
 /**
  * El aviso de entrada para un comercial: estos leads tuyos siguen sin tocar y
  * llevan esperando más de la cuenta.
  *
- * Sale una vez al día. Un aviso que aparece en cada pantalla deja de leerse a
- * los dos días, y lo que se persigue aquí es justo lo contrario: que la primera
- * vez que entras por la mañana sepas a quién llamar antes que a nadie.
+ * Al cerrarlo se calla una hora. Ni en cada pantalla —eso se deja de leer en
+ * dos días— ni una sola vez al día, que es demasiado poco para algo que se
+ * arregla con una llamada: si a media mañana sigue ahí, vale la pena repetirlo.
  *
- * "Una vez al día" cuenta los leads, no las veces: si por la tarde se pasa de
- * plazo otro, vuelve a salir con ese. Lo que ya se ha visto y sigue igual se
- * queda callado hasta mañana.
+ * La hora de silencio vale para los leads que ya se enseñaron. Si mientras
+ * tanto se pasa de plazo otro, vuelve a salir en el acto con ese.
  *
  * El retraso se cuenta en horas laborables, sin fines de semana, con las mismas
  * reglas que la insignia "Sin atender" de la tabla de leads: una sola fuente
@@ -25,6 +23,8 @@ import { todayKey } from "@/lib/dates";
  */
 
 const CUANTOS_SE_ENSEÑAN = 8;
+/** Lo que calla tras cerrarlo, mientras no haya ninguno nuevo. */
+const MINUTOS_DE_SILENCIO = 60;
 
 type LeadPendiente = { id: string; nombre: string; empresa: string | null; horas: number };
 
@@ -32,32 +32,33 @@ function clave(userId: string) {
   return `intec.leads-sin-atender.${userId}`;
 }
 
-/** Lo que se guardó al cerrarlo: el día y los leads que ya se enseñaron. */
-function loVisto(userId: string): { dia: string; ids: string[] } {
+/** Lo que se guardó al cerrarlo: hasta cuándo callar y con qué leads. */
+function loVisto(userId: string): { hasta: number; ids: string[] } {
   try {
     const crudo = window.localStorage.getItem(clave(userId));
-    if (!crudo) return { dia: "", ids: [] };
-    const valor = JSON.parse(crudo) as { dia?: string; ids?: string[] };
-    return { dia: valor.dia ?? "", ids: Array.isArray(valor.ids) ? valor.ids : [] };
+    if (!crudo) return { hasta: 0, ids: [] };
+    const valor = JSON.parse(crudo) as { hasta?: number; ids?: string[] };
+    return { hasta: Number(valor.hasta) || 0, ids: Array.isArray(valor.ids) ? valor.ids : [] };
   } catch {
     // Sin almacén se avisa en cada carga: molesta menos que callarse.
-    return { dia: "", ids: [] };
+    return { hasta: 0, ids: [] };
   }
 }
 
-/** Ya se enseñaron hoy estos mismos leads (o más): no hay nada nuevo que decir. */
+/** Estos mismos leads se enseñaron hace menos de una hora: nada nuevo que decir. */
 function yaSeVieron(userId: string, ids: string[]): boolean {
   const visto = loVisto(userId);
-  if (visto.dia !== todayKey()) return false;
+  if (Date.now() >= visto.hasta) return false;
   const vistos = new Set(visto.ids);
   return ids.every((id) => vistos.has(id));
 }
 
 function apuntarVisto(userId: string, ids: string[]) {
   try {
-    const visto = loVisto(userId);
-    const juntos = visto.dia === todayKey() ? [...new Set([...visto.ids, ...ids])] : ids;
-    window.localStorage.setItem(clave(userId), JSON.stringify({ dia: todayKey(), ids: juntos }));
+    window.localStorage.setItem(clave(userId), JSON.stringify({
+      hasta: Date.now() + MINUTOS_DE_SILENCIO * 60_000,
+      ids,
+    }));
   } catch {
     // Nada que hacer: el aviso volverá a salir, que es el lado seguro.
   }
@@ -101,8 +102,8 @@ export function PendingLeadsNotice({ userId }: { userId: string }) {
       if (!activo || tarde.length === 0) return;
       tarde.sort((a, b) => b.horas - a.horas);
       setPendientes(tarde);
-      // Lo que ya se enseñó hoy se carga igual —para el botón de la lista—
-      // pero sin volver a abrir el diálogo.
+      // Lo enseñado hace menos de una hora se carga igual —hace falta para el
+      // botón de la lista— pero sin volver a abrir el diálogo.
       if (!yaSeVieron(userId, tarde.map((lead) => lead.id))) setOpen(true);
     })();
     return () => { activo = false; };
