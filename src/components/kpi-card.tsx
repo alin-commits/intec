@@ -12,6 +12,10 @@ type KpiCardProps = {
   icon?: ReactNode;
   tone?: KpiTone;
   sparkline?: number[];
+  /** Una línea corta bajo el número, para un dato que acompaña (el gasto, el coste por lead). */
+  sub?: string;
+  /** Lo que explica esa línea al pasar el ratón, que ahí no cabe. */
+  subTitle?: string;
   /** Para abrir el detalle o filtrar pulsando la tarjeta, como en Power BI. */
   onClick?: () => void;
   /** Lo que pasa al pulsar ("Ver lista", "Ver ofertas"...), para que se note que se puede. */
@@ -28,7 +32,7 @@ function valueSizeClass(value: string): string {
   return "kpi-value";
 }
 
-export function KpiCard({ label, value, delta, positive = true, helper, icon, tone = "indigo", sparkline, onClick, actionLabel, active = false }: KpiCardProps) {
+export function KpiCard({ label, value, delta, positive = true, helper, icon, tone = "indigo", sparkline, sub, subTitle, onClick, actionLabel, active = false }: KpiCardProps) {
   const neutral = delta === NO_COMPARISON;
   const context = helper ?? "frente al mes anterior";
   const footer = neutral ? (
@@ -76,7 +80,10 @@ export function KpiCard({ label, value, delta, positive = true, helper, icon, to
         <div className="kpi-label">{label}</div>
       </div>
       <div className="kpi-card-body">
-        <div className={valueSizeClass(value)}>{value}</div>
+        <div className="kpi-value-stack">
+          <div className={valueSizeClass(value)}>{value}</div>
+          {sub ? <div className="kpi-sub" title={subTitle}>{sub}</div> : null}
+        </div>
         {sparkline ? <Sparkline values={sparkline} /> : null}
       </div>
       {footer}

@@ -739,6 +739,11 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .pending-lead-name small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-lead-delay { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: 700; white-space: nowrap; }
 
+/* La línea de apoyo de una tarjeta (el gasto y el coste por lead en Leads) */
+.kpi-value-stack { display: grid; gap: 2px; min-width: 0; }
+.kpi-sub { color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 420px) { .kpi-sub { white-space: normal; } }
+
 /* Aviso de que una extensión está escondiendo parte de la página.
    Nombre neutro a propósito: con "ad" o "banner" lo escondería el mismo filtro. */
 .aviso-navegador { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 16px 24px 0; padding: 12px 16px; border: 1px solid #f59e0b; border-radius: 12px; background: #fffbeb; color: #78350f; font-size: 13px; line-height: 1.5; }

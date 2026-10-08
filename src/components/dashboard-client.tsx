@@ -486,6 +486,23 @@ export function DashboardClient() {
     [mailingRows, businessUnitId, viewMode, selectedMonth, selectedYear],
   );
 
+  /**
+   * Lo que ha costado traer estos leads: el gasto en publicidad del periodo
+   * repartido entre todos los leads que entraron, vengan de donde vengan.
+   *
+   * Se divide entre los leads de la aplicación, no entre los que cuenta la
+   * plataforma, para que la tarjeta cuadre consigo misma: el número grande y el
+   * coste se pueden dividir a mano y dar lo mismo. El panel de Ads enseña el
+   * CPL de la plataforma, que mide otra cosa —solo lo pagado— y por eso sale
+   * más bajo.
+   */
+  const gastoDelPeriodo = rrssAdsFiltered.reduce((suma, fila) => suma + fila.amountSpent, 0);
+  const costePorLead = gastoDelPeriodo <= 0
+    ? undefined
+    : current.leads <= 0
+      ? `${currencyFormatter.format(gastoDelPeriodo)} en publicidad`
+      : `${currencyFormatter.format(gastoDelPeriodo)} · ${currencyFormatter.format(gastoDelPeriodo / current.leads)} por lead`;
+
   const rrssSummary = useMemo(() => {
     const spend = rrssAdsFiltered.reduce((sum, row) => sum + row.amountSpent, 0);
     const adsLeads = rrssAdsFiltered.reduce((sum, row) => sum + row.leads, 0);
@@ -698,7 +715,19 @@ export function DashboardClient() {
 
       <section className="kpi-grid kpi-grid-main">
         <KpiCard label="Consultas" value={numberFormatter.format(currentTotal)} helper={comparisonHelper} icon={<ConsultasIcon />} tone="indigo" sparkline={sparkInquiries} {...deltaProps(totalDelta)} onClick={goTo(canSeeInquiries, "/consultas")} actionLabel="Ver consultas" />
-        <KpiCard label="Leads" value={numberFormatter.format(current.leads)} helper={comparisonHelper} icon={<LeadsIcon />} tone="sky" sparkline={sparkLeads} {...deltaProps(leadsDelta)} onClick={goTo(canSeeLeads, "/leads")} actionLabel="Ver leads" />
+        <KpiCard
+          label="Leads"
+          value={numberFormatter.format(current.leads)}
+          helper={comparisonHelper}
+          icon={<LeadsIcon />}
+          tone="sky"
+          sparkline={sparkLeads}
+          sub={costePorLead}
+          subTitle="Lo gastado en publicidad en este periodo, dividido entre todos los leads que entraron. Incluye los que no vienen de anuncios, así que es lo que cuesta de media traer un lead, no el coste de una campaña."
+          {...deltaProps(leadsDelta)}
+          onClick={goTo(canSeeLeads, "/leads")}
+          actionLabel="Ver leads"
+        />
         <KpiCard
           label="Conversión"
           value={formatPercent(conversion)}
