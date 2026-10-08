@@ -7,7 +7,7 @@ import { monthKey, monthShortLabel } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadMetaSpendByMonth } from "@/lib/meta/spend-by-unit";
+import { loadAdsSpendByMonth } from "@/lib/ads/spend-by-month";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { KpiCard } from "@/components/kpi-card";
 import { ConversionIcon, EuroIcon, LeadsIcon, TrophyIcon } from "@/components/icons";
@@ -63,7 +63,7 @@ export function MarketingDashboardView() {
         supabase.from("social_media_stats").select("new_followers").eq("period_month", currentMonth),
         // Lo que dice Meta, no lo que alguien escribió a mano: el mismo origen
         // que el panel de inicio y que la pestaña de Campañas.
-        loadMetaSpendByMonth(supabase),
+        loadAdsSpendByMonth(supabase),
         supabase.from("mailing_campaigns").select("sent_count, opens, delivered_count, revenue"),
         supabase.from("social_media_stats").select("period_month, new_followers"),
       ]);
@@ -147,7 +147,7 @@ export function MarketingDashboardView() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Meta Ads</th></tr></thead>
+            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Valor</th><th>Publicidad</th></tr></thead>
             <tbody>
               {campaigns.map((campaign) => {
                 const unit = units.find((item) => item.id === campaign.businessUnitId);
@@ -171,12 +171,12 @@ export function MarketingDashboardView() {
 
       <section className="panel table-panel">
         <div className="panel-heading">
-          <div><span className="eyebrow">RRSS</span><h2>Redes sociales, Meta Ads y mailing</h2></div>
+          <div><span className="eyebrow">RRSS</span><h2>Redes sociales, publicidad y mailing</h2></div>
           <a href="/marketing?p=redes" className="text-link">Ver todas →</a>
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Nuevos seguidores (mes)</th><th>Gasto Meta Ads</th><th>Ingresos RRSS</th><th>Leads Meta Ads</th><th>Envíos de email</th><th>Open rate medio</th></tr></thead>
+            <thead><tr><th>Nuevos seguidores (mes)</th><th>Gasto en publicidad</th><th>Ingresos RRSS</th><th>Leads Meta Ads</th><th>Envíos de email</th><th>Open rate medio</th></tr></thead>
             <tbody>
               <tr>
                 <td>{numberFormatter.format(rrssSummary.newFollowers)}</td>

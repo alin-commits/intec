@@ -122,8 +122,8 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
         .gte("day", desde).lte("day", hasta).order("day").order("id").range(from, to)),
       supabase.from("meta_campaign_extras").select("meta_campaign_id, revenue, qualified_leads, followers_gained, notes"),
       // Lo que quedó escrito a mano y todavía no está colgado de ninguna campaña.
-      supabase.from("meta_ads_entries").select("id, campaign_name, revenue, qualified_leads, followers_gained, notes").is("placed_into", null),
-      supabase.from("meta_sync_runs").select("started_at, ok, message, account_id").order("started_at", { ascending: false }).limit(60),
+      supabase.from("ads_entries").select("id, campaign_name, revenue, qualified_leads, followers_gained, notes").eq("platform", "meta").is("placed_into", null),
+      supabase.from("ads_sync_runs").select("started_at, ok, message, account_id").eq("platform", "meta").order("started_at", { ascending: false }).limit(60),
       supabase.from("meta_insights_daily").select("day").order("day", { ascending: true }).limit(1),
       supabase.from("campaigns").select("id, name, business_unit_id").order("name"),
     ]);
@@ -347,7 +347,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       // Si no marca ninguna fila, esa entrada ya la colocó otra persona: hay
       // que parar aquí o se sumaría su dinero por segunda vez.
       await writeRows(
-        supabase.from("meta_ads_entries")
+        supabase.from("ads_entries")
           .update({ placed_into: destino, placed_at: new Date().toISOString() })
           .eq("id", suelta.id)
           .is("placed_into", null),
@@ -366,7 +366,7 @@ export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; 
       if (error) {
         // La marca ya está puesta pero el dinero no se ha sumado: se deshace
         // para que la entrada vuelva a la lista y se pueda reintentar.
-        await supabase.from("meta_ads_entries").update({ placed_into: null, placed_at: null }).eq("id", suelta.id);
+        await supabase.from("ads_entries").update({ placed_into: null, placed_at: null }).eq("id", suelta.id);
         throw error;
       }
       await cargar();

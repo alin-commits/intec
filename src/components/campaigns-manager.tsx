@@ -18,6 +18,8 @@ import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-
 import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
+import { loadAdsSpendByMonth } from "@/lib/ads/spend-by-month";
+import type { AdsPlatform } from "@/lib/ads/platforms";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
@@ -39,7 +41,7 @@ function campaignDate(campaign: Campaign): string {
 function backlogOf(campaignId: string, leads: LeadStub[]): number {
   return leads.filter((lead) => lead.campaignId === campaignId && !lead.assigned && !CLOSED_STATUSES.includes(lead.status)).length;
 }
-type AdsStub = { campaignId: string | null; amountSpent: number; revenue: number; leads: number };
+type AdsStub = { platform: AdsPlatform; campaignId: string | null; amountSpent: number; revenue: number; leads: number };
 
 function blankDraft(units: BusinessUnit[]): CampaignDraft {
   return {
@@ -177,25 +179,19 @@ export function CampaignsManager() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: adsData, error: adsError }, { data: authData }, { data: campaignAssignees }, { data: leadAssignees }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { rows: adsRows, error: adsError }, { data: authData }, { data: campaignAssignees }, { data: leadAssignees }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, leads_assign_mode, created_at, updated_at").order("created_at", { ascending: false }),
       fetchAllPages((from, to) => supabase.from("leads").select("id, campaign_id, status, sale_value").order("id").range(from, to)),
-      // El gasto sale de lo que manda Meta, no de lo que alguien escribió a
-      // mano: se cruza por la campaña de Meta que esté atada a esta.
-      supabase.from("meta_campaigns").select("meta_id, campaign_id").not("campaign_id", "is", null),
+      // El gasto no sale de lo que alguien escribió a mano: lo trae la capa
+      // común de publicidad, que cruza cada campaña con la de su plataforma.
+      loadAdsSpendByMonth(supabase),
       supabase.auth.getUser(),
       supabase.from("campaign_assignees").select("campaign_id, profile_id").order("added_at"),
       // Solo para saber qué leads no lleva nadie (los que se pueden repartir).
       fetchAllPages<{ lead_id: string }>((from, to) => supabase.from("lead_assignees").select("lead_id").order("lead_id").order("profile_id").range(from, to)),
     ]);
 
-    // El gasto por día se pagina: en un año son miles de filas y PostgREST
-    // devuelve mil por petición.
-    const [dias, extras] = await Promise.all([
-      fetchAllPages((from, to) => supabase.from("meta_insights_daily").select("meta_campaign_id, spend, leads").order("id").range(from, to)).then((r) => r.data),
-      supabase.from("meta_campaign_extras").select("meta_campaign_id, revenue"),
-    ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar las campañas."));
       setLoadFailed(true);
@@ -209,19 +205,18 @@ export function CampaignsManager() {
     for (const row of campaignAssignees ?? []) byCampaign.set(row.campaign_id as string, [...(byCampaign.get(row.campaign_id as string) ?? []), row.profile_id as string]);
     setAssigneesOf(byCampaign);
     if (adsError) setMessage(PARTIAL_LOAD_MESSAGE);
-    // Una fila por campaña de la aplicación, sumando todas sus campañas de Meta.
-    const atadaA = new Map((adsData ?? []).map((row) => [row.meta_id as string, row.campaign_id as string]));
-    const ingresoDe = new Map((extras.data ?? []).map((row) => [row.meta_campaign_id as string, Number(row.revenue ?? 0)]));
+    // Una fila por campaña de la aplicación y plataforma: los totales suman
+    // todas, y el desglose por plataforma sigue estando si hace falta.
     const porCampana = new Map<string, AdsStub>();
-    const apunta = (metaId: string, gasto: number, leads: number, ingresos: number) => {
-      const destino = atadaA.get(metaId);
-      if (!destino) return;
-      const fila = porCampana.get(destino) ?? { campaignId: destino, amountSpent: 0, revenue: 0, leads: 0 };
-      fila.amountSpent += gasto; fila.leads += leads; fila.revenue += ingresos;
-      porCampana.set(destino, fila);
-    };
-    for (const row of dias) apunta(String(row.meta_campaign_id), Number(row.spend ?? 0), Number(row.leads ?? 0), 0);
-    for (const [metaId, ingresos] of ingresoDe) apunta(metaId, 0, 0, ingresos);
+    for (const fila of adsRows) {
+      if (!fila.campaignId) continue;
+      const clave = `${fila.platform}|${fila.campaignId}`;
+      const actual = porCampana.get(clave) ?? { platform: fila.platform, campaignId: fila.campaignId, amountSpent: 0, revenue: 0, leads: 0 };
+      actual.amountSpent += fila.amountSpent;
+      actual.leads += fila.leads;
+      actual.revenue += fila.revenue;
+      porCampana.set(clave, actual);
+    }
     setAds([...porCampana.values()]);
     const user = authData.user;
     if (user) {
@@ -436,8 +431,8 @@ export function CampaignsManager() {
       { label: "Leads totales", value: stats.reduce((sum, item) => sum + item.total, 0) },
       { label: "Ganados", value: stats.reduce((sum, item) => sum + item.won, 0) },
       { label: "Valor total (€)", value: stats.reduce((sum, item) => sum + item.value, 0) },
-      { label: "Gasto Meta Ads (€)", value: adsStats.reduce((sum, item) => sum + item.spend, 0) },
-      { label: "Ingresos Meta Ads (€)", value: adsStats.reduce((sum, item) => sum + item.revenue, 0) },
+      { label: "Gasto en Ads (€)", value: adsStats.reduce((sum, item) => sum + item.spend, 0) },
+      { label: "Ingresos de Ads (€)", value: adsStats.reduce((sum, item) => sum + item.revenue, 0) },
     ];
     downloadCsvReport(`informe_campanas_${new Date().toISOString().slice(0, 10)}.csv`, summary, visibleCampaigns, [
       { header: "Unidad", value: (campaign) => units.find((unit) => unit.id === campaign.businessUnitId)?.name ?? "" },
@@ -451,8 +446,8 @@ export function CampaignsManager() {
       { header: "Ganados", value: (campaign) => statsFor(campaign, leads).won },
       { header: "Conversión (%)", value: (campaign) => statsFor(campaign, leads).conversion.toFixed(1).replace(".", ",") },
       { header: "Valor total (€)", value: (campaign) => statsFor(campaign, leads).value },
-      { header: "Gasto Meta Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).spend },
-      { header: "Ingresos Meta Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).revenue },
+      { header: "Gasto en Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).spend },
+      { header: "Ingresos de Ads (€)", value: (campaign) => adsStatsFor(campaign, ads).revenue },
     ]);
   }
 
@@ -551,7 +546,7 @@ export function CampaignsManager() {
         <KpiCard label="Campañas activas" value={String(campaignSummary.active)} delta="Sin comparación" helper={`de ${visibleCampaigns.length} según los filtros`} icon={<CampanasIcon />} tone="indigo" />
         <KpiCard label="Leads generados" value={String(campaignSummary.leads)} delta="Sin comparación" helper="asociados a estas campañas" icon={<LeadsIcon />} tone="sky" />
         <KpiCard label="Ventas ganadas" value={String(campaignSummary.won)} delta="Sin comparación" helper="leads ganados + ventas directas" icon={<ConversionIcon />} tone="emerald" />
-        <KpiCard label="Valor total" value={currencyFormatter.format(campaignSummary.value)} delta="Sin comparación" helper={campaignSummary.spend > 0 ? `${currencyFormatter.format(campaignSummary.spend)} invertidos en Meta Ads` : "sin gasto en Meta Ads"} icon={<EuroIcon />} tone="amber" />
+        <KpiCard label="Valor total" value={currencyFormatter.format(campaignSummary.value)} delta="Sin comparación" helper={campaignSummary.spend > 0 ? `${currencyFormatter.format(campaignSummary.spend)} invertidos en publicidad` : "sin gasto en publicidad"} icon={<EuroIcon />} tone="amber" />
       </section>
 
       <section className="campaigns-grid">
@@ -585,7 +580,7 @@ export function CampaignsManager() {
                 <p className="muted campaign-direct-sales-note">Incluye {campaign.directSalesCount} venta{campaign.directSalesCount === 1 ? "" : "s"} directa{campaign.directSalesCount === 1 ? "" : "s"} ({currencyFormatter.format(campaign.directSaleValue)}) sin pasar por leads.</p>
               ) : null}
               {adsStats.count > 0 ? (
-                <p className="muted campaign-direct-sales-note">Meta Ads: gasto {currencyFormatter.format(adsStats.spend)} · {numberFormatter.format(adsStats.leads)} lead{adsStats.leads === 1 ? "" : "s"} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2).replace(".", ",")}x</p>
+                <p className="muted campaign-direct-sales-note">Publicidad: gasto {currencyFormatter.format(adsStats.spend)} · {numberFormatter.format(adsStats.leads)} lead{adsStats.leads === 1 ? "" : "s"} · ingresos {currencyFormatter.format(adsStats.revenue)} · ROAS {adsStats.roas.toFixed(2).replace(".", ",")}x</p>
               ) : null}
               {(assigneesOf.get(campaign.id) ?? []).length ? (
                 <p className="muted campaign-direct-sales-note">

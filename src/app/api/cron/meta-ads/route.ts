@@ -132,7 +132,8 @@ export async function GET(request: Request) {
         filas += utiles.length;
       }
 
-      await admin.from("meta_sync_runs").insert({
+      await admin.from("ads_sync_runs").insert({
+        platform: "meta",
         started_at: empezado,
         finished_at: new Date().toISOString(),
         account_id: cuenta.account_id,
@@ -145,7 +146,8 @@ export async function GET(request: Request) {
     } catch (cause) {
       const mensaje = cause instanceof Error ? cause.message : "Error desconocido";
       console.error(`Cron meta-ads: falló ${cuenta.name}`, mensaje);
-      await admin.from("meta_sync_runs").insert({
+      await admin.from("ads_sync_runs").insert({
+        platform: "meta",
         started_at: empezado,
         finished_at: new Date().toISOString(),
         account_id: cuenta.account_id,

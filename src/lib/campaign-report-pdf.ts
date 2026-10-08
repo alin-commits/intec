@@ -60,8 +60,8 @@ export async function exportCampaignReportPdf({ totalLeads, totalWon, totalValue
     { label: "Leads totales", value: String(totalLeads) },
     { label: "Ganados", value: String(totalWon) },
     { label: "Valor total", value: eur(totalValue) },
-    { label: "Gasto Meta Ads", value: eur(totalAdsSpend) },
-    { label: "Ingresos Meta Ads", value: eur(totalAdsRevenue) },
+    { label: "Gasto en Ads", value: eur(totalAdsSpend) },
+    { label: "Ingresos de Ads", value: eur(totalAdsRevenue) },
   ];
 
   const generatedAt = new Intl.DateTimeFormat("es-ES", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Madrid" }).format(new Date());

@@ -10,7 +10,7 @@ import { downloadCsv } from "@/lib/csv-export";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadMetaSpendByMonth } from "@/lib/meta/spend-by-unit";
+import { loadAdsSpendByMonth } from "@/lib/ads/spend-by-month";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
@@ -214,7 +214,7 @@ export function DashboardClient() {
         // El gasto de anuncios sale de lo que manda Meta, igual que en Campañas:
         // la tabla de entradas a mano decía 1.237 € y 385 leads donde Meta dice
         // 1.051 € y 293, y colgaba el gasto del mes en que empezó la campaña.
-        loadMetaSpendByMonth(supabase),
+        loadAdsSpendByMonth(supabase),
         fetchAllPages((from, to) => supabase.from("mailing_campaigns").select("business_unit_id, sent_date, sent_count, opens, delivered_count, revenue").order("id").range(from, to)),
       ]);
       // Una respuesta vieja que llega tarde no puede pisar a la nueva: al
@@ -513,7 +513,7 @@ export function DashboardClient() {
     const campaignsInPeriod = campaignRows.filter((row) => matchesUnit(row.businessUnitId) && row.month !== null && inPeriod(row.month));
     return [
       { key: "leads", label: "Leads ganados", value: current.saleValue, helper: "valor de los leads marcados como ganados" },
-      { key: "ads", label: "Meta Ads", value: rrssAdsFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada campaña" },
+      { key: "ads", label: "Publicidad", value: rrssAdsFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada campaña" },
       { key: "mailing", label: "Mailing", value: rrssMailingFiltered.reduce((sum, row) => sum + row.revenue, 0), helper: "valor atribuido a mano en cada envío" },
       { key: "inquiries", label: "Consultas", value: filteredInquirySales.filter((item) => inPeriod(item.month)).reduce((sum, item) => sum + item.value, 0), helper: "los apuntes de tipo pedido, también los de leads ganados" },
       { key: "campaigns", label: "Campañas", value: campaignsInPeriod.reduce((sum, row) => sum + row.directSaleValue, 0), helper: "venta directa anotada en la campaña" },
@@ -799,10 +799,10 @@ export function DashboardClient() {
           />
         </article>
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><h2>Meta Ads y mailing</h2><p className="panel-subtitle">{periodLabel}</p></div></div>
+          <div className="panel-heading"><div><h2>Publicidad y mailing</h2><p className="panel-subtitle">{periodLabel}</p></div></div>
           <ul className="stat-list">
-            <li><span>Gasto en Meta Ads</span><strong>{currencyFormatter.format(rrssSummary.adsSpend)}</strong></li>
-            <li><span>Leads de Meta Ads</span><strong>{numberFormatter.format(rrssSummary.adsLeads)}</strong></li>
+            <li><span>Gasto en publicidad</span><strong>{currencyFormatter.format(rrssSummary.adsSpend)}</strong></li>
+            <li><span>Leads de publicidad</span><strong>{numberFormatter.format(rrssSummary.adsLeads)}</strong></li>
             <li><span>Seguidores ganados</span><strong>{numberFormatter.format(rrssSummary.followersGained)}</strong></li>
             <li><span>Envíos de email</span><strong>{numberFormatter.format(rrssSummary.mailingSent)}</strong></li>
             <li><span>Open rate medio</span><strong>{formatPercent(rrssSummary.mailingOpenRate)}</strong></li>
@@ -836,7 +836,7 @@ export function DashboardClient() {
                 que no salen de un lead y venta directa de campañas.
               </p>
               <p>
-                Meta Ads y Mailing son el valor que se atribuye a esas mismas ventas para medir cada canal:
+                Publicidad y Mailing son el valor que se atribuye a esas mismas ventas para medir cada canal:
                 se ven aquí, pero no entran en el total.
               </p>
               <p>
@@ -878,7 +878,7 @@ export function DashboardClient() {
         </div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Venta directa</th><th>Valor</th><th>Meta Ads</th></tr></thead>
+            <thead><tr><th>Campaña</th><th>Unidad</th><th>Estado</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Venta directa</th><th>Valor</th><th>Publicidad</th></tr></thead>
             <tbody>
               {topCampaigns.map((campaign) => {
                 const unit = allBusinessUnits.find((item) => item.id === campaign.businessUnitId);

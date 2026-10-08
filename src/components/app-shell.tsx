@@ -24,7 +24,7 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
-  // Campañas, redes sociales, Meta Ads, mailing y gastos: un departamento, una entrada con pestañas.
+  // Campañas, redes sociales, publicidad, mailing y gastos: un departamento, una entrada con pestañas.
   { href: "/marketing", label: "Marketing", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
   { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
   { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },

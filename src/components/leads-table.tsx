@@ -22,7 +22,7 @@ import { Toast } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { KpiCard } from "@/components/kpi-card";
-import { MetaFreshness } from "@/components/meta-freshness";
+import { AdsFreshness } from "@/components/ads-freshness";
 import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon, SearchIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { TablePagination } from "@/components/ui/table-pagination";
@@ -679,7 +679,7 @@ export function LeadsTable() {
 
       {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar los leads, pero no crear ni editar registros.</span></div> : null}
 
-      <MetaFreshness />
+      <AdsFreshness />
 
       <Toast message={message} onDismiss={() => setMessage(null)} />
       <CollapsibleFilters

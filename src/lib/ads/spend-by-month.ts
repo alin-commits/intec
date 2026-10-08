@@ -1,27 +1,34 @@
+import { adsPlatformDe, type AdsPlatform } from "@/lib/ads/platforms";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { createClient } from "@/lib/supabase/client";
 
 /**
- * El gasto de Meta repartido por marca, campaña y mes.
+ * El gasto en publicidad repartido por plataforma, marca, campaña y mes.
  *
  * Existe para que el panel de inicio y la pestaña de Campañas cuenten lo mismo.
- * Antes el inicio leía meta_ads_entries, la tabla que se rellenaba a mano: decía
- * 1.237,33 € y 385 leads donde Meta dice 1.051,42 € y 293, y además colgaba todo
- * el gasto del mes en que empezó la campaña en vez del día en que se gastó.
+ * Antes el inicio leía la tabla que se rellenaba a mano: decía 1.237,33 € y 385
+ * leads donde Meta dice 1.051,42 € y 293, y además colgaba todo el gasto del mes
+ * en que empezó la campaña en vez del día en que se gastó.
  *
- * Reglas, las mismas que en la pestaña de Meta Ads:
+ * De dónde sale cada número:
  *
- *  - Gasto y leads salen de meta_insights_daily, un día por fila.
- *  - Los ingresos los escribe una persona en meta_campaign_extras, porque aquí
- *    se vende por teléfono y por WhatsApp y Meta no ve esas ventas. Como no
- *    llevan fecha, se cuelgan del primer día en que esa campaña gastó, que es
- *    justo lo que hacía la tabla vieja con su start_date.
+ *  - De las plataformas con espejo (hoy Meta), de su espejo: gasto y leads de
+ *    meta_insights_daily, un día por fila, que es el dato bueno.
+ *  - De las que todavía no lo tienen, de lo que se apunta a mano en ads_entries.
+ *    Cuando LinkedIn Ads empiece no habrá API el primer día, pero sus números
+ *    tienen que aparecer igual en los paneles: por eso esta función los junta.
+ *    Las entradas manuales de una plataforma que ya tiene espejo se ignoran, o
+ *    el gasto se contaría dos veces.
+ *  - Los ingresos de Meta los escribe una persona en meta_campaign_extras,
+ *    porque aquí se vende por teléfono y por WhatsApp y Meta no ve esas ventas.
+ *    Como no llevan fecha, se cuelgan del primer día en que esa campaña gastó.
  *  - La marca la manda la campaña de la aplicación a la que esté atada, y solo
  *    si no está atada a ninguna manda la marca de la cuenta publicitaria:
  *    "Leads | Filtros Línea Jender" se lanzó desde la cuenta de Intec y es de
  *    Jender.
  */
-export type MetaSpendRow = {
+export type AdsSpendRow = {
+  platform: AdsPlatform;
   businessUnitId: string;
   /** La campaña de la aplicación a la que está atada, si lo está. */
   campaignId: string | null;
@@ -33,8 +40,8 @@ export type MetaSpendRow = {
 
 type Cliente = ReturnType<typeof createClient>;
 
-export async function loadMetaSpendByMonth(supabase: Cliente): Promise<{ rows: MetaSpendRow[]; error: unknown }> {
-  const [cuentasRes, campanasRes, appRes, extrasRes, diasRes] = await Promise.all([
+export async function loadAdsSpendByMonth(supabase: Cliente): Promise<{ rows: AdsSpendRow[]; error: unknown }> {
+  const [cuentasRes, campanasRes, appRes, extrasRes, diasRes, manualesRes] = await Promise.all([
     supabase.from("meta_ad_accounts").select("account_id, business_unit_id"),
     supabase.from("meta_campaigns").select("meta_id, account_id, campaign_id"),
     supabase.from("campaigns").select("id, business_unit_id"),
@@ -42,6 +49,7 @@ export async function loadMetaSpendByMonth(supabase: Cliente): Promise<{ rows: M
     // Un año son miles de filas y PostgREST devuelve mil por petición.
     fetchAllPages<{ meta_campaign_id: string; day: string; spend: number; leads: number }>((from, to) =>
       supabase.from("meta_insights_daily").select("meta_campaign_id, day, spend, leads").order("day").order("meta_campaign_id").range(from, to)),
+    supabase.from("ads_entries").select("platform, business_unit_id, campaign_id, start_date, created_at, amount_spent, leads, revenue"),
   ]);
 
   // Los extras son opcionales: si falta su migración, el resto sigue saliendo.
@@ -59,12 +67,12 @@ export async function loadMetaSpendByMonth(supabase: Cliente): Promise<{ rows: M
     return atada ?? marcaDeCuenta.get(fila.account_id as string) ?? null;
   };
 
-  const buckets = new Map<string, MetaSpendRow>();
-  const bucket = (businessUnitId: string, campaignId: string | null, month: string): MetaSpendRow => {
-    const clave = `${businessUnitId}|${campaignId ?? ""}|${month}`;
+  const buckets = new Map<string, AdsSpendRow>();
+  const bucket = (platform: AdsPlatform, businessUnitId: string, campaignId: string | null, month: string): AdsSpendRow => {
+    const clave = `${platform}|${businessUnitId}|${campaignId ?? ""}|${month}`;
     let fila = buckets.get(clave);
     if (!fila) {
-      fila = { businessUnitId, campaignId, month, amountSpent: 0, leads: 0, revenue: 0 };
+      fila = { platform, businessUnitId, campaignId, month, amountSpent: 0, leads: 0, revenue: 0 };
       buckets.set(clave, fila);
     }
     return fila;
@@ -76,7 +84,7 @@ export async function loadMetaSpendByMonth(supabase: Cliente): Promise<{ rows: M
     const marca = marcaDe(dia.meta_campaign_id);
     if (!marca) continue;
     const mes = String(dia.day).slice(0, 7);
-    const fila = bucket(marca, (ficha.get(dia.meta_campaign_id)?.campaign_id as string | null) ?? null, mes);
+    const fila = bucket("meta", marca, (ficha.get(dia.meta_campaign_id)?.campaign_id as string | null) ?? null, mes);
     fila.amountSpent += Number(dia.spend ?? 0);
     fila.leads += Number(dia.leads ?? 0);
     const actual = primerDia.get(dia.meta_campaign_id);
@@ -93,7 +101,21 @@ export async function loadMetaSpendByMonth(supabase: Cliente): Promise<{ rows: M
     // último cambio para que el dinero no desaparezca del panel.
     const mes = (primerDia.get(metaId) ?? String(extra.updated_at ?? "")).slice(0, 7);
     if (mes.length !== 7) continue;
-    bucket(marca, (ficha.get(metaId)?.campaign_id as string | null) ?? null, mes).revenue += ingreso;
+    bucket("meta", marca, (ficha.get(metaId)?.campaign_id as string | null) ?? null, mes).revenue += ingreso;
+  }
+
+  // Lo apuntado a mano de las plataformas que aún no tienen espejo.
+  for (const entrada of manualesRes.data ?? []) {
+    const platform = adsPlatformDe(entrada.platform);
+    if (platform === "meta") continue;
+    const marca = entrada.business_unit_id as string | null;
+    if (!marca) continue;
+    const mes = String(entrada.start_date ?? entrada.created_at ?? "").slice(0, 7);
+    if (mes.length !== 7) continue;
+    const fila = bucket(platform, marca, (entrada.campaign_id as string | null) ?? null, mes);
+    fila.amountSpent += Number(entrada.amount_spent ?? 0);
+    fila.leads += Number(entrada.leads ?? 0);
+    fila.revenue += Number(entrada.revenue ?? 0);
   }
 
   return { rows: [...buckets.values()], error: null };

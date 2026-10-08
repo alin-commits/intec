@@ -306,7 +306,7 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
   return (
     <div className="page-stack">
       <section className="section-heading">
-        <div><p>Redes sociales, Meta Ads y campañas de email, registradas manualmente por marca y periodo.</p></div>
+        <div><p>Redes sociales y campañas de email, apuntadas a mano por marca y periodo. La publicidad se trae sola de cada plataforma.</p></div>
       </section>
 
       {!canEdit ? <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes consultar las métricas, pero no registrar ni editar datos.</span></div> : null}
@@ -316,7 +316,7 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
       {forcedTab ? null : (
         <div className="view-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === "social"} className={tab === "social" ? "view-tab active" : "view-tab"} onClick={() => setTab("social")}>Redes sociales</button>
-          <button type="button" role="tab" aria-selected={tab === "ads"} className={tab === "ads" ? "view-tab active" : "view-tab"} onClick={() => setTab("ads")}>Meta Ads</button>
+          <button type="button" role="tab" aria-selected={tab === "ads"} className={tab === "ads" ? "view-tab active" : "view-tab"} onClick={() => setTab("ads")}>Ads</button>
           <button type="button" role="tab" aria-selected={tab === "mailing"} className={tab === "mailing" ? "view-tab active" : "view-tab"} onClick={() => setTab("mailing")}>Mailing</button>
         </div>
       )}
