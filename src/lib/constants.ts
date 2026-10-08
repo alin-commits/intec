@@ -145,6 +145,7 @@ export const campaignStatusLabels: Record<CampaignStatus, string> = {
   enviada" se vea igual en todas partes.
 */
 export const contactStatusLabels: Record<InquiryStatus, string> = {
+  informacion: "Solo información",
   sin_contactar: "Sin contactar",
   contactado: "Contactado",
   oferta_enviada: "Oferta enviada",
@@ -155,6 +156,7 @@ export const contactStatusLabels: Record<InquiryStatus, string> = {
 };
 
 export const contactStatusBadges: Record<InquiryStatus, string> = {
+  informacion: "contact_attempt",
   sin_contactar: "new",
   contactado: "contacted",
   oferta_enviada: "offer_sent",
@@ -171,7 +173,7 @@ export const crmStatusOrder: CrmStatus[] = ["sin_contactar", "contactado", "ofer
  * El de las consultas no empieza en "sin contactar": la consulta la apunta el
  * comercial que ya la está atendiendo, no entra sola a una bandeja esperando.
  */
-export const inquiryStatusOrder: InquiryStatus[] = ["contactado", "oferta_enviada", "seguimiento", "interesado", "ganado", "perdido"];
+export const inquiryStatusOrder: InquiryStatus[] = ["informacion", "contactado", "oferta_enviada", "seguimiento", "interesado", "ganado", "perdido"];
 
 export const saleTypeOrder: SaleType[] = ["oferta", "seguimiento", "pedido", "perdido"];
 

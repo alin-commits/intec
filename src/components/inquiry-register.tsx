@@ -46,7 +46,23 @@ const compareModeHelpers: Record<CompareMode, string> = {
   none: "sin periodo de comparación",
 };
 
-const FICHA_VACIA = { contactName: "", companyName: "", phone: "", email: "", productInterest: "", notes: "" };
+const FICHA_VACIA = { contactName: "", companyName: "", phone: "", email: "", productInterest: "", notes: "", status: "contactado" as InquiryStatus, saleValue: "" };
+
+/**
+ * Los estados que llevan dinero. El resto —solo información, contactado— no
+ * tienen venta, y por eso no se pregunta por un importe que nadie sabría.
+ */
+/** Las columnas de un apunte de venta, siempre las mismas. */
+const SALE_COLUMNS = "id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at, lead_id, notes";
+const ESTADOS_CON_IMPORTE: InquiryStatus[] = ["oferta_enviada", "seguimiento", "interesado", "ganado", "perdido"];
+/** Lo mismo que hace el disparador de la base, para que la vista de demo cuadre. */
+const VENTA_DEL_ESTADO: Partial<Record<InquiryStatus, SaleType>> = {
+  oferta_enviada: "oferta",
+  seguimiento: "seguimiento",
+  interesado: "seguimiento",
+  ganado: "pedido",
+  perdido: "perdido",
+};
 
 function mapInquiry(row: Record<string, unknown>): InquiryRecord {
   return {
@@ -65,6 +81,7 @@ function mapInquiry(row: Record<string, unknown>): InquiryRecord {
     productInterest: row.product_interest ? String(row.product_interest) : null,
     notes: row.notes ? String(row.notes) : null,
     status: (row.status as InquiryRecord["status"]) ?? "contactado",
+    saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
   };
 }
 
@@ -89,7 +106,8 @@ function mapSalesEntry(row: Record<string, unknown>): SalesEntry {
 /** De dónde sale una venta, para la tabla y el CSV. */
 function saleOrigin(entry: SalesEntry): string {
   if (entry.entryMode === "lead") return entry.notes ?? "Lead";
-  return entry.entryMode === "inquiry" ? "Consulta" : "Semanal";
+  if (entry.entryMode === "crm") return entry.notes ?? "CRM";
+  return entry.entryMode === "inquiry" ? entry.notes ?? "Consulta" : "Semanal";
 }
 
 /** El buscador de Leads abierto en el lead de un apunte ("Lead: Laura Pérez · Clima…"). */
@@ -139,8 +157,6 @@ export function InquiryRegister() {
   const [sortColumn, setSortColumn] = useState<ChannelTableColumn>("total");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [pending, setPending] = useState<{ unit: BusinessUnit; type: InquiryType } | null>(null);
-  const [pendingSaleType, setPendingSaleType] = useState<SaleType | "none">("none");
-  const [pendingSaleValue, setPendingSaleValue] = useState("");
   const [registrationUnitId, setRegistrationUnitId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -149,6 +165,8 @@ export function InquiryRegister() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [assignedUnitIds, setAssignedUnitIds] = useState<string[] | null>(null);
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
+  const [pendingStatus, setPendingStatus] = useState<{ record: InquiryRecord; status: InquiryStatus } | null>(null);
+  const [pendingStatusValue, setPendingStatusValue] = useState("");
   /** Los datos de quien pregunta, al registrar una consulta individual. Todo opcional. */
   const [fichaNueva, setFichaNueva] = useState(FICHA_VACIA);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
@@ -157,24 +175,24 @@ export function InquiryRegister() {
     inquiryType: InquiryType;
     count: string;
     status: InquiryStatus;
+    saleValue: string;
     contactName: string;
     companyName: string;
     phone: string;
     email: string;
     productInterest: string;
     notes: string;
-  }>({ businessUnitId: "", inquiryType: "phone", count: "1", status: "contactado", ...FICHA_VACIA });
+  }>({ businessUnitId: "", inquiryType: "phone", count: "1", ...FICHA_VACIA });
   const [weeklyInquiryOpen, setWeeklyInquiryOpen] = useState(false);
   const [weeklyInquiryUnitId, setWeeklyInquiryUnitId] = useState("");
   const [weeklyInquiryDate, setWeeklyInquiryDate] = useState(() => todayKey());
   const [weeklyInquiryDraft, setWeeklyInquiryDraft] = useState(() => blankWeeklyInquiryDraft());
-  const [newSaleDraft, setNewSaleDraft] = useState<{ saleType: SaleType; value: string }>({ saleType: "pedido", value: "" });
   const [pendingDeleteSale, setPendingDeleteSale] = useState<SalesEntry | null>(null);
   const [saleChooserOpen, setSaleChooserOpen] = useState(false);
   const [saleChooserMode, setSaleChooserMode] = useState<"menu" | "inquiry" | "weekly">("menu");
   const [quickSaleUnitId, setQuickSaleUnitId] = useState("");
   const [quickSaleInquiryId, setQuickSaleInquiryId] = useState("");
-  const [quickSaleType, setQuickSaleType] = useState<SaleType>("pedido");
+  const [quickSaleStatus, setQuickSaleStatus] = useState<InquiryStatus>("ganado");
   const [quickSaleValue, setQuickSaleValue] = useState("");
   const [weeklyUnitId, setWeeklyUnitId] = useState("");
   const [weeklyDate, setWeeklyDate] = useState(() => todayKey());
@@ -235,8 +253,8 @@ export function InquiryRegister() {
       const supabase = createClient();
       const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-        fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
-        fetchAllPages((from, to) => supabase.from("sales_entries").select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at, lead_id, notes").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, sale_value, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("sales_entries").select(SALE_COLUMNS).gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
         supabase.auth.getUser(),
       ]);
       if (!active) return;
@@ -282,7 +300,7 @@ export function InquiryRegister() {
       setSaleChooserMode("menu");
       setQuickSaleUnitId(defaultUnitId);
       setQuickSaleInquiryId("");
-      setQuickSaleType("pedido");
+      setQuickSaleStatus("ganado");
       setQuickSaleValue("");
       setWeeklyUnitId(defaultUnitId);
       setWeeklyDate(todayKey());
@@ -469,11 +487,11 @@ export function InquiryRegister() {
   async function confirmRegistration() {
     if (!pending || busy) return;
     let saleValue: number | null = null;
-    if (pendingSaleType !== "none") {
-      const trimmed = pendingSaleValue.trim();
-      saleValue = Number(trimmed);
-      if (trimmed === "" || Number.isNaN(saleValue) || saleValue < 0) {
-        setMessage("El valor de la venta no es válido.");
+    if (ESTADOS_CON_IMPORTE.includes(fichaNueva.status)) {
+      const trimmed = fichaNueva.saleValue.trim();
+      saleValue = trimmed === "" ? null : Number(trimmed);
+      if (saleValue !== null && (!Number.isFinite(saleValue) || saleValue < 0)) {
+        setMessage("El valor no es válido: tiene que ser un número igual o mayor que cero.");
         return;
       }
     }
@@ -497,7 +515,8 @@ export function InquiryRegister() {
           email: fichaNueva.email.trim() || null,
           productInterest: fichaNueva.productInterest.trim() || null,
           notes: fichaNueva.notes.trim() || null,
-          status: "contactado",
+          status: fichaNueva.status,
+          saleValue,
         };
       } else {
         const { data, error } = await createClient().from("inquiries").insert({
@@ -509,46 +528,43 @@ export function InquiryRegister() {
           email: fichaNueva.email.trim() || null,
           product_interest: fichaNueva.productInterest.trim() || null,
           notes: fichaNueva.notes.trim() || null,
-        }).select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, created_by, created_at").single();
+          status: fichaNueva.status,
+          sale_value: saleValue,
+        }).select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, sale_value, created_by, created_at").single();
         if (error) throw error;
         newRecord = mapInquiry(data as Record<string, unknown>);
       }
       setRecords((current) => [newRecord, ...current]);
 
-      if (pendingSaleType !== "none" && saleValue !== null) {
-        const occurredOn = dateKeyInMadrid(newRecord.createdAt);
-        if (!configured) {
-          const entry: SalesEntry = {
-            id: `SE-${Date.now()}`,
-            businessUnitId: newRecord.businessUnitId,
-            saleType: pendingSaleType,
-            entryMode: "inquiry",
-            inquiryId: newRecord.id,
-            weekStart: null,
-            occurredOn,
-            count: 1,
-            value: saleValue,
-            createdBy: "demo-admin",
-            createdAt: new Date().toISOString(),
-          };
-          setSalesEntries((current) => [entry, ...current]);
-        } else {
-          const { data, error } = await createClient().from("sales_entries").insert({
-            business_unit_id: newRecord.businessUnitId,
-            sale_type: pendingSaleType,
-            entry_mode: "inquiry",
-            inquiry_id: newRecord.id,
-            occurred_on: occurredOn,
-            count: 1,
-            value: saleValue,
-          }).select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").single();
-          if (error) throw error;
-          setSalesEntries((current) => [mapSalesEntry(data as Record<string, unknown>), ...current]);
-        }
+      // El apunte de venta lo crea la base a partir del estado: aquí no se
+      // escribe, solo se recoge para que aparezca sin recargar la página.
+      const saleType = VENTA_DEL_ESTADO[fichaNueva.status];
+      if (!configured && saleType) {
+        setSalesEntries((current) => [{
+          id: `SE-${newRecord.id}`,
+          businessUnitId: newRecord.businessUnitId,
+          saleType,
+          entryMode: "inquiry",
+          inquiryId: newRecord.id,
+          weekStart: null,
+          occurredOn: dateKeyInMadrid(newRecord.createdAt),
+          count: 1,
+          value: saleValue ?? 0,
+          createdBy: "demo-admin",
+          createdAt: new Date().toISOString(),
+        }, ...current]);
+      }
+      if (configured && ESTADOS_CON_IMPORTE.includes(fichaNueva.status)) {
+        const { data: apunte } = await createClient()
+          .from("sales_entries")
+          .select(SALE_COLUMNS)
+          .eq("inquiry_id", newRecord.id)
+          .maybeSingle();
+        if (apunte) setSalesEntries((current) => [mapSalesEntry(apunte as Record<string, unknown>), ...current]);
       }
 
       const channelLabel = pending.type === "phone" ? "telefónica" : `de ${inquiryChannelLabels[pending.type]}`;
-      const saleSuffix = pendingSaleType !== "none" ? ` con una venta de tipo ${saleTypeLabels[pendingSaleType]}` : "";
+      const saleSuffix = saleValue !== null ? ` como ${contactStatusLabels[fichaNueva.status].toLowerCase()} de ${currencyFormatter.format(saleValue)}` : "";
       setMessage(`Consulta ${channelLabel} registrada correctamente para ${pending.unit.name}${saleSuffix}.`);
       setPending(null);
       setFichaNueva(FICHA_VACIA);
@@ -587,18 +603,66 @@ export function InquiryRegister() {
    * Cambiar el estado desde la lista, sin abrir la ficha. No arrastra ninguna
    * venta: aquí los apuntes se llevan a mano, que pueden ser varios por consulta.
    */
-  async function cambiarEstadoConsulta(record: InquiryRecord, status: InquiryStatus) {
+  /** Los estados con dinero preguntan el importe antes de guardarse. */
+  function pedirEstadoConsulta(record: InquiryRecord, status: InquiryStatus) {
+    if (!ESTADOS_CON_IMPORTE.includes(status)) { void cambiarEstadoConsulta(record, status, null); return; }
+    setPendingStatus({ record, status });
+    setPendingStatusValue(record.saleValue === null || record.saleValue === undefined ? "" : String(record.saleValue));
+    setMessage(null);
+  }
+
+  async function confirmarEstadoConsulta() {
+    if (!pendingStatus) return;
+    const importe = pendingStatusValue.trim() === "" ? null : Number(pendingStatusValue);
+    if (importe !== null && (!Number.isFinite(importe) || importe < 0)) {
+      setMessage("El valor tiene que ser un número igual o mayor que cero.");
+      return;
+    }
+    const { record, status } = pendingStatus;
+    setPendingStatus(null);
+    await cambiarEstadoConsulta(record, status, importe);
+  }
+
+  async function cambiarEstadoConsulta(record: InquiryRecord, status: InquiryStatus, saleValue: number | null) {
     const anterior = record.status ?? "contactado";
-    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status } : item));
-    if (!configured) return;
+    const valorAnterior = record.saleValue ?? null;
+    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status, saleValue } : item));
+    if (!configured) {
+      // En la vista de demo no hay disparador: el apunte se simula aquí.
+      const saleType = VENTA_DEL_ESTADO[status];
+      setSalesEntries((current) => {
+        const resto = current.filter((entry) => entry.inquiryId !== record.id);
+        if (!saleType) return resto;
+        return [{
+          id: `SE-${record.id}`,
+          businessUnitId: record.businessUnitId,
+          saleType,
+          entryMode: "inquiry",
+          inquiryId: record.id,
+          weekStart: null,
+          occurredOn: dateKeyInMadrid(record.createdAt),
+          count: 1,
+          value: saleValue ?? 0,
+          createdBy: "demo-admin",
+          createdAt: new Date().toISOString(),
+        }, ...resto];
+      });
+      return;
+    }
     try {
       await writeRows(
-        createClient().from("inquiries").update({ status }).eq("id", record.id),
+        createClient().from("inquiries").update({ status, sale_value: saleValue }).eq("id", record.id),
         "No se pudo cambiar el estado: puede que alguien haya borrado la consulta o que tu rol no permita cambiarla.",
       );
+      // La venta la lleva la base: se recoge como quedó para verla al momento.
+      const { data: apunte } = await createClient().from("sales_entries").select(SALE_COLUMNS).eq("inquiry_id", record.id).maybeSingle();
+      setSalesEntries((current) => {
+        const resto = current.filter((entry) => entry.inquiryId !== record.id);
+        return apunte ? [mapSalesEntry(apunte as Record<string, unknown>), ...resto] : resto;
+      });
       setMessage(`${record.contactName || "La consulta"}: ${contactStatusLabels[status]}.`);
     } catch (cause) {
-      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: anterior } : item));
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: anterior, saleValue: valorAnterior } : item));
       setMessage(reportSafeError(cause, "No se pudo cambiar el estado de la consulta."));
     }
   }
@@ -610,6 +674,7 @@ export function InquiryRegister() {
       inquiryType: record.inquiryType,
       count: String(record.count),
       status: record.status ?? "contactado",
+      saleValue: record.saleValue === null || record.saleValue === undefined ? "" : String(record.saleValue),
       contactName: record.contactName ?? "",
       companyName: record.companyName ?? "",
       phone: record.phone ?? "",
@@ -617,7 +682,6 @@ export function InquiryRegister() {
       productInterest: record.productInterest ?? "",
       notes: record.notes ?? "",
     });
-    setNewSaleDraft({ saleType: "pedido", value: "" });
     setMessage(null);
   }
 
@@ -632,6 +696,11 @@ export function InquiryRegister() {
         return;
       }
     }
+    const valorEditado = editDraft.saleValue.trim() === "" ? null : Number(editDraft.saleValue);
+    if (editingRecord.entryMode !== "weekly" && valorEditado !== null && (!Number.isFinite(valorEditado) || valorEditado < 0)) {
+      setMessage("El valor tiene que ser un número igual o mayor que cero.");
+      return;
+    }
     setBusy(true);
     try {
       if (configured) {
@@ -641,6 +710,7 @@ export function InquiryRegister() {
             inquiry_type: editDraft.inquiryType,
             ...(editingRecord.entryMode === "weekly" ? { count } : {
               status: editDraft.status,
+              sale_value: valorEditado,
               contact_name: editDraft.contactName.trim() || null,
               company_name: editDraft.companyName.trim() || null,
               phone: editDraft.phone.trim() || null,
@@ -651,6 +721,14 @@ export function InquiryRegister() {
           }).eq("id", editingRecord.id),
           "No se pudo guardar la consulta: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
         );
+        if (editingRecord.entryMode !== "weekly") {
+          // El apunte de venta lo ha rehecho la base con el estado nuevo.
+          const { data: apunte } = await createClient().from("sales_entries").select(SALE_COLUMNS).eq("inquiry_id", editingRecord.id).maybeSingle();
+          setSalesEntries((current) => {
+            const resto = current.filter((entry) => entry.inquiryId !== editingRecord.id);
+            return apunte ? [mapSalesEntry(apunte as Record<string, unknown>), ...resto] : resto;
+          });
+        }
       }
       setRecords((current) => current.map((item) => item.id === editingRecord.id
         ? {
@@ -660,6 +738,7 @@ export function InquiryRegister() {
           count: editingRecord.entryMode === "weekly" ? count : item.count,
           ...(editingRecord.entryMode === "weekly" ? {} : {
             status: editDraft.status,
+            saleValue: valorEditado,
             contactName: editDraft.contactName.trim() || null,
             companyName: editDraft.companyName.trim() || null,
             phone: editDraft.phone.trim() || null,
@@ -679,57 +758,10 @@ export function InquiryRegister() {
   }
 
   function canDeleteSale(entry: SalesEntry): boolean {
-    // La de un lead la lleva el lead: se quita cambiando su estado.
-    if (entry.leadId) return false;
+    // Solo las semanales se tocan a mano. Las de un lead, un contacto del CRM
+    // o una consulta las lleva su ficha: se quitan cambiando su estado.
+    if (entry.entryMode !== "weekly") return false;
     return isAdmin || (currentUserId !== null && entry.createdBy === currentUserId);
-  }
-
-  async function addSaleToInquiry() {
-    if (!editingRecord) return;
-    const trimmed = newSaleDraft.value.trim();
-    const value = Number(trimmed);
-    if (trimmed === "" || Number.isNaN(value) || value < 0) {
-      setMessage("El valor de la venta no es válido.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const occurredOn = dateKeyInMadrid(editingRecord.createdAt);
-      if (!configured) {
-        const entry: SalesEntry = {
-          id: `SE-${Date.now()}`,
-          businessUnitId: editDraft.businessUnitId,
-          saleType: newSaleDraft.saleType,
-          entryMode: "inquiry",
-          inquiryId: editingRecord.id,
-          weekStart: null,
-          occurredOn,
-          count: 1,
-          value,
-          createdBy: "demo-admin",
-          createdAt: new Date().toISOString(),
-        };
-        setSalesEntries((current) => [entry, ...current]);
-      } else {
-        const { data, error } = await createClient().from("sales_entries").insert({
-          business_unit_id: editDraft.businessUnitId,
-          sale_type: newSaleDraft.saleType,
-          entry_mode: "inquiry",
-          inquiry_id: editingRecord.id,
-          occurred_on: occurredOn,
-          count: 1,
-          value,
-        }).select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").single();
-        if (error) throw error;
-        setSalesEntries((current) => [mapSalesEntry(data as Record<string, unknown>), ...current]);
-      }
-      setNewSaleDraft({ saleType: "pedido", value: "" });
-      setMessage("Venta añadida a la consulta.");
-    } catch (cause) {
-      setMessage(reportSafeError(cause, "No se pudo añadir la venta."));
-    } finally {
-      setBusy(false);
-    }
   }
 
   function openEditSale(entry: SalesEntry) {
@@ -807,7 +839,7 @@ export function InquiryRegister() {
     setSaleChooserMode("menu");
     setQuickSaleUnitId(defaultUnitId);
     setQuickSaleInquiryId("");
-    setQuickSaleType("pedido");
+    setQuickSaleStatus("ganado");
     setQuickSaleValue("");
     setWeeklyUnitId(defaultUnitId);
     setWeeklyDate(todayKey());
@@ -836,38 +868,50 @@ export function InquiryRegister() {
       setMessage("La consulta seleccionada ya no existe.");
       return;
     }
+    const saleType = VENTA_DEL_ESTADO[quickSaleStatus];
+    if (!saleType) {
+      setMessage("Ese estado no lleva venta.");
+      return;
+    }
     setBusy(true);
     try {
-      const occurredOn = dateKeyInMadrid(record.createdAt);
-      if (!configured) {
+      // Aquí solo se mueve el estado de la consulta: el apunte de venta lo
+      // escribe la base, igual que en los leads y en el CRM.
+      if (configured) {
+        await writeRows(
+          createClient().from("inquiries").update({ status: quickSaleStatus, sale_value: value }).eq("id", record.id),
+          "No se pudo guardar: no tienes permiso sobre esta consulta.",
+          "id",
+        );
+      }
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: quickSaleStatus, saleValue: value } : item));
+      if (configured) {
+        const { data: apunte } = await createClient()
+          .from("sales_entries")
+          .select(SALE_COLUMNS)
+          .eq("inquiry_id", record.id)
+          .maybeSingle();
+        setSalesEntries((current) => {
+          const resto = current.filter((entry) => entry.inquiryId !== record.id);
+          return apunte ? [mapSalesEntry(apunte as Record<string, unknown>), ...resto] : resto;
+        });
+      } else {
         const entry: SalesEntry = {
-          id: `SE-${Date.now()}`,
+          id: `SE-${record.id}`,
           businessUnitId: record.businessUnitId,
-          saleType: quickSaleType,
+          saleType,
           entryMode: "inquiry",
           inquiryId: record.id,
           weekStart: null,
-          occurredOn,
+          occurredOn: dateKeyInMadrid(record.createdAt),
           count: 1,
           value,
           createdBy: "demo-admin",
           createdAt: new Date().toISOString(),
         };
-        setSalesEntries((current) => [entry, ...current]);
-      } else {
-        const { data, error } = await createClient().from("sales_entries").insert({
-          business_unit_id: record.businessUnitId,
-          sale_type: quickSaleType,
-          entry_mode: "inquiry",
-          inquiry_id: record.id,
-          occurred_on: occurredOn,
-          count: 1,
-          value,
-        }).select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at").single();
-        if (error) throw error;
-        setSalesEntries((current) => [mapSalesEntry(data as Record<string, unknown>), ...current]);
+        setSalesEntries((current) => [entry, ...current.filter((item) => item.inquiryId !== record.id)]);
       }
-      setMessage("Venta registrada correctamente.");
+      setMessage(`Consulta marcada como «${contactStatusLabels[quickSaleStatus]}» con ${currencyFormatter.format(value)}.`);
       setSaleChooserOpen(false);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo registrar la venta."));
@@ -921,7 +965,7 @@ export function InquiryRegister() {
           value: row.value,
         }));
         const { data, error } = await createClient().from("sales_entries").insert(payload)
-          .select("id, business_unit_id, sale_type, entry_mode, inquiry_id, week_start, occurred_on, count, value, created_by, created_at");
+          .select(SALE_COLUMNS);
         if (error) throw error;
         setSalesEntries((current) => [...(data ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)), ...current]);
       }
@@ -1064,7 +1108,8 @@ export function InquiryRegister() {
       { header: "Estado", value: (record) => record.entryMode === "weekly" ? "" : contactStatusLabels[record.status ?? "contactado"] },
       { header: "Origen", value: (record) => record.entryMode === "weekly" ? "Semanal" : "Individual" },
       { header: "Cantidad", value: (record) => record.count },
-      { header: "Venta asociada (€)", value: (record) => (salesByInquiry.get(record.id) ?? []).reduce((sum, entry) => sum + entry.value, 0) },
+      { header: "Valor (€)", value: (record) => (salesByInquiry.get(record.id) ?? []).reduce((sum, entry) => sum + entry.value, 0) },
+      { header: "Tipo de venta", value: (record) => (salesByInquiry.get(record.id) ?? []).map((entry) => saleTypeLabels[entry.saleType]).join(" · ") },
     ]);
   }
 
@@ -1131,7 +1176,7 @@ export function InquiryRegister() {
                 </div>
                 <div className="inquiry-actions-inline">
                   {inquiryChannelOrder.map((channel) => (
-                    <button key={channel} type="button" onClick={() => { setPending({ unit: registrationUnit, type: channel }); setPendingSaleType("none"); setPendingSaleValue(""); }} className="channel-chip">
+                    <button key={channel} type="button" onClick={() => { setPending({ unit: registrationUnit, type: channel }); }} className="channel-chip">
                       <i className={`channel-dot channel-dot-${channel}`} />{inquiryChannelLabels[channel]}
                     </button>
                   ))}
@@ -1165,7 +1210,7 @@ export function InquiryRegister() {
             placeholder="Buscar por nombre, empresa, teléfono, correo o lo que pide"
           />
         </label>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto</th><th>Canal</th><th>Estado</th><th>Origen</th><th>Cantidad</th><th>Ventas</th><th></th></tr></thead><tbody>{consultasDeLaPagina.map((record) => {
+        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto</th><th>Canal</th><th>Estado</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{consultasDeLaPagina.map((record) => {
           const unit = units.find((item) => item.id === record.businessUnitId);
           const recordSales = salesByInquiry.get(record.id) ?? [];
           const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
@@ -1185,7 +1230,7 @@ export function InquiryRegister() {
                     className={`table-select badge-select badge-${contactStatusBadges[record.status ?? "contactado"]}`}
                     value={record.status ?? "contactado"}
                     aria-label={`Estado de la consulta de ${record.contactName || "sin nombre"}`}
-                    onChange={(event) => void cambiarEstadoConsulta(record, event.target.value as InquiryStatus)}
+                    onChange={(event) => pedirEstadoConsulta(record, event.target.value as InquiryStatus)}
                   >
                     {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
                   </select>
@@ -1193,7 +1238,11 @@ export function InquiryRegister() {
               </td>
               <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
               <td>{numberFormatter.format(record.count)}</td>
-              <td>{recordSalesTotal ? currencyFormatter.format(recordSalesTotal) : "—"}</td>
+              <td>
+                {recordSales.length > 0
+                  ? <><strong>{currencyFormatter.format(recordSalesTotal)}</strong><small>{saleTypeLabels[recordSales[0].saleType]}</small></>
+                  : <span className="muted">—</span>}
+              </td>
               <td className="recent-inquiries-actions">
                 {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
                 {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
@@ -1310,7 +1359,7 @@ export function InquiryRegister() {
       </section>
 
       <section className="section-heading">
-        <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta se registra por consulta (al editarla) o de golpe por semana. La cantidad indica cuántas ventas componen el valor total. Las de los leads entran solas: oferta al marcar «Oferta enviada» y pedido al marcarlo «Ganado».</p></div>
+        <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta la manda el estado de su ficha —consulta, lead o contacto del CRM—: oferta al marcar «Oferta enviada», pedido al marcar «Ganado», y se quita si se vuelve atrás. A mano solo se apuntan las semanales, de golpe y por tipo.</p></div>
       </section>
       <section className="kpi-grid">
         {saleTypeOrder.map((type) => (
@@ -1386,12 +1435,16 @@ export function InquiryRegister() {
               <td>{formatDate(entry.occurredOn)}</td>
               <td>{unit?.name ?? "—"}</td>
               <td><span className="badge">{saleTypeLabels[entry.saleType]}</span></td>
-              <td>{entry.leadId ? <span className="sale-origin-lead" title="Sale de un lead: cambia con su estado y su valor">{saleOrigin(entry)}</span> : saleOrigin(entry)}</td>
+              <td>{entry.entryMode === "weekly" ? saleOrigin(entry) : <span className="sale-origin-lead" title="La lleva su ficha: cambia con el estado y el valor que tenga allí">{saleOrigin(entry)}</span>}</td>
               <td>{numberFormatter.format(entry.count)}</td>
               <td>{currencyFormatter.format(entry.value)}</td>
               <td className="recent-inquiries-actions">
                 {entry.leadId ? (
                   <a className="button button-compact button-secondary" href={leadLink(entry)}>Ver lead</a>
+                ) : entry.entryMode === "crm" ? (
+                  <a className="button button-compact button-secondary" href="/crm">Ver en CRM</a>
+                ) : entry.entryMode === "inquiry" ? (
+                  <span className="muted">La lleva su consulta</span>
                 ) : (
                   <>
                     {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditSale(entry)}>Editar</button> : null}
@@ -1414,6 +1467,37 @@ export function InquiryRegister() {
       </section>
 
       <ConfirmationDialog
+        open={Boolean(pendingStatus)}
+        title={pendingStatus?.status === "ganado" ? "¿Por cuánto se ha vendido?" : pendingStatus?.status === "perdido" ? "¿Cuánto se ha perdido?" : "¿De cuánto es la oferta?"}
+        confirmLabel="Guardar"
+        busy={busy}
+        onCancel={() => setPendingStatus(null)}
+        onConfirm={() => void confirmarEstadoConsulta()}
+      >
+        {pendingStatus ? (
+          <>
+            <div className="confirmation-summary">
+              <span>Consulta</span><strong>{pendingStatus.record.contactName || pendingStatus.record.companyName || formatDate(pendingStatus.record.createdAt)}</strong>
+              <span>Pasa a</span><strong>{contactStatusLabels[pendingStatus.status]}</strong>
+            </div>
+            <div className="confirmation-sale-form">
+              <label>
+                <span>{pendingStatus.status === "ganado" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
+                <input type="number" min="0" step="0.01" placeholder="0,00" value={pendingStatusValue} onChange={(event) => setPendingStatusValue(event.target.value)} />
+              </label>
+              <p className="muted">
+                {pendingStatus.status === "ganado"
+                  ? "Se apunta abajo como pedido y suma en el total de ventas, una sola vez."
+                  : pendingStatus.status === "perdido"
+                    ? "La oferta que había pasa a perdida, con este valor."
+                    : "Se apunta abajo en «Ventas comerciales» con el estado que elijas."}
+              </p>
+            </div>
+          </>
+        ) : null}
+      </ConfirmationDialog>
+
+      <ConfirmationDialog
         open={Boolean(pending)}
         title={pending ? `¿Quieres registrar ${pending.type === "phone" ? "una consulta telefónica" : `una consulta de ${inquiryChannelLabels[pending.type]}`} para ${pending.unit.name}?` : "¿Quieres registrar la consulta?"}
         confirmLabel="Registrar consulta"
@@ -1424,19 +1508,20 @@ export function InquiryRegister() {
         {pending ? (
           <>
             <div className="confirmation-summary"><span>Unidad de negocio</span><strong>{pending.unit.name}</strong><span>Canal</span><strong>{inquiryChannelLabels[pending.type]}</strong><p>La fecha, la hora y tu usuario se guardarán automáticamente.</p></div>
-            <div className="confirmation-sale-form">
-              <label><span>Venta asociada (opcional)</span>
-                <select value={pendingSaleType} onChange={(event) => setPendingSaleType(event.target.value as SaleType | "none")}>
-                  <option value="none">Sin venta</option>
-                  {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
+
+            {/* Qué es y quién pregunta. Todo opcional menos el estado, que es
+                lo que distingue a quien pide un precio de quien va en serio. */}
+            <div className="form-grid inquiry-ficha">
+              <label><span>Estado</span>
+                <select value={fichaNueva.status} onChange={(event) => setFichaNueva((actual) => ({ ...actual, status: event.target.value as InquiryStatus }))}>
+                  {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
                 </select>
               </label>
-              {pendingSaleType !== "none" ? (
-                <label><span>Valor (€)</span><input type="number" min="0" step="0.01" placeholder="0,00" value={pendingSaleValue} onChange={(event) => setPendingSaleValue(event.target.value)} /></label>
+              {ESTADOS_CON_IMPORTE.includes(fichaNueva.status) ? (
+                <label><span>{fichaNueva.status === "ganado" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
+                  <input type="number" min="0" step="0.01" placeholder="0,00" value={fichaNueva.saleValue} onChange={(event) => setFichaNueva((actual) => ({ ...actual, saleValue: event.target.value }))} />
+                </label>
               ) : null}
-            </div>
-            {/* Quién pregunta. Todo opcional: si se exige, se deja de apuntar. */}
-            <div className="form-grid inquiry-ficha">
               <label><span>Contacto</span><input value={fichaNueva.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setFichaNueva((actual) => ({ ...actual, contactName: event.target.value }))} /></label>
               <label><span>Empresa</span><input value={fichaNueva.companyName} onChange={(event) => setFichaNueva((actual) => ({ ...actual, companyName: event.target.value }))} /></label>
               <label><span>Teléfono</span><input value={fichaNueva.phone} onChange={(event) => setFichaNueva((actual) => ({ ...actual, phone: event.target.value }))} /></label>
@@ -1484,6 +1569,11 @@ export function InquiryRegister() {
                   {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
                 </select>
               </label>
+              {ESTADOS_CON_IMPORTE.includes(editDraft.status) ? (
+                <label><span>{editDraft.status === "ganado" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
+                  <input type="number" min="0" step="0.01" placeholder="0,00" value={editDraft.saleValue} onChange={(event) => setEditDraft((current) => ({ ...current, saleValue: event.target.value }))} />
+                </label>
+              ) : null}
               <label><span>Contacto</span><input value={editDraft.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setEditDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
               <label><span>Empresa</span><input value={editDraft.companyName} onChange={(event) => setEditDraft((current) => ({ ...current, companyName: event.target.value }))} /></label>
               <label><span>Teléfono</span><input value={editDraft.phone} onChange={(event) => setEditDraft((current) => ({ ...current, phone: event.target.value }))} /></label>
@@ -1495,7 +1585,7 @@ export function InquiryRegister() {
         </div>
         {editingRecord?.entryMode === "weekly" ? <p className="muted">Este registro representa varias consultas de una semana ({formatDate(editingRecord.createdAt)}).</p> : null}
 
-        <h3>Ventas de esta consulta</h3>
+        <h3>Venta de esta consulta</h3>
         {editingRecordSales.length > 0 ? (
           <div className="sale-entry-list">
             {editingRecordSales.map((entry) => (
@@ -1508,20 +1598,10 @@ export function InquiryRegister() {
               </div>
             ))}
           </div>
-        ) : <p className="muted">Todavía no hay ventas registradas en esta consulta.</p>}
-        {canRegister ? (
-          <div className="sale-entry-add-form">
-            <label><span>Tipo</span>
-              <select value={newSaleDraft.saleType} onChange={(event) => setNewSaleDraft((current) => ({ ...current, saleType: event.target.value as SaleType }))}>
-                {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
-              </select>
-            </label>
-            <label><span>Valor (€)</span>
-              <input type="number" min="0" step="0.01" placeholder="0,00" value={newSaleDraft.value} onChange={(event) => setNewSaleDraft((current) => ({ ...current, value: event.target.value }))} />
-            </label>
-            <button type="button" className="button button-secondary" disabled={busy} onClick={() => void addSaleToInquiry()}>Añadir venta</button>
-          </div>
         ) : null}
+        {editingRecord?.entryMode === "weekly" ? null : (
+          <p className="muted">La venta sale del estado: al pasar la consulta a oferta, ganado o perdido se apunta sola con el valor de arriba, y si se vuelve atrás se quita.</p>
+        )}
 
         <div className="modal-actions">
           <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cerrar</button>
@@ -1579,7 +1659,7 @@ export function InquiryRegister() {
           <section className="brand-picker">
             <button type="button" className="brand-tile department-tile" onClick={() => setSaleChooserMode("inquiry")}>
               <strong>Venta de una consulta</strong>
-              <span>Vincula el tipo y el valor de la venta a una consulta ya registrada.</span>
+              <span>Marca el estado de una consulta ya registrada y su importe: la venta se apunta sola.</span>
             </button>
             <button type="button" className="brand-tile department-tile" onClick={() => setSaleChooserMode("weekly")}>
               <strong>Venta por periodo</strong>
@@ -1604,9 +1684,9 @@ export function InquiryRegister() {
                   ))}
                 </select>
               </label>
-              <label><span>Tipo de venta</span>
-                <select value={quickSaleType} onChange={(event) => setQuickSaleType(event.target.value as SaleType)}>
-                  {saleTypeOrder.map((type) => <option key={type} value={type}>{saleTypeLabels[type]}</option>)}
+              <label><span>Estado de la consulta</span>
+                <select value={quickSaleStatus} onChange={(event) => setQuickSaleStatus(event.target.value as InquiryStatus)}>
+                  {ESTADOS_CON_IMPORTE.map((estado) => <option key={estado} value={estado}>{contactStatusLabels[estado]}</option>)}
                 </select>
               </label>
               <label><span>Valor (€)</span>

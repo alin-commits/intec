@@ -46,11 +46,13 @@ export type BusinessCard = {
 export type CrmStatus = "sin_contactar" | "contactado" | "oferta_enviada" | "interesado" | "ganado" | "perdido";
 
 /**
- * El de una consulta: el mismo embudo del CRM más "seguimiento", que aquí sí se
- * usa —se manda la oferta y después se persigue— y en el CRM no. Tampoco
+ * El de una consulta: el embudo del CRM con dos escalones propios. "Solo
+ * información" para quien pregunta un precio o pide el catálogo sin más, que es
+ * la mayoría de las llamadas y no es una oportunidad; y "seguimiento", que aquí
+ * sí se usa —se manda la oferta y después se persigue— y en el CRM no. No
  * empieza en "sin contactar": la apunta el comercial que ya la está atendiendo.
  */
-export type InquiryStatus = CrmStatus | "seguimiento";
+export type InquiryStatus = CrmStatus | "seguimiento" | "informacion";
 
 export type CrmContact = {
   id: string;
@@ -146,11 +148,13 @@ export type InquiryRecord = {
   notes?: string | null;
   /** En qué quedó. El vocabulario del CRM más "seguimiento". */
   status?: InquiryStatus;
+  /** Lo que vale la oferta o la venta. El estado decide si se pide. */
+  saleValue?: number | null;
 };
 
 export type SaleType = "oferta" | "seguimiento" | "pedido" | "perdido";
 /** "lead": el apunte de un lead en oferta o ganado; lo lleva el propio lead y aquí no se edita. */
-export type SaleEntryMode = "inquiry" | "weekly" | "lead";
+export type SaleEntryMode = "inquiry" | "weekly" | "lead" | "crm";
 
 export type SalesEntry = {
   id: string;
