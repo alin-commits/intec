@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
+import { AvisoExtension } from "@/components/aviso-extension";
 import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
@@ -172,6 +173,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <main className="main-content">
         {profile.isPreview ? <PreviewBanner fullName={profile.fullName} roles={profile.roles} /> : null}
+        {/* Va aquí, fuera de lo que el bloqueador esconde: dentro no se vería. */}
+        <AvisoExtension />
         {/* Los leads sin tocar se le recuerdan a quien los lleva, no a quien mira. */}
         {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <PendingLeadsNotice userId={profile.id} /> : null}
         <header className="topbar">
