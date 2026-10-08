@@ -97,6 +97,33 @@ export function atencionDeLead(lead: LeadParaAtender, ahora = new Date().toISOSt
   return { estado: horas > HORAS_PARA_ATENDER ? "sin-atender" : "esperando", horas };
 }
 
+/**
+ * Lo mismo pero al detalle: "3 días laborables, 19 h y 24 min".
+ *
+ * El corto vale para una insignia dentro de una tabla, donde no cabe más; este
+ * es para cuando el dato es la noticia —el aviso de entrada— y redondear a
+ * "3 días" hace dudar de si son tres y pico o casi cuatro.
+ *
+ * Un "día laborable" aquí son 24 horas de un día entre semana, igual que en el
+ * plazo: los fines de semana no cuentan, las noches sí.
+ */
+export function esperaDetallada(horas: number): string {
+  if (horas < 1 / 60) return "menos de 1 min";
+  let minutosTotales = Math.round(horas * 60);
+  const dias = Math.floor(minutosTotales / (HORAS_PARA_ATENDER * 60));
+  minutosTotales -= dias * HORAS_PARA_ATENDER * 60;
+  const resto = Math.floor(minutosTotales / 60);
+  const minutos = minutosTotales - resto * 60;
+
+  const partes: string[] = [];
+  if (dias > 0) partes.push(dias === 1 ? "1 día laborable" : `${dias} días laborables`);
+  if (resto > 0) partes.push(`${resto} h`);
+  if (minutos > 0) partes.push(`${minutos} min`);
+  if (partes.length === 0) return "menos de 1 min";
+  if (partes.length === 1) return partes[0];
+  return `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+}
+
 /** "6 h", "1 día laborable", "3 días laborables": para decirlo sin dar un número crudo. */
 export function horasEnPalabras(horas: number): string {
   if (horas < 1) return "menos de 1 h";

@@ -205,6 +205,9 @@ export function LeadsTable() {
   const urlStatus = searchParams.get("status") ?? "";
   // El aviso de entrada trae aquí con los suyos sin atender ya filtrados.
   const urlAtencion = searchParams.get("atencion") ?? "";
+  // Desde el aviso de leads parados se llega a uno concreto, con su ficha abierta.
+  const urlLead = searchParams.get("lead") ?? "";
+  const [leadAbiertoPorUrl, setLeadAbiertoPorUrl] = useState("");
   const urlKey = `${urlQuery}|${urlOwner}|${urlStatus}|${urlAtencion}`;
   const [appliedUrlKey, setAppliedUrlKey] = useState("|||");
   if (urlKey !== "|||" && urlKey !== appliedUrlKey) {
@@ -216,6 +219,17 @@ export function LeadsTable() {
       setStatus("new");
     }
     if (urlStatus in leadStatusLabels) setStatus(urlStatus);
+  }
+
+  // La ficha de un lead concreto, pedida desde el aviso de leads parados. No va
+  // con los demás parámetros porque hay que esperar a que los leads lleguen:
+  // mientras la lista está vacía no hay ficha que abrir.
+  if (urlLead && urlLead !== leadAbiertoPorUrl) {
+    const leadPedido = rows.find((fila) => fila.id === urlLead);
+    if (leadPedido) {
+      setLeadAbiertoPorUrl(urlLead);
+      openEdit(leadPedido);
+    }
     if (urlAtencion === "tarde" || urlAtencion === "sin-atender") setAtencionFilter(urlAtencion);
   }
   // Nuevos leads solo ofrecen unidades marcadas visibleInLeads; al editar uno

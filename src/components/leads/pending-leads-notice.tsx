@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/modal";
-import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER, type CambioDeEstado } from "@/lib/leads/atencion";
+import { atencionDeLead, esperaDetallada, HORAS_PARA_ATENDER, type CambioDeEstado } from "@/lib/leads/atencion";
 import { createClient } from "@/lib/supabase/client";
 
 /**
@@ -131,11 +131,15 @@ export function PendingLeadsNotice({ userId }: { userId: string }) {
       <ul className="pending-leads-list">
         {pendientes.slice(0, CUANTOS_SE_ENSEÑAN).map((lead) => (
           <li key={lead.id}>
-            <span className="pending-lead-name">
-              <strong>{lead.nombre}</strong>
-              {lead.empresa && lead.empresa !== lead.nombre ? <small>{lead.empresa}</small> : null}
-            </span>
-            <span className="pending-lead-delay">{horasEnPalabras(lead.horas)}</span>
+            {/* El nombre lleva a su ficha, abierta: el aviso dice a quién llamar
+                y el siguiente clic ya es el teléfono. */}
+            <Link href={`/leads?lead=${lead.id}`} className="pending-lead-link" onClick={cerrar}>
+              <span className="pending-lead-name">
+                <strong>{lead.nombre}</strong>
+                {lead.empresa && lead.empresa !== lead.nombre ? <small>{lead.empresa}</small> : null}
+              </span>
+              <span className="pending-lead-delay">{esperaDetallada(lead.horas)}</span>
+            </Link>
           </li>
         ))}
       </ul>

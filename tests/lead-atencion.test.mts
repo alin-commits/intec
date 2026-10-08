@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   HORAS_PARA_ATENDER,
   atencionDeLead,
+  esperaDetallada,
   horasEnPalabras,
   horasLaborables,
   primerToque,
@@ -99,4 +100,31 @@ test("las horas se dicen en palabras", () => {
   assert.equal(horasEnPalabras(6), "6 h");
   assert.equal(horasEnPalabras(25), "1 día laborable");
   assert.equal(horasEnPalabras(49), "2 días laborables");
+});
+
+test("el detalle dice dias, horas y minutos", () => {
+  // 3 dias laborables (72 h) + 19 h + 24 min
+  assert.equal(esperaDetallada(72 + 19 + 24 / 60), "3 días laborables, 19 h y 24 min");
+});
+
+test("el detalle se salta lo que vale cero", () => {
+  assert.equal(esperaDetallada(48), "2 días laborables");
+  assert.equal(esperaDetallada(48 + 0.5), "2 días laborables y 30 min");
+  assert.equal(esperaDetallada(5), "5 h");
+  assert.equal(esperaDetallada(5 + 7 / 60), "5 h y 7 min");
+});
+
+test("el detalle habla en singular cuando toca", () => {
+  assert.equal(esperaDetallada(24), "1 día laborable");
+  assert.equal(esperaDetallada(25), "1 día laborable y 1 h");
+});
+
+test("el detalle no inventa 60 minutos", () => {
+  assert.equal(esperaDetallada(1 - 1 / 3600), "1 h");
+  assert.equal(esperaDetallada(24 - 1 / 3600), "1 día laborable");
+});
+
+test("el detalle de una espera minima", () => {
+  assert.equal(esperaDetallada(0), "menos de 1 min");
+  assert.equal(esperaDetallada(1 / 120), "menos de 1 min");
 });
