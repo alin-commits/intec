@@ -102,7 +102,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const title = Object.entries(pageTitles).find(([path]) => pathname.startsWith(path))?.[1] ?? "Actividad comercial";
   const isDashboard = pathname.startsWith("/dashboard");
   const firstName = profile.fullName.split(" ")[0];
-  const initials = profile.fullName.split(" ").filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("");
+  // Solo cuentan las palabras que empiezan por letra: "Comercial (prueba)" daba "C(".
+  const initials = profile.fullName.split(" ").filter((part) => /^\p{L}/u.test(part)).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("");
   /*
    * Dirección ve el menú entero, como todo el mundo: las pantallas que la
    * nombran en su lista de roles. Antes se filtraba por el departamento elegido
