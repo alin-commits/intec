@@ -11,6 +11,7 @@ import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format"
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { loadAdsSpendByMonth } from "@/lib/publicidad/gasto-por-mes";
+import { plataformaDeLead, type AdsPlatform } from "@/lib/publicidad/plataformas";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
@@ -60,7 +61,7 @@ function ActivityIcon({ kind }: { kind: ActivityKind }) {
 type ViewMode = "month" | "year";
 type CompareMode = "previous" | "current" | "previous_year" | "none";
 type CampaignRow = { id: string; businessUnitId: string; name: string; status: CampaignStatus; month: string | null; directSalesCount: number; directSaleValue: number };
-type CampaignLeadStub = { campaignId: string | null; businessUnitId: string; createdAt: string; status: LeadStatus; saleValue: number | null };
+type CampaignLeadStub = { campaignId: string | null; businessUnitId: string; createdAt: string; status: LeadStatus; saleValue: number | null; metaLeadId: string | null };
 type StatusCounts = Partial<Record<LeadStatus, number>>;
 
 function countByStatus(leads: CampaignLeadStub[]): StatusCounts {
@@ -95,7 +96,7 @@ const demoChannelStats = bucketChannels(demoInquiries.map((record) => ({ busines
 type SocialStub = { businessUnitId: string; periodMonth: string; newFollowers: number };
 /** `ownValue`: lo que no sale de un lead (los de un lead ya cuentan como leads ganados). */
 type InquirySaleStub = { businessUnitId: string; month: string; value: number; ownValue: number };
-type AdsStub = { businessUnitId: string; campaignId: string | null; month: string; amountSpent: number; leads: number; revenue: number };
+type AdsStub = { platform: AdsPlatform; businessUnitId: string; campaignId: string | null; month: string; amountSpent: number; leads: number; revenue: number };
 type MailingStub = { businessUnitId: string; month: string; sentCount: number; opens: number; deliveredCount: number; revenue: number };
 
 function sumRows(rows: MonthlyStat[]): Totals {
@@ -127,7 +128,7 @@ const compareModeHelpers: Record<CompareMode, string> = {
   none: "sin periodo de comparación",
 };
 
-const demoCampaignLeads: CampaignLeadStub[] = demoLeads.map((lead) => ({ campaignId: lead.campaignId ?? null, businessUnitId: lead.businessUnitId, createdAt: lead.createdAt, status: lead.status, saleValue: lead.saleValue }));
+const demoCampaignLeads: CampaignLeadStub[] = demoLeads.map((lead) => ({ campaignId: lead.campaignId ?? null, businessUnitId: lead.businessUnitId, createdAt: lead.createdAt, status: lead.status, saleValue: lead.saleValue, metaLeadId: null }));
 
 function monthKeyOf(value: string): string {
   return monthKeyInMadrid(value);
@@ -207,7 +208,7 @@ export function DashboardClient() {
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
         fetchAllPages((from, to) => supabase.from("inquiries").select("business_unit_id, inquiry_type, created_at, count").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("sales_entries").select("business_unit_id, occurred_on, value, entry_mode, sale_type, lead_id").gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("id").range(from, to)),
-        fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status").order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, created_at, sale_value, status, meta_lead_id").order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("lead_status_history").select("lead_id, new_status, changed_at, leads(business_unit_id, sale_value)").in("new_status", ["won", "lost"]).order("id").range(from, to)),
         supabase.from("campaigns").select("id, business_unit_id, name, status, start_date, direct_sales_count, direct_sale_value").neq("status", "archived").order("name"),
         fetchAllPages((from, to) => supabase.from("social_media_stats").select("business_unit_id, period_month, new_followers").order("id").range(from, to)),
@@ -296,7 +297,7 @@ export function DashboardClient() {
 
       setCampaignRows((campaignData ?? []).map((row) => ({ id: row.id, businessUnitId: row.business_unit_id, name: row.name, status: row.status as CampaignStatus, month: row.start_date ? monthKeyOf(String(row.start_date)) : null, directSalesCount: Number(row.direct_sales_count ?? 0), directSaleValue: Number(row.direct_sale_value ?? 0) })));
 
-      const leadStubs: CampaignLeadStub[] = (leadData ?? []).map((row) => ({ campaignId: row.campaign_id, businessUnitId: row.business_unit_id, createdAt: row.created_at, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value) }));
+      const leadStubs: CampaignLeadStub[] = (leadData ?? []).map((row) => ({ campaignId: row.campaign_id, businessUnitId: row.business_unit_id, createdAt: row.created_at, status: row.status as LeadStatus, saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value), metaLeadId: row.meta_lead_id ? String(row.meta_lead_id) : null }));
       setCampaignLeads(leadStubs);
 
       setSocialStats((socialData ?? []).map((row) => ({ businessUnitId: row.business_unit_id, periodMonth: String(row.period_month).slice(0, 7), newFollowers: Number(row.new_followers ?? 0) })));
@@ -496,13 +497,6 @@ export function DashboardClient() {
    * CPL de la plataforma, que mide otra cosa —solo lo pagado— y por eso sale
    * más bajo.
    */
-  const gastoDelPeriodo = rrssAdsFiltered.reduce((suma, fila) => suma + fila.amountSpent, 0);
-  const costePorLead = gastoDelPeriodo <= 0
-    ? undefined
-    : current.leads <= 0
-      ? `${currencyFormatter.format(gastoDelPeriodo)} en publicidad`
-      : `${currencyFormatter.format(gastoDelPeriodo)} · ${currencyFormatter.format(gastoDelPeriodo / current.leads)} por lead`;
-
   const rrssSummary = useMemo(() => {
     const spend = rrssAdsFiltered.reduce((sum, row) => sum + row.amountSpent, 0);
     const adsLeads = rrssAdsFiltered.reduce((sum, row) => sum + row.leads, 0);
@@ -586,6 +580,39 @@ export function DashboardClient() {
    * creados en él, y en un mes con pocos leads nuevos y muchos cierres antiguos
    * la conversión pasaba del 100 %.
    */
+  /**
+   * Lo que cuesta traer un lead de campañas.
+   *
+   * Lo difícil aquí no es dividir, es decidir qué gasto entra. Hay meses con
+   * gasto de los que no queda ni un lead en la aplicación, porque la conexión
+   * con la plataforma todavía no existía: en abril de 2026 Meta contó 186 leads
+   * y aquí no entró ninguno. Meter ese gasto en la cuenta carga meses enteros
+   * sobre los leads de las últimas semanas y dispara el coste.
+   *
+   * Así que de cada plataforma solo cuenta el gasto desde el mes en que empezó
+   * a dejar leads aquí. A partir de ahí entra todo, también los meses malos: si
+   * se gasta y no entra nada, tiene que notarse. Y el día que LinkedIn empiece,
+   * su gasto entra solo, desde su primer lead, sin tocar esto.
+   */
+  const primerMesConLeads = new Map<AdsPlatform, string>();
+  for (const lead of campaignLeads) {
+    const plataforma = plataformaDeLead(lead);
+    if (!plataforma) continue;
+    const mes = monthKeyOf(lead.createdAt);
+    const actual = primerMesConLeads.get(plataforma);
+    if (!actual || mes < actual) primerMesConLeads.set(plataforma, mes);
+  }
+  const gastoComparable = rrssAdsFiltered.reduce((suma, fila) => {
+    const desde = primerMesConLeads.get(fila.platform);
+    return desde && fila.month >= desde ? suma + fila.amountSpent : suma;
+  }, 0);
+  const leadsDeCampanas = periodLeads.filter((lead) => plataformaDeLead(lead) !== null).length;
+  const costePorLead = gastoComparable <= 0
+    ? undefined
+    : leadsDeCampanas <= 0
+      ? `${currencyFormatter.format(gastoComparable)} en publicidad`
+      : `${currencyFormatter.format(gastoComparable)} · ${currencyFormatter.format(gastoComparable / leadsDeCampanas)} por lead`;
+
   const conversionOf = (leads: CampaignLeadStub[]) => (leads.length ? (leads.filter((lead) => lead.status === "won").length / leads.length) * 100 : 0);
   const conversion = conversionOf(periodLeads);
   const wonInPeriodCohort = periodLeads.filter((lead) => lead.status === "won").length;
@@ -723,7 +750,7 @@ export function DashboardClient() {
           tone="sky"
           sparkline={sparkLeads}
           sub={costePorLead}
-          subTitle="Lo gastado en publicidad en este periodo, dividido entre todos los leads que entraron. Incluye los que no vienen de anuncios, así que es lo que cuesta de media traer un lead, no el coste de una campaña."
+          subTitle="Lo gastado en publicidad dividido entre los leads que llegaron de campañas. Solo cuenta el gasto desde que cada plataforma empezó a dejar sus leads aquí: lo anterior se gastó cuando no se recogía nada y mezclarlo dispararía el coste."
           {...deltaProps(leadsDelta)}
           onClick={goTo(canSeeLeads, "/leads")}
           actionLabel="Ver leads"

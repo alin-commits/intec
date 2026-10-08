@@ -26,6 +26,18 @@ export function esAdsPlatform(valor: unknown): valor is AdsPlatform {
   return valor === "meta" || valor === "linkedin";
 }
 
+/**
+ * De qué plataforma de anuncios vino un lead, o null si no vino de ninguna
+ * (lo apuntó un comercial, llegó por el formulario de la web, por teléfono...).
+ *
+ * Hoy solo Meta deja su marca en el lead. Cuando LinkedIn entre, traerá la suya
+ * y bastará con mirarla aquí: todo lo que cuenta el coste por lead pasa por
+ * esta función.
+ */
+export function plataformaDeLead(lead: { metaLeadId?: string | null }): AdsPlatform | null {
+  return lead.metaLeadId ? "meta" : null;
+}
+
 /** Lo guardado puede ser cualquier cosa si alguien tocó la base a mano. */
 export function adsPlatformDe(valor: unknown): AdsPlatform {
   return esAdsPlatform(valor) ? valor : "meta";
