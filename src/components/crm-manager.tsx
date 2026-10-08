@@ -7,7 +7,7 @@ import { downloadCsv } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoCrmContacts } from "@/lib/demo-data";
 import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
-import { displayName, formatDate, formatDateTime } from "@/lib/format";
+import { currencyFormatter, displayName, formatDate, formatDateTime } from "@/lib/format";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { BusinessUnit, CrmContact, CrmStatus } from "@/lib/types";
@@ -29,6 +29,8 @@ type ContactDraft = {
   notes: string;
   origin: string;
   status: CrmStatus;
+  /** Como texto, que es lo que escribe quien rellena el formulario. */
+  saleValue: string;
 };
 
 /** Los estados de un contacto, en el orden en que se avanza. El color es el de los leads equivalentes. */
@@ -40,6 +42,9 @@ const CRM_STATUSES: { value: CrmStatus; label: string; badge: string }[] = [
   { value: "ganado", label: "Ganado", badge: "won" },
   { value: "perdido", label: "Perdido", badge: "lost" },
 ];
+/** Al pasar a estos estados se pregunta por cuánto, igual que en los leads. */
+const VALUE_STATUSES: CrmStatus[] = ["oferta_enviada", "ganado"];
+
 const statusInfo = (status: CrmStatus | undefined) => CRM_STATUSES.find((item) => item.value === status) ?? CRM_STATUSES[0];
 const isCrmStatus = (value: unknown): value is CrmStatus => CRM_STATUSES.some((item) => item.value === value);
 
@@ -48,11 +53,12 @@ const ORIGIN_SUGGESTIONS = ["Evento", "Feria", "Web", "Llamada", "Recomendación
 /** Para filtrar los contactos a los que no se les puso origen. */
 const NO_ORIGIN = "__sin_origen__";
 
-type SortKey = "name" | "company" | "unit" | "status" | "origin" | "phone" | "email" | "city" | "created";
+type SortKey = "name" | "company" | "unit" | "status" | "value" | "origin" | "phone" | "email" | "city" | "created";
 /** En la lista solo lo esencial; el resto está en la ficha que se abre al pulsar. */
 const SORT_COLUMNS: { key: SortKey; label: string }[] = [
   { key: "name", label: "Contacto" },
   { key: "status", label: "Estado" },
+  { key: "value", label: "Valor" },
   { key: "origin", label: "Origen" },
   { key: "created", label: "Creado" },
 ];
@@ -76,6 +82,7 @@ function blankDraft(units: BusinessUnit[]): ContactDraft {
     notes: "",
     origin: "",
     status: "sin_contactar",
+    saleValue: "",
   };
 }
 
@@ -92,6 +99,7 @@ function mapContactRow(row: Record<string, unknown>): CrmContact {
     origin: row.origin ? String(row.origin) : null,
     status: isCrmStatus(row.status) ? row.status : "sin_contactar",
     statusChangedAt: row.status_changed_at ? String(row.status_changed_at) : null,
+    saleValue: row.sale_value === null || row.sale_value === undefined ? null : Number(row.sale_value),
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -124,6 +132,8 @@ export function CrmManager() {
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
   const [loadFailed, setLoadFailed] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<{ contact: CrmContact; status: CrmStatus } | null>(null);
+  const [pendingValue, setPendingValue] = useState("");
   const [pendingDelete, setPendingDelete] = useState<CrmContact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [viewingContact, setViewingContact] = useState<CrmContact | null>(null);
@@ -150,7 +160,7 @@ export function CrmManager() {
     const supabase = createClient();
     const [{ data: unitData, error: unitError }, { data: contactData, error: contactError }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, origin, status, status_changed_at, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
+      fetchAllPages((from, to) => supabase.from("crm_contacts").select("id, business_unit_id, full_name, company_name, phone, city, company_email, notes, origin, status, status_changed_at, sale_value, created_by, created_at, updated_at").order("created_at", { ascending: false }).order("id").range(from, to)),
       supabase.auth.getUser(),
     ]);
     if (unitError || contactError) {
@@ -205,6 +215,7 @@ export function CrmManager() {
         case "unit": return unitName(contact.businessUnitId);
         // Por el orden en que se avanza, no por orden alfabético.
         case "status": return String(CRM_STATUSES.indexOf(statusInfo(contact.status)));
+        case "value": return String(contact.saleValue ?? 0).padStart(14, "0");
         case "origin": return contact.origin ?? "";
         case "phone": return contact.phone ?? "";
         case "email": return contact.companyEmail ?? "";
@@ -258,6 +269,7 @@ export function CrmManager() {
       notes: contact.notes ?? "",
       origin: contact.origin ?? "",
       status: contact.status ?? "sin_contactar",
+      saleValue: contact.saleValue === null || contact.saleValue === undefined ? "" : String(contact.saleValue),
     });
     setEditorOpen(true);
     setMessage(null);
@@ -271,6 +283,11 @@ export function CrmManager() {
     event.preventDefault();
     if (!draft.fullName.trim() || !draft.businessUnitId) {
       setMessage("Indica al menos el nombre y la unidad de negocio.");
+      return;
+    }
+    const importe = draft.saleValue.trim() === "" ? null : Number(draft.saleValue);
+    if (importe !== null && (!Number.isFinite(importe) || importe < 0)) {
+      setMessage("El valor de venta tiene que ser un número igual o mayor que cero.");
       return;
     }
     setBusy(true);
@@ -311,6 +328,7 @@ export function CrmManager() {
         notes: draft.notes.trim() || null,
         origin: draft.origin.trim() || null,
         status: draft.status,
+        sale_value: draft.saleValue.trim() === "" ? null : Number(draft.saleValue),
       };
       if (editingId) {
         await writeRows(
@@ -345,20 +363,47 @@ export function CrmManager() {
       });
   }
 
+  /**
+   * Al pasar a oferta o a ganado se pregunta por cuánto: ese importe es el que
+   * acaba en las cifras de ventas, igual que el de un lead. En los demás
+   * estados se cambia directamente, sin preguntar nada.
+   */
+  function pedirCambioDeEstado(contact: CrmContact, status: CrmStatus) {
+    if (!VALUE_STATUSES.includes(status)) { void changeStatus(contact, status); return; }
+    setPendingStatus({ contact, status });
+    setPendingValue(contact.saleValue === null || contact.saleValue === undefined ? "" : String(contact.saleValue));
+  }
+
+  async function confirmarCambioDeEstado() {
+    if (!pendingStatus) return;
+    const importe = pendingValue.trim() === "" ? null : Number(pendingValue);
+    if (importe !== null && (!Number.isFinite(importe) || importe < 0)) {
+      setMessage("El valor de venta tiene que ser un número igual o mayor que cero.");
+      return;
+    }
+    const { contact, status } = pendingStatus;
+    setPendingStatus(null);
+    await changeStatus(contact, status, importe);
+  }
+
   /** Cambiar el estado desde la tabla, sin abrir la ficha. La fecha del cambio la pone la base. */
-  async function changeStatus(contact: CrmContact, status: CrmStatus) {
+  async function changeStatus(contact: CrmContact, status: CrmStatus, saleValue?: number | null) {
     const previous = contact.status;
+    const previousValue = contact.saleValue;
     const changedAt = new Date().toISOString();
-    setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status, statusChangedAt: changedAt } : item));
+    const conImporte = saleValue !== undefined;
+    setContacts((current) => current.map((item) => item.id === contact.id
+      ? { ...item, status, statusChangedAt: changedAt, saleValue: conImporte ? saleValue : item.saleValue }
+      : item));
     if (!configured) return;
     try {
       await writeRows(
-        createClient().from("crm_contacts").update({ status }).eq("id", contact.id),
+        createClient().from("crm_contacts").update(conImporte ? { status, sale_value: saleValue } : { status }).eq("id", contact.id),
         "No se pudo cambiar el estado: puede que alguien haya borrado el contacto o que tu rol no permita cambiarlo.",
       );
     } catch (cause) {
       // La tabla ya enseña el estado nuevo; si la base no lo acepta, se vuelve atrás.
-      setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status: previous, statusChangedAt: contact.statusChangedAt } : item));
+      setContacts((current) => current.map((item) => item.id === contact.id ? { ...item, status: previous, statusChangedAt: contact.statusChangedAt, saleValue: previousValue } : item));
       setMessage(reportSafeError(cause, "No se pudo cambiar el estado."));
       return;
     }
@@ -402,6 +447,7 @@ export function CrmManager() {
       { header: "Correo", value: (contact) => contact.companyEmail ?? "" },
       { header: "Población", value: (contact) => contact.city ?? "" },
       { header: "Estado", value: (contact) => statusInfo(contact.status).label },
+      { header: "Valor de venta (€)", value: (contact) => contact.saleValue ?? "" },
       { header: "Estado desde", value: (contact) => (contact.statusChangedAt ? formatDate(contact.statusChangedAt) : "") },
       { header: "Origen", value: (contact) => contact.origin ?? "" },
       { header: "Notas", value: (contact) => contact.notes ?? "" },
@@ -522,18 +568,19 @@ export function CrmManager() {
                           className={`table-select badge-select badge-${statusInfo(contact.status).badge}`}
                           value={contact.status ?? "sin_contactar"}
                           aria-label={`Estado de ${contact.fullName}`}
-                          onChange={(event) => { if (isCrmStatus(event.target.value)) void changeStatus(contact, event.target.value); }}
+                          onChange={(event) => { if (isCrmStatus(event.target.value)) pedirCambioDeEstado(contact, event.target.value); }}
                         >
                           {CRM_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                         </select>
                       ) : <span className={`badge badge-${statusInfo(contact.status).badge}`}>{statusInfo(contact.status).label}</span>}
                     </td>
+                    <td>{contact.saleValue ? currencyFormatter.format(contact.saleValue) : <span className="muted">—</span>}</td>
                     <td>{contact.origin ? <span className="badge">{contact.origin}</span> : <span className="muted">—</span>}</td>
                     <td>{formatDate(contact.createdAt)}</td>
                   </tr>
                 );
               })}
-              {visibleContacts.length === 0 ? <tr><td colSpan={4} className="muted">{query.trim() ? `Ningún contacto coincide con «${query.trim()}».` : "Sin contactos que coincidan con los filtros."}</td></tr> : null}
+              {visibleContacts.length === 0 ? <tr><td colSpan={5} className="muted">{query.trim() ? `Ningún contacto coincide con «${query.trim()}».` : "Sin contactos que coincidan con los filtros."}</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -571,6 +618,17 @@ export function CrmManager() {
                 {originSuggestions.map((option) => <option key={option} value={option} />)}
               </datalist>
             </label>
+            <label><span>Valor de venta (€)</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0,00"
+                value={draft.saleValue}
+                readOnly={!canEdit}
+                onChange={(event) => updateDraft("saleValue", event.target.value)}
+              />
+            </label>
             <label className="form-field-wide"><span>Notas</span><textarea rows={4} value={draft.notes} readOnly={!canEdit} onChange={(event) => updateDraft("notes", event.target.value)} /></label>
           </div>
           <div className="modal-actions">
@@ -591,6 +649,7 @@ export function CrmManager() {
               <div><span>Correo</span><strong>{viewingContact.companyEmail ? <a href={`mailto:${viewingContact.companyEmail}`}>{viewingContact.companyEmail}</a> : "—"}</strong></div>
               <div><span>Población</span><strong>{viewingContact.city || "—"}</strong></div>
               <div><span>Estado</span><strong>{statusInfo(viewingContact.status).label}{viewingContact.statusChangedAt ? ` · desde el ${formatDate(viewingContact.statusChangedAt)}` : ""}</strong></div>
+              <div><span>Valor de venta</span><strong>{viewingContact.saleValue ? currencyFormatter.format(viewingContact.saleValue) : "—"}</strong></div>
               <div><span>Origen</span><strong>{viewingContact.origin || "—"}</strong></div>
               <div><span>Creado</span><strong>{formatDate(viewingContact.createdAt)}</strong></div>
             </div>
@@ -634,6 +693,35 @@ export function CrmManager() {
           <div className="confirmation-summary">
             <span>Contacto</span><strong>{pendingDelete.fullName}</strong>
           </div>
+        ) : null}
+      </ConfirmationDialog>
+
+      <ConfirmationDialog
+        open={Boolean(pendingStatus)}
+        title={pendingStatus?.status === "ganado" ? "¿Por cuánto se ha vendido?" : "¿De cuánto es la oferta?"}
+        confirmLabel="Guardar"
+        busy={busy}
+        onCancel={() => setPendingStatus(null)}
+        onConfirm={() => void confirmarCambioDeEstado()}
+      >
+        {pendingStatus ? (
+          <>
+            <div className="confirmation-summary">
+              <span>Contacto</span><strong>{pendingStatus.contact.fullName}</strong>
+              <span>Pasa a</span><strong>{statusInfo(pendingStatus.status).label}</strong>
+            </div>
+            <div className="confirmation-sale-form">
+              <label>
+                <span>{pendingStatus.status === "ganado" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
+                <input type="number" min="0" step="0.01" placeholder="0,00" value={pendingValue} onChange={(event) => setPendingValue(event.target.value)} />
+              </label>
+              <p className="muted">
+                {pendingStatus.status === "ganado"
+                  ? "Pasa a Consultas como pedido (venta) y suma en el total de ventas, una sola vez."
+                  : "Se apunta en Consultas → Ventas comerciales como oferta enviada."}
+              </p>
+            </div>
+          </>
         ) : null}
       </ConfirmationDialog>
     </div>

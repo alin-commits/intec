@@ -60,6 +60,8 @@ export type CrmContact = {
   status?: CrmStatus;
   /** Cuándo cambió de estado por última vez (lo apunta la base). */
   statusChangedAt?: string | null;
+  /** Lo que se le vendió. Se pide al pasarlo a oferta o a ganado, como en un lead. */
+  saleValue?: number | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
