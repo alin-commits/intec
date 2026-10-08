@@ -77,7 +77,7 @@ const estadoLegible: Record<string, string> = { ACTIVE: "Activa", PAUSED: "Pausa
 
 const vacio = { revenue: 0, qualified_leads: 0, followers_gained: 0, notes: null as string | null };
 
-export function MetaAdsSyncedPanel({ units, canEdit }: { units: BusinessUnit[]; canEdit: boolean }) {
+export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[]; canEdit: boolean }) {
   const [periodo, setPeriodo] = useState<Periodo>("90");
   const [desde, setDesde] = useState(() => haceDias(90));
   const [hasta, setHasta] = useState(hoy);

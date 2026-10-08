@@ -1,4 +1,4 @@
-import { adsPlatformDe, type AdsPlatform } from "@/lib/ads/platforms";
+import { adsPlatformDe, type AdsPlatform } from "@/lib/publicidad/plataformas";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { createClient } from "@/lib/supabase/client";
 

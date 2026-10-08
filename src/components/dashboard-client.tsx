@@ -10,7 +10,7 @@ import { downloadCsv } from "@/lib/csv-export";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadAdsSpendByMonth } from "@/lib/ads/spend-by-month";
+import { loadAdsSpendByMonth } from "@/lib/publicidad/gasto-por-mes";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";

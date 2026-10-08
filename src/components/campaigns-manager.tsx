@@ -18,8 +18,8 @@ import { exportCampaignReportPdf, type CampaignReportRow } from "@/lib/campaign-
 import { dateKeyInMadrid } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
-import { loadAdsSpendByMonth } from "@/lib/ads/spend-by-month";
-import type { AdsPlatform } from "@/lib/ads/platforms";
+import { loadAdsSpendByMonth } from "@/lib/publicidad/gasto-por-mes";
+import type { AdsPlatform } from "@/lib/publicidad/plataformas";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";

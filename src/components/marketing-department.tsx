@@ -17,7 +17,9 @@ import { CAMPAIGNS_ROLES, EXPENSES_ROLES, RRSS_ROLES } from "@/lib/constants";
 const pages: DepartmentPage[] = [
   { key: "campanas", label: "Campañas", roles: CAMPAIGNS_ROLES, render: () => <CampaignsManager /> },
   { key: "redes", label: "Redes sociales", roles: RRSS_ROLES, render: () => <RrssManager tab="social" /> },
-  { key: "ads", label: "Ads", roles: RRSS_ROLES, render: () => <RrssManager tab="ads" /> },
+  // La clave va en la dirección (?p=...): "ads" la bloquean las extensiones de
+  // anuncios, que dejaban la pestaña en blanco. En pantalla sigue siendo "Ads".
+  { key: "publicidad", label: "Ads", roles: RRSS_ROLES, render: () => <RrssManager tab="publicidad" /> },
   { key: "mailing", label: "Mailing", roles: RRSS_ROLES, render: () => <RrssManager tab="mailing" /> },
   { key: "gastos", label: "Gastos", roles: EXPENSES_ROLES, render: () => <ExpensesManager /> },
   { key: "feed", label: "Organizador de posts", roles: RRSS_ROLES, render: () => <PostPlanner /> },

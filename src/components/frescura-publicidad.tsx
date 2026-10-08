@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { adsPlatformDe, adsPlatformLabels, type AdsPlatform } from "@/lib/ads/platforms";
+import { adsPlatformDe, adsPlatformLabels, type AdsPlatform } from "@/lib/publicidad/plataformas";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 /*
@@ -20,7 +20,7 @@ const UN_DIA = 24 * 60 * 60 * 1000;
 /** "viejo" se decide al traer el dato: la hora no se puede mirar al pintar. */
 type Lectura = { platform: AdsPlatform; cuando: string; viejo: boolean };
 
-export function AdsFreshness() {
+export function FrescuraPublicidad() {
   const [lecturas, setLecturas] = useState<Lectura[]>([]);
   const [cargado, setCargado] = useState(!isSupabaseConfigured());
 

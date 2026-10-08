@@ -7,7 +7,7 @@ import { monthKey, monthShortLabel } from "@/lib/dates";
 import { currencyFormatter, formatPercent, numberFormatter } from "@/lib/format";
 import { PARTIAL_LOAD_MESSAGE, reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadAdsSpendByMonth } from "@/lib/ads/spend-by-month";
+import { loadAdsSpendByMonth } from "@/lib/publicidad/gasto-por-mes";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { KpiCard } from "@/components/kpi-card";
 import { ConversionIcon, EuroIcon, LeadsIcon, TrophyIcon } from "@/components/icons";

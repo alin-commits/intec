@@ -13,7 +13,7 @@ import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { KpiCard } from "@/components/kpi-card";
 import { EuroIcon, EyeIcon, HeartIcon, InboxIcon, MailIcon, UsuariosIcon, PlusCircleIcon } from "@/components/icons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { MetaAdsSyncedPanel } from "@/components/rrss/meta-ads-synced-panel";
+import { PanelMetaSincronizado } from "@/components/rrss/panel-meta-sincronizado";
 import {
   RRSS_ROLES,
   hasAnyRole,
@@ -49,7 +49,7 @@ const FILAS_POR_PAGINA = 5;
 const SOCIAL_STORAGE_KEY = "intec-demo-social-media-stats";
 const MAILING_STORAGE_KEY = "intec-demo-mailing-campaigns";
 
-type Tab = "social" | "ads" | "mailing";
+type Tab = "social" | "publicidad" | "mailing";
 type ViewMode = "month" | "year";
 
 type SocialDraft = Omit<SocialMediaStat, "id" | "createdAt" | "createdBy">;
@@ -316,7 +316,7 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
       {forcedTab ? null : (
         <div className="view-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === "social"} className={tab === "social" ? "view-tab active" : "view-tab"} onClick={() => setTab("social")}>Redes sociales</button>
-          <button type="button" role="tab" aria-selected={tab === "ads"} className={tab === "ads" ? "view-tab active" : "view-tab"} onClick={() => setTab("ads")}>Ads</button>
+          <button type="button" role="tab" aria-selected={tab === "publicidad"} className={tab === "publicidad" ? "view-tab active" : "view-tab"} onClick={() => setTab("publicidad")}>Ads</button>
           <button type="button" role="tab" aria-selected={tab === "mailing"} className={tab === "mailing" ? "view-tab active" : "view-tab"} onClick={() => setTab("mailing")}>Mailing</button>
         </div>
       )}
@@ -324,7 +324,7 @@ export function RrssManager({ tab: forcedTab }: { tab?: RrssTab } = {}) {
       {tab === "social" ? (
         <SocialTab units={units} stats={socialStats} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistSocial} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
       ) : null}
-      {tab === "ads" ? <MetaAdsSyncedPanel units={units} canEdit={canEdit} /> : null}
+      {tab === "publicidad" ? <PanelMetaSincronizado units={units} canEdit={canEdit} /> : null}
       {tab === "mailing" ? (
         <MailingTab units={units} campaigns={mailingCampaigns} canEdit={canEdit} configured={configured} busy={busy} setBusy={setBusy} setMessage={setMessage} persist={persistMailing} refresh={loadRealData} onDeleteRequest={setPendingDelete} />
       ) : null}
