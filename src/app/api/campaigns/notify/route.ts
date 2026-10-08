@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   if (!campaign) return NextResponse.json({ error: "Campaña no encontrada." }, { status: 404 });
   if (!isNotifiableCampaignStatus(campaign.status)) return NextResponse.json({ skipped: "Estado sin aviso." });
 
-  const { data: recipients } = await admin.from("profiles").select("email").eq("is_active", true).overlaps("roles", ["commercial", "direction"]).not("email", "is", null);
+  const { data: recipients } = await admin.from("profiles").select("email").eq("is_active", true).eq("is_preview", false).overlaps("roles", ["commercial", "direction"]).not("email", "is", null);
   const emails = Array.from(new Set((recipients ?? []).map((row) => row.email as string)));
   if (emails.length === 0) return NextResponse.json({ skipped: "Sin destinatarios." });
 

@@ -71,6 +71,7 @@ export async function GET(request: Request) {
     .from("profiles")
     .select("full_name, email")
     .eq("is_active", true)
+    .eq("is_preview", false)
     .overlaps("roles", ["admin", "it"])
     .not("email", "is", null);
 

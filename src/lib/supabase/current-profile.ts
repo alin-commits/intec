@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { AppRole } from "@/lib/types";
 
-export type CurrentProfile = { id: string; email: string | null; fullName: string; roles: AppRole[] } | null;
+export type CurrentProfile = { id: string; email: string | null; fullName: string; roles: AppRole[]; isPreview: boolean } | null;
 
 /**
  * Who is signed in, asked once and shared. Several parts of the page need it at
@@ -30,7 +30,13 @@ export function loadCurrentProfile(): Promise<CurrentProfile> {
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
-    const { data, error } = await supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle();
+    // De esta consulta cuelga la aplicación entera: el menú, las pestañas y
+    // cada pantalla. Si la columna de las cuentas de prueba todavía no está
+    // migrada, se pide sin ella en vez de dejar a todo el mundo sin roles.
+    let { data, error } = await supabase.from("profiles").select("full_name, roles, is_preview").eq("id", user.id).maybeSingle();
+    if (error?.code === "42703") {
+      ({ data, error } = await supabase.from("profiles").select("full_name, roles").eq("id", user.id).maybeSingle());
+    }
     // Supabase no lanza cuando la consulta falla: devuelve el error. Sin esto,
     // un fallo pasajero se guardaba en la caché como "esta persona no tiene
     // ningún rol" y el menú se quedaba vacío hasta recargar entera la página.
@@ -40,6 +46,7 @@ export function loadCurrentProfile(): Promise<CurrentProfile> {
       email: user.email ?? null,
       fullName: (data?.full_name as string | null) || user.email || "Usuario",
       roles: (data?.roles ?? []) as AppRole[],
+      isPreview: Boolean(data?.is_preview),
     };
   })();
 

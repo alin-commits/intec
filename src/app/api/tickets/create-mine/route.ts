@@ -67,7 +67,7 @@ export async function POST(request: Request) {
   await admin.from("ticket_events").insert({ ticket_id: ticket.id, actor_id: user.id, event_type: "created", new_value: "new" });
 
   if (isEmailConfigured()) {
-    const { data: itStaff } = await admin.from("profiles").select("email").overlaps("roles", ["admin", "it"]).eq("is_active", true).not("email", "is", null);
+    const { data: itStaff } = await admin.from("profiles").select("email").overlaps("roles", ["admin", "it"]).eq("is_active", true).eq("is_preview", false).not("email", "is", null);
     const recipients = new Set((itStaff ?? []).map((row) => row.email as string));
     if (process.env.ADMIN_EMAIL) recipients.add(process.env.ADMIN_EMAIL);
     if (recipients.size > 0) {

@@ -67,7 +67,7 @@ export function TicketDetailManager({ ticketId }: { ticketId: string }) {
       supabase.from("tickets").select("*").eq("id", ticketId).maybeSingle(),
       supabase.from("ticket_notes").select("*").eq("ticket_id", ticketId),
       supabase.from("ticket_events").select("*").eq("ticket_id", ticketId),
-      supabase.from("profiles").select("id, full_name, roles, is_active"),
+      supabase.from("profiles").select("id, full_name, roles, is_active").eq("is_preview", false),
     ]);
     if (ticketError) {
       setMessage(reportSafeError(ticketError, "No se pudo cargar el ticket. Recarga la página para reintentarlo."));

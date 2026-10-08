@@ -47,7 +47,7 @@ export async function GET(request: Request) {
   const ownerIds = Array.from(new Set(asignados.map((fila) => fila.profile_id)));
   const [{ data: owners }, { data: admins }] = await Promise.all([
     ownerIds.length ? admin.from("profiles").select("id, full_name, email, is_active").in("id", ownerIds) : Promise.resolve({ data: [] as { id: string; full_name: string | null; email: string | null; is_active: boolean }[] }),
-    admin.from("profiles").select("email").eq("is_active", true).overlaps("roles", ["admin"]).not("email", "is", null),
+    admin.from("profiles").select("email").eq("is_active", true).eq("is_preview", false).overlaps("roles", ["admin"]).not("email", "is", null),
   ]);
   const reachableOwners = new Map((owners ?? []).filter((owner) => owner.is_active && owner.email).map((owner) => [owner.id as string, owner]));
 

@@ -113,7 +113,7 @@ export function BusinessCardsManager() {
     const [{ data: unitData, error: unitError }, { data: cardData, error: cardError }, { data: profileRows }, { data: authData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("business_cards").select("id, business_unit_id, slug, full_name, position, phone, email, website, company_address, instagram_url, facebook_url, linkedin_url, primary_color, is_active, assigned_user_id, created_by, created_at").order("created_at", { ascending: false }),
-      supabase.from("profiles").select("id, full_name").eq("is_active", true).order("full_name"),
+      supabase.from("profiles").select("id, full_name").eq("is_active", true).eq("is_preview", false).order("full_name"),
       supabase.auth.getUser(),
     ]);
     if (unitError || cardError) {

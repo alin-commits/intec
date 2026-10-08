@@ -50,7 +50,7 @@ export async function notifyNewLead(admin: SupabaseClient, input: {
   }
   if (destinatarios.length === 0) {
     sinResponsable = true;
-    const { data } = await admin.from("profiles").select("id, full_name, email, is_active").eq("is_active", true).overlaps("roles", ["admin"]).not("email", "is", null);
+    const { data } = await admin.from("profiles").select("id, full_name, email, is_active").eq("is_active", true).eq("is_preview", false).overlaps("roles", ["admin"]).not("email", "is", null);
     destinatarios = (data ?? []) as Destinatario[];
   }
 

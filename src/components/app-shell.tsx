@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
+import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
@@ -56,7 +57,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured();
   // Sin roles hasta saberlos: suponer "admin" enseñaba el menú entero, "Usuarios"
   // incluido, durante la carga de cada recarga dura.
-  const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[] }>(() => ({ fullName: "", roles: [] }));
+  const [profile, setProfile] = useState<{ fullName: string; roles: AppRole[]; isPreview: boolean }>(() => ({ fullName: "", roles: [], isPreview: false }));
+  // Las cuentas de prueba solo las pide quien puede usarlas.
+  const [cuentasDePrueba, setCuentasDePrueba] = useState<CuentaDePrueba[]>([]);
   const [hasAssignedCard, setHasAssignedCard] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [lastPathname, setLastPathname] = useState(pathname);
@@ -71,11 +74,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     async function loadProfile() {
       const current = await loadCurrentProfile();
       if (!current || !active) return;
-      setProfile({ fullName: displayName(current.fullName), roles: current.roles });
+      setProfile({ fullName: displayName(current.fullName), roles: current.roles, isPreview: current.isPreview });
       const supabase = createClient();
       const { data: assignedCard } = await supabase.from("business_cards").select("id").eq("assigned_user_id", current.id).limit(1).maybeSingle();
       if (!active) return;
       setHasAssignedCard(Boolean(assignedCard));
+
+      if (!current.isPreview && hasAnyRole(current.roles, ["owner", "admin"])) {
+        const { data: cuentas } = await supabase
+          .from("profiles")
+          .select("id, full_name, roles")
+          .eq("is_preview", true)
+          .eq("is_active", true)
+          .order("full_name");
+        if (!active) return;
+        setCuentasDePrueba((cuentas ?? []).map((fila) => ({
+          id: String(fila.id),
+          fullName: String(fila.full_name ?? "Cuenta de prueba"),
+          roles: (fila.roles ?? []) as AppRole[],
+        })));
+      }
     }
     void loadProfile();
     return () => { active = false; };
@@ -151,6 +169,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <main className="main-content">
+        {profile.isPreview ? <PreviewBanner fullName={profile.fullName} roles={profile.roles} /> : null}
         <header className="topbar">
           {isDashboard ? (
             <div className="topbar-title">
@@ -173,13 +192,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link href="/consultas" className="button button-primary">Registrar consulta</Link>
               </>
             ) : null}
-            <div className="user-chip" title={profile.fullName}>
-              <span className="user-avatar" aria-hidden="true">{initials}</span>
-              <div className="user-chip-text">
-                <strong>{profile.fullName}</strong>
-                <small>{profile.roles.map((role) => roleLabels[role]).join(" + ")}</small>
-              </div>
-            </div>
+            <AccountSwitcher
+              fullName={profile.fullName}
+              roles={profile.roles}
+              initials={initials}
+              isPreview={profile.isPreview}
+              cuentas={cuentasDePrueba}
+              onSignOut={() => void signOut()}
+            />
           </div>
         </header>
         {children}

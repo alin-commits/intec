@@ -179,6 +179,8 @@ export type Profile = {
   email?: string | null;
   roles: AppRole[];
   isActive: boolean;
+  /** Cuenta de prueba: existe solo para mirar la app con los ojos de un rol. */
+  isPreview?: boolean;
   createdAt?: string;
 };
 

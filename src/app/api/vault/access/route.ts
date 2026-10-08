@@ -20,7 +20,7 @@ export async function GET() {
     categoriesQuery(),
     guard.admin.from("vault_entries").select("category_id, visibility").eq("is_active", true),
     guard.admin.from("vault_category_access").select("category_id, user_id"),
-    guard.admin.from("profiles").select("id, full_name, email, roles, is_active").eq("is_active", true).order("full_name"),
+    guard.admin.from("profiles").select("id, full_name, email, roles, is_active").eq("is_active", true).eq("is_preview", false).order("full_name"),
   ]);
 
   const counts = new Map<string, number>();

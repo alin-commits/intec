@@ -133,6 +133,7 @@ export async function POST(request: Request) {
       .select("email")
       .overlaps("roles", ["admin", "it"])
       .eq("is_active", true)
+      .eq("is_preview", false)
       .not("email", "is", null);
     const recipients = new Set((itStaff ?? []).map((row) => row.email as string));
     const adminEmail = process.env.ADMIN_EMAIL;

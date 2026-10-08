@@ -60,7 +60,7 @@ export async function GET(request: Request) {
     fetchAllPages<{ count: number }>((from, to) => admin
       .from("inquiries").select("count")
       .gte("created_at", `${desde}T00:00:00Z`).lte("created_at", finDia).order("id").range(from, to)),
-    admin.from("profiles").select("full_name, email").eq("is_active", true).overlaps("roles", ["direction", "owner"]).not("email", "is", null),
+    admin.from("profiles").select("full_name, email").eq("is_active", true).eq("is_preview", false).overlaps("roles", ["direction", "owner"]).not("email", "is", null),
   ]);
 
   const suma = (filas: { net_amount?: number }[] | null) => (filas ?? []).reduce((total, fila) => total + Number(fila.net_amount ?? 0), 0);

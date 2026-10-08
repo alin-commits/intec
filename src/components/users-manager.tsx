@@ -20,6 +20,7 @@ function mapProfile(row: Record<string, unknown>): Profile {
     email: row.email ? String(row.email) : null,
     roles: row.roles as AppRole[],
     isActive: Boolean(row.is_active),
+    isPreview: Boolean(row.is_preview),
     createdAt: row.created_at ? String(row.created_at) : undefined,
   };
 }
@@ -115,7 +116,7 @@ export function UsersManager() {
 
   async function loadProfiles() {
     const supabase = createClient();
-    const { data, error } = await supabase.from("profiles").select("id, full_name, email, roles, is_active, created_at").order("full_name");
+    const { data, error } = await supabase.from("profiles").select("id, full_name, email, roles, is_active, is_preview, created_at").order("full_name");
     if (error) {
       setMessage(reportSafeError(error, "No se pudieron cargar los usuarios."));
       return;
@@ -319,7 +320,7 @@ export function UsersManager() {
               const esPropietario = profile.roles.includes("owner");
               return (
               <tr key={profile.id}>
-                <td><strong>{profile.fullName}</strong>{esPropietario ? <small className="muted">Propietario · no se puede modificar</small> : null}</td>
+                <td><strong>{profile.fullName}</strong>{esPropietario ? <small className="muted">Propietario · no se puede modificar</small> : null}{profile.isPreview ? <small className="muted">Cuenta de prueba · solo para ver la app como este rol</small> : null}</td>
                 <td>{profile.email || "—"}</td>
                 <td><RoleChips value={profile.roles} disabled={esPropietario} onChange={(next) => void updateProfile(profile.id, { roles: next })} /></td>
                 <td>

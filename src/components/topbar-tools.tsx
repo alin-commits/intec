@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { BellIcon, ClockIcon, CrmIcon, LeadsIcon, MegaphoneIcon, SearchIcon, TicketsIcon, WalletIcon } from "@/components/icons";
 import { SendAnnouncementModal } from "@/components/send-announcement-modal";
 import { SentAnnouncementsModal } from "@/components/sent-announcements-modal";
 import { Toast } from "@/components/ui/toast";
+import { useClickOutside } from "@/components/ui/use-click-outside";
 import { ANNOUNCEMENT_SENDER_ROLES, CRM_ROLES, EXPENSES_EDIT_ROLES, LEADS_ROLES, hasAnyRole } from "@/lib/constants";
 import { todayKey } from "@/lib/dates";
 import { daysBetween, nextRenewal, type BillingPeriod } from "@/lib/expenses";
@@ -21,18 +22,6 @@ const STALE_TICKET_DAYS = 3;
 const SEARCH_LIMIT = 5;
 const RENEWAL_ALERT_DAYS = 7;
 
-function useClickOutside(ref: RefObject<HTMLElement | null>, onOutside: () => void) {
-  const callback = useRef(onOutside);
-  // En un efecto, no en el render: React 19 no deja tocar refs mientras pinta.
-  useEffect(() => { callback.current = onOutside; });
-  useEffect(() => {
-    function handle(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) callback.current();
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [ref]);
-}
 
 // ---------- Notifications ----------
 

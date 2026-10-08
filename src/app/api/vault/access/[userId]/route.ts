@@ -81,7 +81,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ user
   const [{ data: categories }, { data: access }, { data: people }] = await Promise.all([
     guard.admin.from("vault_categories").select("id, name"),
     guard.admin.from("vault_category_access").select("category_id, user_id"),
-    guard.admin.from("profiles").select("id, roles").eq("is_active", true),
+    guard.admin.from("profiles").select("id, roles").eq("is_active", true).eq("is_preview", false),
   ]);
 
   const byCategory = new Map<string, string[]>();
