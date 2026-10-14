@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Modal } from "@/components/ui/modal";
 import { downloadCsv, type CsvColumn } from "@/lib/csv-export";
+import { downloadXlsxFromColumns } from "@/lib/excel-export";
 import { numberFormatter } from "@/lib/format";
 import { channelLabel, euros } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
@@ -109,7 +110,8 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
   const multiCompany = new Set(rows.map((row) => row.company_code)).size > 1;
 
   let table: ReactNode;
-  let csv: () => void;
+  // Las columnas se escriben una vez y valen para los dos formatos.
+  let exportacion: { rows: unknown[]; columns: CsvColumn<unknown>[] } | null = null;
   const filename = `${request.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}.csv`;
 
   if (request.type === "clientes") {
@@ -165,7 +167,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       { header: "Importe", value: (row) => Number(row.net_amount) },
       { header: "Albaranes", value: (row) => Number(row.documents) },
     ];
-    csv = () => downloadCsv(filename, list, csvColumns);
+    exportacion = { rows: list, columns: csvColumns as CsvColumn<unknown>[] };
   } else if (request.type === "ofertas") {
     const list = visible as OfferRow[];
     const columns: Column<OfferRow>[] = [
@@ -184,7 +186,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
         : { key: "pedido", header: "Pedido", render: (row) => (Number(row.ordered_amount) > 0 ? `${euros(Number(row.ordered_amount))} · ${shortDate(row.first_order_on)}` : <span className="muted">—</span>), sort: (row) => Number(row.ordered_amount) },
     ];
     table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} onRowClick={openCustomer} initialSort={{ key: "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ninguna oferta con estos filtros."} />;
-    csv = () => downloadCsv(filename, list, [
+    const columnasOferta: CsvColumn<OfferRow>[] = [
       { header: "Sociedad", value: (row) => company(row.company_code) },
       { header: "Serie", value: (row) => row.series },
       { header: "Número", value: (row) => row.number },
@@ -197,7 +199,8 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       { header: "Pedido", value: (row) => Number(row.ordered_amount) },
       { header: "Fecha del pedido", value: (row) => row.first_order_on },
       { header: "Motivo", value: (row) => row.reason },
-    ]);
+    ];
+    exportacion = { rows: list, columns: columnasOferta as CsvColumn<unknown>[] };
   } else {
     const list = visible as OrderRow[];
     const columns: Column<OrderRow>[] = [
@@ -215,7 +218,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       { key: "pendiente", header: "Pendiente", render: (row) => (Number(row.pending_amount) > 0 ? euros(Number(row.pending_amount)) : <span className="muted">—</span>), sort: (row) => Number(row.pending_amount) },
     ];
     table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} onRowClick={openCustomer} initialSort={{ key: request.kind === "pendientes" ? "pendiente" : "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ningún pedido con estos filtros."} />;
-    csv = () => downloadCsv(filename, list, [
+    const columnasPedido: CsvColumn<OrderRow>[] = [
       { header: "Sociedad", value: (row) => company(row.company_code) },
       { header: "Serie", value: (row) => row.series },
       { header: "Número", value: (row) => row.number },
@@ -228,7 +231,8 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       { header: "Importe", value: (row) => Number(row.net_amount) },
       { header: "Pendiente", value: (row) => Number(row.pending_amount) },
       { header: "Desde oferta", value: (row) => (row.from_offer ? "Sí" : "No") },
-    ]);
+    ];
+    exportacion = { rows: list, columns: columnasPedido as CsvColumn<unknown>[] };
   }
 
   const noun = request.type === "clientes" ? "clientes" : request.type === "ofertas" ? "ofertas" : "pedidos";
@@ -248,7 +252,10 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
         <span className="sales-list-count">
           {result.loading ? "Cargando…" : `${numberFormatter.format(visible.length)} ${noun} · ${euros(totalAmount)}`}
         </span>
-        <button type="button" className="button button-compact button-secondary" onClick={() => csv()} disabled={result.loading || visible.length === 0}>Descargar Excel</button>
+        <button type="button" className="button button-compact button-secondary" disabled={result.loading || visible.length === 0 || !exportacion}
+          onClick={() => { if (exportacion) void downloadXlsxFromColumns(`${filename.replace(/\.csv$/, "")}.xlsx`, request.title, exportacion.rows, exportacion.columns); }}>Descargar Excel</button>
+        <button type="button" className="button button-compact button-secondary" disabled={result.loading || visible.length === 0 || !exportacion}
+          onClick={() => { if (exportacion) downloadCsv(filename, exportacion.rows, exportacion.columns); }}>CSV</button>
       </div>
       {result.failed ? <LoadFailed what="la lista" /> : table}
       {capped ? <p className="sales-section-note">Se enseñan los 500 de mayor importe.</p> : null}
