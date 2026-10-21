@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/**/*.test.mts\"",
     "check:schema": "node scripts/check-schema.mts",
-    "cuentas:prueba": "node scripts/crear-cuentas-de-prueba.mts"
+    "cuentas:prueba": "node scripts/crear-cuentas-de-prueba.mts",
+    "compras:graph": "tsx scripts/comprobar-graph.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",

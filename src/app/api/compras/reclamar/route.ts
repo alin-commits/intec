@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { hasAnyRole, COMPRAS_ROLES } from "@/lib/constants";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { enviarReclamacion, prepararReclamacion } from "@/lib/compras/enviar-reclamacion";
+import { comoVaASalir, enviarReclamacion, prepararReclamacion } from "@/lib/compras/enviar-reclamacion";
 import { clavePedido, escalonAMano, type PedidoAReclamar, type Seguimiento } from "@/lib/compras/reclamaciones";
 import type { AppRole } from "@/lib/types";
 
@@ -116,7 +116,19 @@ export async function POST(request: Request) {
 
   if (cuerpo.previsualizar) {
     const previo = await prepararReclamacion(admin, grupo, { firma });
-    return NextResponse.json({ previsualizacion: true, ...previo, pedidos: aReclamar.length });
+    // Cómo va a salir se mira aquí también, para que la pantalla lo diga antes
+    // de enviar: no es lo mismo responder sobre el pedido que mandar un correo
+    // suelto, y quien le da al botón tiene derecho a saberlo.
+    const salida = await comoVaASalir(grupo, previo.destinatario);
+    return NextResponse.json({
+      previsualizacion: true, ...previo, pedidos: aReclamar.length,
+      destinatario: salida.destinatario,
+      via: salida.via,
+      enHilo: Boolean(salida.hilo),
+      asuntoDelHilo: salida.hilo?.subject ?? null,
+      redirigido: salida.redirigido,
+      remitente: salida.remitente,
+    });
   }
 
   const resultado = await enviarReclamacion(admin, grupo, { kind: "manual", sentBy: user.id, firma });

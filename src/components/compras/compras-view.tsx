@@ -99,6 +99,15 @@ type Reclamacion = {
   asunto: string;
   html: string;
   enviando: boolean;
+  /** Por dónde sale: el buzón de compras (graph) o nuestro servidor (resend). */
+  via?: "graph" | "resend";
+  /** Si responde sobre el correo con el que se mandó el pedido. */
+  enHilo?: boolean;
+  asuntoDelHilo?: string | null;
+  /** Si los envíos están desviados a un buzón de pruebas. */
+  redirigido?: string | null;
+  /** De dónde sale; lo dice el servidor, que es quien lo sabe. */
+  remitente?: string;
 };
 
 /** Qué periodo se está mirando. "todo" existe porque el atasco es de hace meses. */
@@ -359,7 +368,10 @@ export function ComprasView() {
       });
       const datos = await respuesta.json();
       if (!respuesta.ok) { setReclamando(null); setAviso(datos.error ?? "No se pudo preparar el correo."); return; }
-      setReclamando((actual) => actual && { ...actual, destinatario: datos.destinatario, asunto: datos.asunto, html: datos.html, enviando: false });
+      setReclamando((actual) => actual && {
+        ...actual, destinatario: datos.destinatario, asunto: datos.asunto, html: datos.html, enviando: false,
+        via: datos.via, enHilo: datos.enHilo, asuntoDelHilo: datos.asuntoDelHilo, redirigido: datos.redirigido, remitente: datos.remitente,
+      });
     } catch {
       setReclamando(null);
       setAviso("No se pudo preparar el correo.");
@@ -653,11 +665,20 @@ export function ComprasView() {
           <div className="page-stack">
             {reclamando.html ? (
               <>
+                {reclamando.redirigido ? (
+                  <p className="form-error" style={{ margin: 0 }}>
+                    Los envíos están desviados a <strong>{reclamando.redirigido}</strong>: esto no llega al proveedor.
+                  </p>
+                ) : null}
                 <p className="muted" style={{ margin: 0 }}>
-                  Sale de <strong>compras@suministrointec.com</strong> para <strong>{reclamando.destinatario}</strong>.
-                  Las respuestas llegan a ese mismo buzón.
+                  {reclamando.enHilo
+                    ? <>Se responde sobre el correo con el que se mandó el pedido, desde el buzón de compras. El proveedor lo verá debajo, y su respuesta vuelve a ese hilo.</>
+                    : reclamando.via === "graph"
+                      ? <>Sale del buzón de compras como correo nuevo: no se ha encontrado el correo con el que se mandó el pedido.</>
+                      : <>Sale de <strong>{reclamando.remitente}</strong>, pero sin pasar por el buzón: no quedará en Enviados.</>}
                 </p>
-                <p style={{ margin: 0 }}><strong>Asunto:</strong> {reclamando.asunto}</p>
+                <p className="muted" style={{ margin: 0 }}>Para <strong>{reclamando.destinatario}</strong>.</p>
+                <p style={{ margin: 0 }}><strong>Asunto:</strong> {reclamando.enHilo && reclamando.asuntoDelHilo ? `RE: ${reclamando.asuntoDelHilo}` : reclamando.asunto}</p>
                 <iframe title="Vista previa del correo" sandbox="" srcDoc={reclamando.html}
                   style={{ width: "100%", height: 380, border: "1px solid var(--border)", borderRadius: 12, background: "#f5f7fb" }} />
                 <div className="modal-actions">
