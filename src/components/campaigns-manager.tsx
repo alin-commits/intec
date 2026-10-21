@@ -190,7 +190,7 @@ export function CampaignsManager() {
       // común de publicidad, que cruza cada campaña con la de su plataforma.
       loadAdsSpendByMonth(supabase),
       // Y el presupuesto, tal como está puesto en la plataforma.
-      supabase.from("meta_campaigns").select("campaign_id, daily_budget, lifetime_budget").not("campaign_id", "is", null),
+      supabase.from("meta_campaigns").select("campaign_id, status, daily_budget, lifetime_budget").not("campaign_id", "is", null),
       supabase.auth.getUser(),
       supabase.from("campaign_assignees").select("campaign_id, profile_id").order("added_at"),
       // Solo para saber qué leads no lleva nadie (los que se pueden repartir).
@@ -224,17 +224,33 @@ export function CampaignsManager() {
     }
     setAds([...porCampana.values()]);
 
-    // Una campaña de la aplicación puede tener varias de Meta atadas: sus
-    // presupuestos se suman, que es lo que puede gastar en total.
-    const presupuestos = new Map<string, PresupuestoPlataforma>();
+    /*
+     * Una campaña de la aplicación puede tener varias de Meta atadas, y sus
+     * presupuestos se suman... pero solo los de las que pueden gastar. La de
+     * PREVENTA tenía dos de 20 €/día, una pausada y otra activa, y sumarlas
+     * decía 40 €/día cuando lo que se está gastando son 20.
+     *
+     * Si no hay ninguna activa —la campaña terminó— se suman todas, que es lo
+     * que llegó a tener presupuestado.
+     */
+    const esViva = (estado: unknown) => String(estado ?? "").toUpperCase() === "ACTIVE";
+    const porDestino = new Map<string, { campaign_id: string; status: unknown; daily_budget: unknown; lifetime_budget: unknown }[]>();
     for (const fila of presupuestosMeta ?? []) {
       const destino = String(fila.campaign_id);
-      const actual = presupuestos.get(destino) ?? { diario: null, total: null };
-      const diario = fila.daily_budget === null || fila.daily_budget === undefined ? null : Number(fila.daily_budget);
-      const total = fila.lifetime_budget === null || fila.lifetime_budget === undefined ? null : Number(fila.lifetime_budget);
-      if (diario !== null) actual.diario = (actual.diario ?? 0) + diario;
-      if (total !== null) actual.total = (actual.total ?? 0) + total;
-      presupuestos.set(destino, actual);
+      porDestino.set(destino, [...(porDestino.get(destino) ?? []), fila]);
+    }
+    const presupuestos = new Map<string, PresupuestoPlataforma>();
+    for (const [destino, metas] of porDestino) {
+      const vivas = metas.filter((meta) => esViva(meta.status));
+      const cuentan = vivas.length > 0 ? vivas : metas;
+      const acumulado: PresupuestoPlataforma = { diario: null, total: null };
+      for (const meta of cuentan) {
+        const diario = meta.daily_budget === null || meta.daily_budget === undefined ? null : Number(meta.daily_budget);
+        const total = meta.lifetime_budget === null || meta.lifetime_budget === undefined ? null : Number(meta.lifetime_budget);
+        if (diario !== null) acumulado.diario = (acumulado.diario ?? 0) + diario;
+        if (total !== null) acumulado.total = (acumulado.total ?? 0) + total;
+      }
+      presupuestos.set(destino, acumulado);
     }
     setPresupuestoDeMeta(presupuestos);
     const user = authData.user;
