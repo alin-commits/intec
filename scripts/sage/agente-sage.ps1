@@ -1154,7 +1154,13 @@ group by p.CodigoEmpresa, p.EjercicioPedido, isnull(ltrim(rtrim(p.SeriePedido)),
 
 function Sql-ComprasLineas($cfg) {
   $recepcion = if ($cfg.RecepcionLinea) { "cast(l.[$($cfg.RecepcionLinea)] as date)" } else { "cast(null as date)" }
-  $orden = if ($cfg.Orden) { "cast(l.[$($cfg.Orden)] as int)" } else { "cast(0 as int)" }
+  # El número de línea sale de un contador, no de la columna de Sage: si esa
+  # columna no existe —o repite, que pasa cuando una línea se parte por
+  # almacén— dos líneas del mismo pedido chocarían al guardarse y se perdería
+  # el envío entero. Se ordena por la columna buena cuando la hay, así que el
+  # orden es el de Sage; solo el número es nuestro.
+  $porOrden = if ($cfg.Orden) { "l.[$($cfg.Orden)], " } else { "" }
+  $orden = "row_number() over (partition by l.CodigoEmpresa, l.EjercicioPedido, l.SeriePedido, l.NumeroPedido order by $porOrden(select null))"
   $articulo = if ($cfg.Articulo) { "ltrim(rtrim(l.[$($cfg.Articulo)]))" } else { "cast(null as varchar(40))" }
   $descripcion = if ($cfg.Descripcion) { "ltrim(rtrim(l.[$($cfg.Descripcion)]))" } else { "''" }
   $pedidas = if ($cfg.Pedidas) { "isnull(l.[$($cfg.Pedidas)], 0)" } else { "0" }
