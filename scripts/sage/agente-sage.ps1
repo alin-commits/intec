@@ -127,7 +127,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-21 compras"
+$VersionAgente = "2026-10-21 compras-2"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
