@@ -29,6 +29,25 @@ import type { AppRole } from "@/lib/types";
   Los datos los manda el agente de Sage; aquí no se escribe nada en el ERP.
 */
 
+/*
+  Por qué columna se ordena. "Esperando" y "Pedido el" son el mismo dato del
+  derecho y del revés —los días son hoy menos la fecha—, así que ordenar por
+  una es ordenar por la otra al contrario; se dejan las dos porque cada uno
+  mira una cosa.
+*/
+type ClaveOrden = "pedido" | "proveedor" | "fecha_pedido" | "esperando" | "prevista" | "pendiente";
+type Orden = { clave: ClaveOrden; sentido: "asc" | "desc" };
+/* Las que se miran de mayor a menor: el que más lleva esperando y el que más dinero tiene detrás. */
+const PRIMERO_DESCENDENTE: ClaveOrden[] = ["esperando", "pendiente"];
+const COLUMNAS_ORDENABLES: { clave: ClaveOrden; etiqueta: string }[] = [
+  { clave: "pedido", etiqueta: "Pedido" },
+  { clave: "proveedor", etiqueta: "Proveedor" },
+  { clave: "fecha_pedido", etiqueta: "Pedido el" },
+  { clave: "esperando", etiqueta: "Esperando" },
+  { clave: "prevista", etiqueta: "Fecha prevista" },
+  { clave: "pendiente", etiqueta: "Pendiente" },
+];
+
 const POR_PAGINA = 15;
 
 type Pedido = {
@@ -79,6 +98,8 @@ export function ComprasView() {
   const [falloCarga, setFalloCarga] = useState<string | null>(null);
   const [hoy, setHoy] = useState("");
   const [filtro, setFiltro] = useState<"sin_fecha" | "con_fecha" | "vencidos" | "todos">("sin_fecha");
+  // De entrada, el que más lleva esperando arriba: es el que hay que reclamar antes.
+  const [orden, setOrden] = useState<Orden>({ clave: "esperando", sentido: "desc" });
   const [busqueda, setBusqueda] = useState("");
   const [pagina, setPagina] = useState(0);
   const [abierto, setAbierto] = useState<string | null>(null);
@@ -176,6 +197,36 @@ export function ComprasView() {
     });
   }, [conEstado, filtro, busqueda]);
 
+  const ordenadas = useMemo(() => {
+    // Lo que no tiene fecha prevista se va al final en los dos sentidos: no es
+    // ni la más próxima ni la más lejana, simplemente no la hay.
+    const valor = (fila: (typeof visibles)[number]): string | number | null => {
+      switch (orden.clave) {
+        case "pedido": return `${fila.pedido.company_code}-${fila.pedido.series}-${String(fila.pedido.number).padStart(10, "0")}`;
+        case "proveedor": return fila.proveedorNombre.toLowerCase();
+        case "fecha_pedido": case "esperando": return fila.pedido.order_date;
+        case "prevista": return fila.fecha;
+        case "pendiente": return Number(fila.pedido.pending_amount);
+      }
+    };
+    // "Esperando" es al revés que la fecha del pedido: más días es más antiguo.
+    const factor = (orden.sentido === "asc" ? 1 : -1) * (orden.clave === "esperando" ? -1 : 1);
+    return [...visibles].sort((a, b) => {
+      const izq = valor(a);
+      const der = valor(b);
+      if (izq === null || izq === "") return der === null || der === "" ? 0 : 1;
+      if (der === null || der === "") return -1;
+      return izq < der ? -factor : izq > der ? factor : 0;
+    });
+  }, [visibles, orden]);
+
+  function cambiarOrden(clave: ClaveOrden) {
+    setPagina(0);
+    setOrden((actual) => actual.clave === clave
+      ? { clave, sentido: actual.sentido === "asc" ? "desc" : "asc" }
+      : { clave, sentido: PRIMERO_DESCENDENTE.includes(clave) ? "desc" : "asc" });
+  }
+
   const resumen = useMemo(() => ({
     sinFecha: conEstado.filter((fila) => fila.sinFecha > 0).length,
     conFecha: conEstado.filter((fila) => fila.sinFecha === 0).length,
@@ -184,9 +235,9 @@ export function ComprasView() {
     proveedores: new Set(conEstado.filter((fila) => fila.sinFecha > 0).map((fila) => fila.proveedorNombre)).size,
   }), [conEstado]);
 
-  const paginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
+  const paginas = Math.max(1, Math.ceil(ordenadas.length / POR_PAGINA));
   const paginaActual = Math.min(pagina, paginas - 1);
-  const enPantalla = visibles.slice(paginaActual * POR_PAGINA, paginaActual * POR_PAGINA + POR_PAGINA);
+  const enPantalla = ordenadas.slice(paginaActual * POR_PAGINA, paginaActual * POR_PAGINA + POR_PAGINA);
 
   const columnas: CsvColumn<(typeof conEstado)[number]>[] = [
     { header: "Sociedad", value: (fila) => fila.pedido.company_code },
@@ -225,12 +276,12 @@ export function ComprasView() {
             fecha ya no se reclama aunque el resto del pedido siga a medias. Los datos los trae el agente de Sage.
           </p>
         </div>
-        {visibles.length > 0 ? (
+        {ordenadas.length > 0 ? (
           <div className="panel-heading-trailing">
             <button type="button" className="button button-compact button-secondary"
-              onClick={() => void downloadXlsx("pedidos_a_proveedor.xlsx", [{ name: "Pendientes", columns: columnas, rows: visibles }] as never[])}>Exportar Excel</button>
+              onClick={() => void downloadXlsx("pedidos_a_proveedor.xlsx", [{ name: "Pendientes", columns: columnas, rows: ordenadas }] as never[])}>Exportar Excel</button>
             <button type="button" className="button button-compact button-secondary"
-              onClick={() => downloadCsv("pedidos_a_proveedor.csv", visibles, columnas)}>CSV</button>
+              onClick={() => downloadCsv("pedidos_a_proveedor.csv", ordenadas, columnas)}>CSV</button>
           </div>
         ) : null}
       </section>
@@ -267,7 +318,7 @@ export function ComprasView() {
                     onClick={() => { setFiltro(clave_); setPagina(0); }}>{etiqueta}</button>
                 ))}
               </div>
-              <span className="muted">{numberFormatter.format(visibles.length)} pedidos</span>
+              <span className="muted">{numberFormatter.format(ordenadas.length)} pedidos</span>
             </div>
 
             <label className="list-search">
@@ -277,7 +328,18 @@ export function ComprasView() {
             </label>
 
             <div className="table-scroll"><table><thead><tr>
-              <th>Pedido</th><th>Proveedor</th><th>Pedido el</th><th>Esperando</th><th>Fecha prevista</th><th>Pendiente</th><th></th>
+              {COLUMNAS_ORDENABLES.map((columna) => {
+                const activa = orden.clave === columna.clave;
+                return (
+                  <th key={columna.clave} aria-sort={activa ? (orden.sentido === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className={activa ? "sort-header active" : "sort-header"} onClick={() => cambiarOrden(columna.clave)} title="Ordenar">
+                      {columna.etiqueta}
+                      <span aria-hidden="true">{activa ? (orden.sentido === "asc" ? "↑" : "↓") : "↕"}</span>
+                    </button>
+                  </th>
+                );
+              })}
+              <th></th>
             </tr></thead><tbody>
               {enPantalla.map((fila) => {
                 const llave = clave(fila.pedido);
@@ -295,7 +357,7 @@ export function ComprasView() {
                     <td>{hoy ? `${numberFormatter.format(diasDesde(fila.pedido.order_date, hoy))} días` : "—"}</td>
                     <td>
                       {fila.sinFecha > 0
-                        ? <span className="badge badge-lost">{fila.sinFecha === fila.pedido.lines ? "sin fecha" : `${fila.sinFecha} líneas sin fecha`}</span>
+                        ? <span className="badge badge-lost">{fila.sinFecha === fila.pedido.lines ? "sin fecha" : `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin fecha`}</span>
                         : <span className={fila.vencido ? "badge badge-lost" : "badge badge-active"}>{fila.fecha}{fila.vencido ? " · vencido" : ""}</span>}
                     </td>
                     <td>{currencyFormatter.format(Number(fila.pedido.pending_amount))}</td>
@@ -327,7 +389,7 @@ export function ComprasView() {
               })}
               {enPantalla.length === 0 ? <tr><td colSpan={7} className="muted">Ningún pedido con estos filtros.</td></tr> : null}
             </tbody></table></div>
-            <TablePagination page={paginaActual} pageCount={paginas} total={visibles.length} label="pedidos" onChange={setPagina} />
+            <TablePagination page={paginaActual} pageCount={paginas} total={ordenadas.length} label="pedidos" onChange={setPagina} />
           </section>
         </>
       )}
