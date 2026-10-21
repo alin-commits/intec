@@ -86,7 +86,12 @@ export async function POST(request: Request) {
   }
   if (!error && hasPurchaseParts(body)) {
     const compras = await saveBlock(admin, toPurchasesPayload(body), "sage_ingest_purchases");
-    if (compras.error) ({ error, status } = compras);
+    // Si la migración de compras todavía no está aplicada, la función no existe.
+    // Eso no puede dar por fallida una lectura cuyo grueso ya se guardó: se
+    // avisa y se sigue, que es como se tratan aquí las partes que aún no están.
+    const sinMigrar = compras.error && (compras.error.code === "PGRST202" || compras.error.code === "42883");
+    if (compras.error && !sinMigrar) ({ error, status } = compras);
+    else if (sinMigrar) console.warn("Sage: todavía no se puede guardar lo de compras (falta su migración).");
     else data = { ...(data ?? {}), ...(compras.data ?? {}) };
   }
   if (error) {

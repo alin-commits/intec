@@ -1086,6 +1086,140 @@ group by p.CodigoEmpresa$grupo;
   return ,$lista
 }
 
+# --- Compras: pedidos a proveedor pendientes de recibir ---------------------
+#
+# Lo que falta por llegar, con la fecha de recepción que haya confirmado el
+# proveedor. No va por ventana de fechas como las ventas: un pedido a proveedor
+# vive abierto meses, así que se manda la foto de lo pendiente.
+#
+# Manda la fecha de la línea, no la de la cabecera: el proveedor confirma por
+# línea y puede confirmar unas y otras no.
+function Preparar-Compras {
+  $claves = @("CodigoEmpresa", "EjercicioPedido", "SeriePedido", "NumeroPedido")
+  $faltan = @(Faltan "CabeceraPedidoProveedor" ($claves + @("FechaPedido", "CodigoProveedor")))
+  $faltan += @(Faltan "LineasPedidoProveedor" ($claves + @("UnidadesPendientes")))
+  if ($faltan.Count -gt 0) { Avisar $avisosDeArranque "pedidos a proveedor: faltan $($faltan -join ', ')"; return $null }
+  # La fecha de recepción es la que rellena compras cuando el proveedor
+  # contesta. Según la versión de Sage se llama de una forma o de otra.
+  $recepcionCabecera = Elegir "CabeceraPedidoProveedor" @("FechaRecepcion", "FechaEntrega", "FechaNecesaria")
+  $recepcionLinea = Elegir "LineasPedidoProveedor" @("FechaRecepcion", "FechaEntrega", "FechaNecesaria")
+  if (-not $recepcionLinea) { Avisar $avisosDeArranque "pedidos a proveedor: la linea no tiene fecha de recepcion; se usara solo la de la cabecera" }
+  return @{
+    RecepcionCabecera = $recepcionCabecera
+    RecepcionLinea    = $recepcionLinea
+    Estado            = (Elegir "CabeceraPedidoProveedor" @("Estado", "StatusPedido"))
+    Importe           = (Elegir "CabeceraPedidoProveedor" @("BaseImponible", "ImporteNeto", "ImporteLiquido"))
+    Lineas            = (Elegir "CabeceraPedidoProveedor" @("NumeroLineas"))
+    Orden             = (Elegir "LineasPedidoProveedor" @("Orden", "NumeroLinea", "Linea"))
+    Articulo          = (Elegir "LineasPedidoProveedor" @("CodigoArticulo"))
+    Descripcion       = (Elegir "LineasPedidoProveedor" @("DescripcionArticulo", "Descripcion"))
+    Pedidas           = (Elegir "LineasPedidoProveedor" @("UnidadesPedidas", "Unidades"))
+    ImporteLinea      = (Elegir "LineasPedidoProveedor" @("BaseImponible", "ImporteNeto", "ImporteLiquido"))
+  }
+}
+
+# Dos años de pedidos pendientes. Más atrás es chatarra que nadie va a reclamar
+# y solo engorda el envío.
+$DiasComprasAtras = 730
+
+function Sql-ComprasPedidos($cfg) {
+  $recepcion = if ($cfg.RecepcionCabecera) { "cast(p.[$($cfg.RecepcionCabecera)] as date)" } else { "cast(null as date)" }
+  $estado = if ($cfg.Estado) { "cast(p.[$($cfg.Estado)] as int)" } else { "cast(null as int)" }
+  $importe = if ($cfg.Importe) { "isnull(p.[$($cfg.Importe)], 0)" } else { "0" }
+  $lineas = if ($cfg.Lineas) { "isnull(p.[$($cfg.Lineas)], 0)" } else { "0" }
+  $importeLinea = if ($cfg.ImporteLinea) { "l.[$($cfg.ImporteLinea)]" } else { "0" }
+  $pedidas = if ($cfg.Pedidas) { "l.[$($cfg.Pedidas)]" } else { "0" }
+  return @"
+select p.CodigoEmpresa, p.EjercicioPedido as Ejercicio,
+  isnull(ltrim(rtrim(p.SeriePedido)), '') as Serie, p.NumeroPedido as Numero,
+  cast(p.FechaPedido as date) as Fecha,
+  ltrim(rtrim(p.CodigoProveedor)) as Proveedor,
+  $recepcion as Recepcion,
+  $estado as Estado,
+  $importe as Neto,
+  $lineas as Lineas,
+  isnull(sum(l.UnidadesPendientes), 0) as Pendientes,
+  isnull(sum($importeLinea * l.UnidadesPendientes / nullif($pedidas, 0)), 0) as PendienteImporte
+from CabeceraPedidoProveedor p
+join LineasPedidoProveedor l
+  on l.CodigoEmpresa = p.CodigoEmpresa and l.EjercicioPedido = p.EjercicioPedido
+ and l.SeriePedido = p.SeriePedido and l.NumeroPedido = p.NumeroPedido
+where l.UnidadesPendientes > 0
+  and p.FechaPedido >= dateadd(day, -$DiasComprasAtras, cast(getdate() as date))
+  and p.CodigoEmpresa not in ($excluidas)
+group by p.CodigoEmpresa, p.EjercicioPedido, isnull(ltrim(rtrim(p.SeriePedido)), ''), p.NumeroPedido,
+  cast(p.FechaPedido as date), ltrim(rtrim(p.CodigoProveedor)), $recepcion, $estado, $importe, $lineas;
+"@
+}
+
+function Sql-ComprasLineas($cfg) {
+  $recepcion = if ($cfg.RecepcionLinea) { "cast(l.[$($cfg.RecepcionLinea)] as date)" } else { "cast(null as date)" }
+  $orden = if ($cfg.Orden) { "cast(l.[$($cfg.Orden)] as int)" } else { "cast(0 as int)" }
+  $articulo = if ($cfg.Articulo) { "ltrim(rtrim(l.[$($cfg.Articulo)]))" } else { "cast(null as varchar(40))" }
+  $descripcion = if ($cfg.Descripcion) { "ltrim(rtrim(l.[$($cfg.Descripcion)]))" } else { "''" }
+  $pedidas = if ($cfg.Pedidas) { "isnull(l.[$($cfg.Pedidas)], 0)" } else { "0" }
+  $importe = if ($cfg.ImporteLinea) { "isnull(l.[$($cfg.ImporteLinea)], 0)" } else { "0" }
+  return @"
+select l.CodigoEmpresa, l.EjercicioPedido as Ejercicio,
+  isnull(ltrim(rtrim(l.SeriePedido)), '') as Serie, l.NumeroPedido as Numero,
+  $orden as Orden,
+  $articulo as Articulo,
+  $descripcion as Descripcion,
+  $pedidas as Pedidas,
+  isnull(l.UnidadesPendientes, 0) as Pendientes,
+  $recepcion as Recepcion,
+  $importe as Neto
+from LineasPedidoProveedor l
+join CabeceraPedidoProveedor p
+  on p.CodigoEmpresa = l.CodigoEmpresa and p.EjercicioPedido = l.EjercicioPedido
+ and p.SeriePedido = l.SeriePedido and p.NumeroPedido = l.NumeroPedido
+where l.UnidadesPendientes > 0
+  and p.FechaPedido >= dateadd(day, -$DiasComprasAtras, cast(getdate() as date))
+  and p.CodigoEmpresa not in ($excluidas);
+"@
+}
+
+function Filas-ComprasPedidos($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode   = [int]$fila["CodigoEmpresa"]
+      year          = [int]$fila["Ejercicio"]
+      series        = (Texto $fila["Serie"] 20)
+      number        = [int]$fila["Numero"]
+      orderDate     = ([datetime]$fila["Fecha"]).ToString("yyyy-MM-dd")
+      supplierCode  = (Texto-O-Nulo $fila["Proveedor"] 40)
+      expectedOn    = (Fecha-O-Nulo $fila["Recepcion"])
+      status        = (Entero-O-Nulo $fila["Estado"])
+      netAmount     = (Numero $fila["Neto"])
+      pendingAmount = (Numero $fila["PendienteImporte"])
+      lines         = [int](Numero $fila["Lineas"])
+      pendingUnits  = (Numero $fila["Pendientes"])
+    })
+  }
+  return ,$lista
+}
+
+function Filas-ComprasLineas($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode  = [int]$fila["CodigoEmpresa"]
+      year         = [int]$fila["Ejercicio"]
+      series       = (Texto $fila["Serie"] 20)
+      number       = [int]$fila["Numero"]
+      lineNumber   = [int]$fila["Orden"]
+      articleCode  = (Texto-O-Nulo $fila["Articulo"] 40)
+      description  = (Texto $fila["Descripcion"] 200)
+      quantity     = (Numero $fila["Pedidas"])
+      pendingUnits = (Numero $fila["Pendientes"])
+      expectedOn   = (Fecha-O-Nulo $fila["Recepcion"])
+      netAmount    = (Numero $fila["Neto"])
+    })
+  }
+  return ,$lista
+}
+
 # --- Ofertas una a una: estado, motivo, fechas y lo que acabó en pedido -----
 function Preparar-OfertasDetalle {
   $faltan = Faltan "CabeceraOfertaCliente" @("CodigoEmpresa", "EjercicioOferta", "NumeroOferta", "FechaOferta")
@@ -1921,6 +2055,8 @@ if (-not $SoloVentas) {
   try { $cfgClientes = Preparar-Clientes } catch { Avisar $avisosDeArranque "ficha de clientes: $($_.Exception.Message)" }
   if ($cfgOfertas) { try { $cfgOfertasDetalle = Preparar-OfertasDetalle } catch { Avisar $avisosDeArranque "ofertas una a una: $($_.Exception.Message)" } }
   if ($cfgPedidos) { try { $cfgPedidosDetalle = Preparar-PedidosDetalle } catch { Avisar $avisosDeArranque "pedidos uno a uno: $($_.Exception.Message)" } }
+  # Compras no depende de que haya pedidos de cliente: es otra familia de tablas.
+  try { $cfgCompras = Preparar-Compras } catch { Avisar $avisosDeArranque "pedidos a proveedor: $($_.Exception.Message)" }
   if ($cfgFamilias -and -not $cfgFamilias.ConArticulo) { Avisar $avisosDeArranque "venta por articulo: las lineas no traen CodigoArticulo" }
   try { $cfgPagos = Preparar-Pagos } catch { Avisar $avisosDeArranque "pagos: $($_.Exception.Message)" }
 }
@@ -2213,6 +2349,12 @@ if (-not $SoloVentas) {
     if ($null -eq $envio["subfamilies"]) { $envio.Remove("subfamilies") }
   }
   Intentar $envio "backlog" $avisos "cartera de pedidos" { Leer-Cartera }
+  # Compras: lo que falta por recibir de los proveedores. Va aquí y no en la
+  # ventana de fechas porque es una foto de lo pendiente, no del día.
+  if ($cfgCompras) {
+    Intentar $envio "purchaseOrders" $avisos "pedidos a proveedor" { Filas-ComprasPedidos (Consultar $servidorBueno (Sql-ComprasPedidos $cfgCompras)) }
+    Intentar $envio "purchaseOrderLines" $avisos "lineas de pedido a proveedor" { Filas-ComprasLineas (Consultar $servidorBueno (Sql-ComprasLineas $cfgCompras)) }
+  }
   if ($null -eq $envio["backlog"]) { $envio.Remove("backlog") }
   if ($clientesListos) { Intentar $envio "dormant" $avisos "clientes dormidos" { Leer-Dormidos } }
   # Los contactos de los clientes, de noche. Se leen aquí para que, si fallan, el
