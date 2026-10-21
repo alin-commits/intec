@@ -44,12 +44,24 @@ alter table public.purchase_order_chases add column if not exists sent_by uuid r
 comment on column public.purchase_order_chases.kind is
   'auto = lo mandó el cron a los 2 o 5 días; manual = alguien le dio al botón.';
 
+-- El día del envío, en una columna propia.
+--
+-- Hacía falta para el índice de aquí abajo y no vale sacarlo de sent_at al
+-- vuelo: pasar una marca de tiempo a fecha depende de la zona horaria de la
+-- sesión, así que Postgres no lo admite en un índice ("functions in index
+-- expression must be marked IMMUTABLE"). Se guarda el día ya resuelto en
+-- Madrid, que es donde se trabaja.
+alter table public.purchase_order_chases add column if not exists sent_on date;
+update public.purchase_order_chases set sent_on = (sent_at at time zone 'Europe/Madrid')::date where sent_on is null;
+alter table public.purchase_order_chases alter column sent_on set default (now() at time zone 'Europe/Madrid')::date;
+alter table public.purchase_order_chases alter column sent_on set not null;
+
 -- Lo que impide mandar dos veces el mismo escalón al mismo proveedor el mismo
 -- día: si el cron se repite —o alguien le da al botón justo después—, el envío
 -- ya está escrito y no se vuelve a hacer. Solo cuenta para los automáticos:
 -- al botón se le da a propósito, y si alguien quiere insistir, puede.
 create unique index if not exists purchase_order_chases_sin_repetir_idx
-  on public.purchase_order_chases (company_code, supplier_code, level, (sent_at::date))
+  on public.purchase_order_chases (company_code, supplier_code, level, sent_on)
   where kind = 'auto';
 
 -- ---------- Quién puede escribir aquí ----------
