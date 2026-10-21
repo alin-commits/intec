@@ -363,6 +363,11 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
   .filter-bar, .lead-filters, .brand-picker, .units-grid { grid-template-columns: minmax(0, 1fr); }
   .kpi-grid-3 { grid-template-columns: minmax(0, 1fr); }
   .chart-panel, .table-panel, .panel-padded { padding: 16px; }.panel-heading { align-items: flex-start; flex-direction: column; }
+  /* Unas pestañas dentro de una cabecera: al apilarse en columna, flex-start
+     las dejaría del ancho de su contenido, así que no habría nada que deslizar
+     y serían ellas las que empujan la página a lo ancho. Que ocupen el panel y
+     deslicen por dentro, que es lo que hacen cuando no van en una cabecera. */
+  .panel-heading > .view-tabs { align-self: stretch; min-width: 0; }
 }
 
 /* Operational phase */

@@ -129,6 +129,9 @@ export function ComprasView() {
       const llave = clave(linea);
       mapa.set(llave, [...(mapa.get(llave) ?? []), linea]);
     }
+    // Ordenadas aquí y no al pintarlas: ordenar al pintar tocaría estos mismos
+    // arrays en pleno render, y además se repetiría en cada repintado.
+    for (const suyas of mapa.values()) suyas.sort((a, b) => a.line_number - b.line_number);
     return mapa;
   }, [lineas]);
 
@@ -307,7 +310,7 @@ export function ComprasView() {
                     <tr key={`${llave}-lineas`} className="fila-detalle">
                       <td colSpan={7}>
                         <ul className="lineas-pedido">
-                          {suyas.sort((a, b) => a.line_number - b.line_number).map((linea) => (
+                          {suyas.map((linea) => (
                             <li key={linea.line_number}>
                               <span><strong>{linea.description || linea.article_code || `Línea ${linea.line_number}`}</strong>
                                 <small className="muted"> · {numberFormatter.format(Number(linea.pending_units))} pendientes</small></span>
