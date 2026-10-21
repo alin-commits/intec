@@ -36,6 +36,8 @@ export const roleLabels: Record<AppRole, string> = {
 
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
+/** Compras: de momento quien ya ve lo de Sage. Si acaba siendo su propio rol, se añade aquí. */
+export const COMPRAS_ROLES: AppRole[] = ["admin", "direction"];
 export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "commercial", "viewer", "direction"];
 export const RRSS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 export const UNITS_ROLES: AppRole[] = ["admin", "viewer"];

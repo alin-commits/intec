@@ -11,7 +11,7 @@ import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -23,6 +23,7 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   // Lo del día y los pagos por confirming: un departamento, una entrada con pestañas.
   { href: "/administracion", label: "Administración", icon: InboxIcon, roles: PAYMENTS_ROLES },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
+  { href: "/compras", label: "Compras", icon: InboxIcon, roles: COMPRAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
   // Campañas, redes sociales, publicidad, mailing y gastos: un departamento, una entrada con pestañas.
