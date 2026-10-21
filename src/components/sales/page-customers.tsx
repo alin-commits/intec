@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
+import { RepCustomersPanel } from "./rep-customers-panel";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, RefreshIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
 import { formatPercent, numberFormatter } from "@/lib/format";
@@ -393,6 +394,10 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         ) : null}
         {ctx.detail.customers ? <SegmentsPanel ctx={ctx} periodName={periodName} /> : null}
       </section>
+
+      {/* La cartera: quién compra y quién no. Va al final porque es la lista
+          larga; arriba quedan las cifras que se miran de un vistazo. */}
+      <RepCustomersPanel ctx={ctx} />
 
       {ctx.detail.customers && counts.data ? (
         <p className="sales-section-note">
