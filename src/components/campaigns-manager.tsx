@@ -20,6 +20,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
 import { loadAdsSpendByMonth } from "@/lib/publicidad/gasto-por-mes";
 import type { AdsPlatform } from "@/lib/publicidad/plataformas";
+import { presupuestoDeCampana, type CampanaDePlataforma, type PresupuestoPlataforma } from "@/lib/publicidad/presupuesto";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole, BusinessUnit, Campaign, CampaignStatus, LeadStatus } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
@@ -41,8 +42,6 @@ function campaignDate(campaign: Campaign): string {
 function backlogOf(campaignId: string, leads: LeadStub[]): number {
   return leads.filter((lead) => lead.campaignId === campaignId && !lead.assigned && !CLOSED_STATUSES.includes(lead.status)).length;
 }
-/** Lo presupuestado en la plataforma: o por día, o para toda la campaña. */
-type PresupuestoPlataforma = { diario: number | null; total: number | null };
 type AdsStub = { platform: AdsPlatform; campaignId: string | null; amountSpent: number; revenue: number; leads: number };
 
 function blankDraft(units: BusinessUnit[]): CampaignDraft {
@@ -190,7 +189,7 @@ export function CampaignsManager() {
       // común de publicidad, que cruza cada campaña con la de su plataforma.
       loadAdsSpendByMonth(supabase),
       // Y el presupuesto, tal como está puesto en la plataforma.
-      supabase.from("meta_campaigns").select("campaign_id, status, daily_budget, lifetime_budget").not("campaign_id", "is", null),
+      supabase.from("meta_campaigns").select("campaign_id, status, started_at, daily_budget, lifetime_budget").not("campaign_id", "is", null),
       supabase.auth.getUser(),
       supabase.from("campaign_assignees").select("campaign_id, profile_id").order("added_at"),
       // Solo para saber qué leads no lleva nadie (los que se pueden repartir).
@@ -224,34 +223,15 @@ export function CampaignsManager() {
     }
     setAds([...porCampana.values()]);
 
-    /*
-     * Una campaña de la aplicación puede tener varias de Meta atadas, y sus
-     * presupuestos se suman... pero solo los de las que pueden gastar. La de
-     * PREVENTA tenía dos de 20 €/día, una pausada y otra activa, y sumarlas
-     * decía 40 €/día cuando lo que se está gastando son 20.
-     *
-     * Si no hay ninguna activa —la campaña terminó— se suman todas, que es lo
-     * que llegó a tener presupuestado.
-     */
-    const esViva = (estado: unknown) => String(estado ?? "").toUpperCase() === "ACTIVE";
-    const porDestino = new Map<string, { campaign_id: string; status: unknown; daily_budget: unknown; lifetime_budget: unknown }[]>();
+    // La regla de qué presupuesto vale cuando hay varias tandas vive aparte,
+    // con sus pruebas: tiene más casos de los que parece.
+    const porDestino = new Map<string, CampanaDePlataforma[]>();
     for (const fila of presupuestosMeta ?? []) {
       const destino = String(fila.campaign_id);
       porDestino.set(destino, [...(porDestino.get(destino) ?? []), fila]);
     }
     const presupuestos = new Map<string, PresupuestoPlataforma>();
-    for (const [destino, metas] of porDestino) {
-      const vivas = metas.filter((meta) => esViva(meta.status));
-      const cuentan = vivas.length > 0 ? vivas : metas;
-      const acumulado: PresupuestoPlataforma = { diario: null, total: null };
-      for (const meta of cuentan) {
-        const diario = meta.daily_budget === null || meta.daily_budget === undefined ? null : Number(meta.daily_budget);
-        const total = meta.lifetime_budget === null || meta.lifetime_budget === undefined ? null : Number(meta.lifetime_budget);
-        if (diario !== null) acumulado.diario = (acumulado.diario ?? 0) + diario;
-        if (total !== null) acumulado.total = (acumulado.total ?? 0) + total;
-      }
-      presupuestos.set(destino, acumulado);
-    }
+    for (const [destino, metas] of porDestino) presupuestos.set(destino, presupuestoDeCampana(metas));
     setPresupuestoDeMeta(presupuestos);
     const user = authData.user;
     if (user) {
