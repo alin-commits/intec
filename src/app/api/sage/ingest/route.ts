@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isSageAgent } from "@/lib/sage-agent-auth";
-import { describeIngest, hasPaymentParts, sageIngestSchema, toDatabasePayload, toPaymentsPayload, type SageIngestBody } from "@/lib/sage-ingest";
+import { describeIngest, hasPaymentParts, hasPurchaseParts, sageIngestSchema, toDatabasePayload, toPaymentsPayload, toPurchasesPayload, type SageIngestBody } from "@/lib/sage-ingest";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /*
@@ -83,6 +83,11 @@ export async function POST(request: Request) {
     const payments = await saveBlock(admin, toPaymentsPayload(body), "sage_ingest_payments");
     if (payments.error) ({ error, status } = payments);
     else data = { ...(data ?? {}), ...(payments.data ?? {}) };
+  }
+  if (!error && hasPurchaseParts(body)) {
+    const compras = await saveBlock(admin, toPurchasesPayload(body), "sage_ingest_purchases");
+    if (compras.error) ({ error, status } = compras);
+    else data = { ...(data ?? {}), ...(compras.data ?? {}) };
   }
   if (error) {
     const message = `No se guardó nada de este envío: ${error.message}`;

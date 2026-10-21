@@ -241,6 +241,38 @@ export const sageIngestSchema = z.object({
     deliveredAmount: amount.default(0),
     firstDeliveryOn: optionalDay,
   })).max(20000).optional(),
+  /*
+   * Compras: los pedidos a proveedor pendientes de recibir, con sus dos fechas
+   * de recepción (la de la cabecera y la de cada línea). Manda la de la línea,
+   * porque el proveedor confirma por línea.
+   */
+  purchaseOrders: z.array(z.object({
+    companyCode: z.number().int(),
+    year: z.number().int(),
+    series: z.string().trim().max(20).default(""),
+    number: z.number().int(),
+    orderDate: day,
+    supplierCode: optionalText(40),
+    expectedOn: optionalDay,
+    status: z.number().int().nullable().default(null),
+    netAmount: amount,
+    pendingAmount: amount.default(0),
+    lines: count.default(0),
+    pendingUnits: z.number().default(0),
+  })).max(20000).optional(),
+  purchaseOrderLines: z.array(z.object({
+    companyCode: z.number().int(),
+    year: z.number().int(),
+    series: z.string().trim().max(20).default(""),
+    number: z.number().int(),
+    lineNumber: z.number().int(),
+    articleCode: optionalText(40),
+    description: z.string().trim().max(200).default(""),
+    quantity: z.number().default(0),
+    pendingUnits: z.number().default(0),
+    expectedOn: optionalDay,
+    netAmount: amount.default(0),
+  })).max(60000).optional(),
   incidents: z.array(z.object({
     companyCode: z.number().int(),
     day,
@@ -453,6 +485,52 @@ export function toPaymentsPayload(body: SageIngestBody): Record<string, unknown>
 export type SageIngestBody = z.infer<typeof sageIngestSchema>;
 
 /** Lo que recibe `sage_ingest`: los nombres de las columnas de la base de datos. */
+/** Si este envío trae algo de compras. */
+export function hasPurchaseParts(body: SageIngestBody): boolean {
+  return Boolean(body.purchaseOrders || body.purchaseOrderLines);
+}
+
+/**
+ * Los pedidos a proveedor van a su propia función de la base, como los pagos:
+ * así se añaden bloques sin tocar las cuatrocientas líneas de sage_ingest, que
+ * es donde está todo lo demás.
+ */
+export function toPurchasesPayload(body: SageIngestBody): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (body.purchaseOrders) {
+    payload.purchase_orders = body.purchaseOrders.map((row) => ({
+      company_code: row.companyCode,
+      year: row.year,
+      series: row.series,
+      number: row.number,
+      order_date: row.orderDate,
+      supplier_code: row.supplierCode,
+      expected_on: row.expectedOn,
+      status: row.status,
+      net_amount: row.netAmount,
+      pending_amount: row.pendingAmount,
+      lines: row.lines,
+      pending_units: row.pendingUnits,
+    }));
+  }
+  if (body.purchaseOrderLines) {
+    payload.purchase_order_lines = body.purchaseOrderLines.map((row) => ({
+      company_code: row.companyCode,
+      year: row.year,
+      series: row.series,
+      number: row.number,
+      line_number: row.lineNumber,
+      article_code: row.articleCode,
+      description: row.description,
+      quantity: row.quantity,
+      pending_units: row.pendingUnits,
+      expected_on: row.expectedOn,
+      net_amount: row.netAmount,
+    }));
+  }
+  return payload;
+}
+
 export function toDatabasePayload(body: SageIngestBody): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     covered_from: body.coveredFrom,
@@ -705,6 +783,8 @@ export function describeIngest(body: SageIngestBody, counts: Record<string, numb
     ["subfamilies", "subfamilias"],
     ["offer_documents", "ofertas una a una"],
     ["order_documents", "pedidos uno a uno"],
+    ["purchase_orders", "pedidos a proveedor"],
+    ["purchase_order_lines", "líneas de pedido a proveedor"],
     ["incidents", "de abonos e incidencias"],
     ["lookups", "códigos de Sage"],
     ["customer_contacts", "contactos de clientes"],
