@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/meta-ads",
       "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/reclamar-compras",
+      "schedule": "10 8 * * 1-5"
     }
   ]
 }
