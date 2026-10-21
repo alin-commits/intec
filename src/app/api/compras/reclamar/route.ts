@@ -141,5 +141,5 @@ export async function POST(request: Request) {
     }[resultado.motivo ?? "fallo_envio"];
     return NextResponse.json({ error: porQue, motivo: resultado.motivo }, { status: resultado.motivo === "sin_correo" ? 409 : 502 });
   }
-  return NextResponse.json({ ok: true, destinatario: resultado.destinatario, pedidos: resultado.pedidos, nivel: grupo.nivel });
+  return NextResponse.json({ ok: true, destinatario: resultado.destinatario, pedidos: resultado.pedidos, nivel: grupo.nivel, enHilo: resultado.enHilo, redirigido: resultado.redirigido });
 }

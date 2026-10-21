@@ -388,7 +388,9 @@ export function ComprasView() {
       });
       const datos = await respuesta.json();
       if (!respuesta.ok) { setReclamando({ ...reclamando, enviando: false }); setAviso(datos.error ?? "No se pudo enviar el correo."); return; }
-      setAviso(`Reclamación enviada a ${datos.destinatario}.`);
+      setAviso(datos.redirigido
+        ? `Prueba enviada a ${datos.destinatario}. El proveedor no ha recibido nada y el pedido sigue sin reclamar.`
+        : `Reclamación enviada a ${datos.destinatario}${datos.enHilo ? ", sobre el hilo del pedido" : ""}.`);
       setReclamando(null);
       await recargarSeguimiento();
     } catch {

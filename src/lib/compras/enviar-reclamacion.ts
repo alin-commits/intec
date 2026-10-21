@@ -36,6 +36,8 @@ export type ResultadoEnvio = {
   via?: "graph" | "resend";
   /** Si se respondió sobre el correo con el que Sage mandó el pedido. */
   enHilo?: boolean;
+  /** Si el envío fue desviado a un buzón de pruebas en vez de al proveedor. */
+  redirigido?: string | null;
 };
 
 type Fila = { company_code: number; year: number; series: string; number: number };
@@ -167,7 +169,12 @@ export async function enviarReclamacion(
   // El correo ya ha salido: cerrar el registro no puede fallar por una columna
   // que falte. Si la migración del envío por buzón no está, se guarda lo demás,
   // que es lo que impide repetir el envío.
-  const cierre = { ok: enviado, message: enviado ? null : (detalle ?? "El envío falló.").slice(0, 2000) };
+  const cierre = {
+    ok: enviado,
+    message: enviado
+      ? (salida.redirigido ? `Prueba: desviado a ${salida.redirigido}, el proveedor no lo ha recibido.` : null)
+      : (detalle ?? "El envío falló.").slice(0, 2000),
+  };
   const apuntado = await admin.from("purchase_order_chases")
     .update({ ...cierre, via: salida.via, in_thread: enHilo }).eq("id", registro.id);
   if (apuntado.error?.code === "42703") {
@@ -180,6 +187,18 @@ export async function enviarReclamacion(
     return { ...base, ok: false, motivo: "fallo_envio", via: salida.via, enHilo: false };
   }
 
+  /*
+    Con el desvío puesto esto es una prueba: el correo ha ido a un buzón
+    nuestro y el proveedor no ha recibido nada. Si se diera el pedido por
+    reclamado, gastaría su primer aviso sin que nadie se lo haya pedido, y al
+    quitar el desvío le llegaría de entrada el segundo —el de "os escribimos de
+    nuevo"— como primer contacto. Queda el registro del envío, que es lo que
+    hace falta para verlo, pero el escalón no sube.
+  */
+  if (salida.redirigido) {
+    return { ...base, ok: true, via: salida.via, enHilo, destinatario, redirigido: salida.redirigido };
+  }
+
   // Solo ahora sube el escalón de cada pedido.
   const ahora = new Date().toISOString();
   const seguimientos = grupo.pedidos.map((pedido) => ({
@@ -190,7 +209,7 @@ export async function enviarReclamacion(
     .upsert(seguimientos, { onConflict: "company_code,year,series,number" });
   if (errorSeguimiento) console.error("Compras: la reclamación salió pero no se pudo apuntar el seguimiento", errorSeguimiento);
 
-  return { ...base, ok: true, via: salida.via, enHilo, destinatario };
+  return { ...base, ok: true, via: salida.via, enHilo, destinatario, redirigido: null };
 }
 
 /** Los pedidos de un envío, como se guardan en el registro. */
