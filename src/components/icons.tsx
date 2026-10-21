@@ -195,6 +195,16 @@ export function InboxIcon() {
   return <Svg><path d="M3 11.2 5 4.5c.2-.6.8-1 1.4-1h7.2c.6 0 1.2.4 1.4 1l2 6.7v3.8c0 .8-.7 1.5-1.5 1.5h-11c-.8 0-1.5-.7-1.5-1.5v-3.8Z" /><path d="M3 11.2h4l1 1.8h4l1-1.8h4" /></Svg>;
 }
 
+export function ComprasIcon() {
+  return (
+    <Svg>
+      <path d="M3 6.6 10 3l7 3.6v7.2L10 17.4 3 13.8V6.6Z" />
+      <path d="M3 6.6 10 10.3l7-3.7M10 10.3v7.1" />
+      <path d="M6.5 4.8 13.5 8.4" />
+    </Svg>
+  );
+}
+
 export function MegaphoneIcon() {
   return <Svg><path d="M3.5 8.2v3.6c0 .5.4.9.9.9H6l7.5 3.3V4L6 7.3H4.4c-.5 0-.9.4-.9.9Z" /><path d="m6.5 12.7.9 3.6M16 8.2v3.6" /></Svg>;
 }

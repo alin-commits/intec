@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CampanasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
+import { CampanasIcon, ComprasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
 import { AvisoExtension } from "@/components/aviso-extension";
@@ -23,7 +23,7 @@ const navigation: { href: string; label: string; icon: () => ReactNode; roles?: 
   // Lo del día y los pagos por confirming: un departamento, una entrada con pestañas.
   { href: "/administracion", label: "Administración", icon: InboxIcon, roles: PAYMENTS_ROLES },
   { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
-  { href: "/compras", label: "Compras", icon: InboxIcon, roles: COMPRAS_ROLES },
+  { href: "/compras", label: "Compras", icon: ComprasIcon, roles: COMPRAS_ROLES },
   { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
   { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
   // Campañas, redes sociales, publicidad, mailing y gastos: un departamento, una entrada con pestañas.
