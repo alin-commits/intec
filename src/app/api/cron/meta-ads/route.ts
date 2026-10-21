@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { appOrigin } from "@/lib/app-origin";
 import { isAuthorizedCron } from "@/lib/cron-auth";
-import { fetchCampaigns, fetchCampaignsByIds, fetchDailyInsights, MetaAdsError, tokenFor, type MetaCampaign } from "@/lib/meta/ads-client";
+import { fetchAdsetBudgets, fetchCampaigns, fetchCampaignsByIds, fetchDailyInsights, MetaAdsError, tokenFor, type MetaCampaign } from "@/lib/meta/ads-client";
 import { syncPagesAndLeads } from "@/lib/meta/leads-import";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -76,6 +76,13 @@ export async function GET(request: Request) {
 
       // Las campañas primero: los datos diarios apuntan a ellas.
       const conocidas = new Set<string>();
+      // El presupuesto puede estar en la campaña o en sus conjuntos de anuncios:
+      // si no está en la campaña, manda la suma de los conjuntos. Si esta
+      // llamada falla, se sigue sin presupuesto antes que perder el gasto.
+      const presupuestoDeConjuntos = await fetchAdsetBudgets(cuenta.account_id, token).catch((causa) => {
+        console.warn("No se pudieron leer los presupuestos de los conjuntos:", causa instanceof Error ? causa.message : causa);
+        return new Map<string, { daily: number | null; lifetime: number | null }>();
+      });
       const guardarCampanas = async (lista: MetaCampaign[]) => {
         if (lista.length === 0) return;
         const { error } = await admin.from("meta_campaigns").upsert(
@@ -87,6 +94,8 @@ export async function GET(request: Request) {
             status: campana.status,
             started_at: campana.startedAt,
             stopped_at: campana.stoppedAt,
+            daily_budget: campana.dailyBudget ?? presupuestoDeConjuntos.get(campana.id)?.daily ?? null,
+            lifetime_budget: campana.lifetimeBudget ?? presupuestoDeConjuntos.get(campana.id)?.lifetime ?? null,
             updated_at: new Date().toISOString(),
           })),
           { onConflict: "meta_id" },

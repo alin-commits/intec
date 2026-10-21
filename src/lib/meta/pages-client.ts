@@ -91,13 +91,16 @@ export async function fetchFormName(formId: string, pageToken: string): Promise<
  */
 export async function fetchCampaignWithAccount(campaignId: string, token: string): Promise<(MetaCampaign & { accountId: string }) | null> {
   try {
-    const row = await graphCall(campaignId, { fields: "id,name,objective,status,start_time,stop_time,account_id" }, token);
+    const row = await graphCall(campaignId, { fields: "id,name,objective,status,start_time,stop_time,account_id,daily_budget,lifetime_budget" }, token);
     return {
       id: String(row.id),
       name: String(row.name ?? "(sin nombre)"),
       objective: row.objective ? String(row.objective) : null,
       status: row.status ? String(row.status) : null,
       startedAt: row.start_time ? String(row.start_time) : null,
+      // Meta manda el dinero en céntimos y como texto.
+      dailyBudget: Number(row.daily_budget) > 0 ? Number(row.daily_budget) / 100 : null,
+      lifetimeBudget: Number(row.lifetime_budget) > 0 ? Number(row.lifetime_budget) / 100 : null,
       stoppedAt: row.stop_time ? String(row.stop_time) : null,
       accountId: String(row.account_id ?? "").replace(/^act_/, ""),
     };

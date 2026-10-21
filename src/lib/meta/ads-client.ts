@@ -19,6 +19,9 @@ export type MetaCampaign = {
   status: string | null;
   startedAt: string | null;
   stoppedAt: string | null;
+  /** Lo presupuestado en Meta, en euros. Una campaña tiene diario o total, nunca los dos. */
+  dailyBudget: number | null;
+  lifetimeBudget: number | null;
 };
 
 export type MetaDailyInsight = {
@@ -79,7 +82,17 @@ export async function graphCall(path: string, params: Record<string, string>, to
   return body;
 }
 
-const CAMPOS_CAMPANA = "id,name,objective,status,start_time,stop_time";
+const CAMPOS_CAMPANA = "id,name,objective,status,start_time,stop_time,daily_budget,lifetime_budget";
+
+/**
+ * Meta manda el dinero en la unidad pequeña de la moneda de la cuenta —céntimos
+ * para los euros— y como texto. Un "20000" son 200 €, no veinte mil.
+ */
+function aEuros(valor: unknown): number | null {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0 ? numero / 100 : null;
+}
 
 function aCampana(row: Record<string, unknown>): MetaCampaign {
   return {
@@ -89,7 +102,42 @@ function aCampana(row: Record<string, unknown>): MetaCampaign {
     status: row.status ? String(row.status) : null,
     startedAt: row.start_time ? String(row.start_time) : null,
     stoppedAt: row.stop_time ? String(row.stop_time) : null,
+    dailyBudget: aEuros(row.daily_budget),
+    lifetimeBudget: aEuros(row.lifetime_budget),
   };
+}
+
+/**
+ * El presupuesto de los conjuntos de anuncios, sumado por campaña.
+ *
+ * Hace falta porque en Meta el presupuesto puede estar puesto en la campaña o
+ * en sus conjuntos, y son excluyentes: si está en los conjuntos, la campaña
+ * devuelve sus dos campos vacíos y la ficha se quedaría sin presupuesto. La
+ * suma de los conjuntos es lo máximo que esa campaña puede gastar.
+ */
+export async function fetchAdsetBudgets(accountId: string, token: string): Promise<Map<string, { daily: number | null; lifetime: number | null }>> {
+  const filas = await getAll(`act_${accountId}/adsets`, {
+    fields: "campaign_id,daily_budget,lifetime_budget",
+    filtering: JSON.stringify([{
+      field: "adset.effective_status",
+      operator: "IN",
+      value: ["ACTIVE", "PAUSED", "DELETED", "ARCHIVED", "IN_PROCESS", "WITH_ISSUES"],
+    }]),
+  }, token);
+
+  const porCampana = new Map<string, { daily: number | null; lifetime: number | null }>();
+  for (const fila of filas) {
+    const campana = fila.campaign_id ? String(fila.campaign_id) : null;
+    if (!campana) continue;
+    const diario = aEuros(fila.daily_budget);
+    const total = aEuros(fila.lifetime_budget);
+    if (diario === null && total === null) continue;
+    const actual = porCampana.get(campana) ?? { daily: null, lifetime: null };
+    if (diario !== null) actual.daily = (actual.daily ?? 0) + diario;
+    if (total !== null) actual.lifetime = (actual.lifetime ?? 0) + total;
+    porCampana.set(campana, actual);
+  }
+  return porCampana;
 }
 
 /**

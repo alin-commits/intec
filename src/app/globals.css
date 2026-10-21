@@ -1776,6 +1776,8 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .sales-down { color: var(--danger); font-weight: 700; }
 .sales-capitalize { display: inline-block; }
 .sales-capitalize::first-letter { text-transform: uppercase; }
+.campaign-budget-over { color: #b91c1c; }
+
 /* La cartera de un comercial: familias de cada cliente y el interruptor de la lista */
 .familia-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .familia-chips .badge { font-size: 11px; }

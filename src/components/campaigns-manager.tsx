@@ -41,6 +41,8 @@ function campaignDate(campaign: Campaign): string {
 function backlogOf(campaignId: string, leads: LeadStub[]): number {
   return leads.filter((lead) => lead.campaignId === campaignId && !lead.assigned && !CLOSED_STATUSES.includes(lead.status)).length;
 }
+/** Lo presupuestado en la plataforma: o por día, o para toda la campaña. */
+type PresupuestoPlataforma = { diario: number | null; total: number | null };
 type AdsStub = { platform: AdsPlatform; campaignId: string | null; amountSpent: number; revenue: number; leads: number };
 
 function blankDraft(units: BusinessUnit[]): CampaignDraft {
@@ -138,6 +140,7 @@ export function CampaignsManager() {
   const [units, setUnits] = useState<BusinessUnit[]>(demoBusinessUnits);
   const [leads, setLeads] = useState<LeadStub[]>(() => demoLeads.map((lead) => ({ campaignId: lead.campaignId ?? null, status: lead.status, saleValue: lead.saleValue })));
   const [ads, setAds] = useState<AdsStub[]>([]);
+  const [presupuestoDeMeta, setPresupuestoDeMeta] = useState<Map<string, PresupuestoPlataforma>>(new Map());
   const [unitId, setUnitId] = useState("all");
   const [status, setStatus] = useState("all");
   const [query, setQuery] = useState("");
@@ -179,13 +182,15 @@ export function CampaignsManager() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { rows: adsRows, error: adsError }, { data: authData }, { data: campaignAssignees }, { data: leadAssignees }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { rows: adsRows, error: adsError }, { data: presupuestosMeta }, { data: authData }, { data: campaignAssignees }, { data: leadAssignees }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").order("sort_order"),
       supabase.from("campaigns").select("id, business_unit_id, name, channel, start_date, end_date, status, budget, notes, direct_sales_count, direct_sale_value, leads_assign_mode, created_at, updated_at").order("created_at", { ascending: false }),
       fetchAllPages((from, to) => supabase.from("leads").select("id, campaign_id, status, sale_value").order("id").range(from, to)),
       // El gasto no sale de lo que alguien escribió a mano: lo trae la capa
       // común de publicidad, que cruza cada campaña con la de su plataforma.
       loadAdsSpendByMonth(supabase),
+      // Y el presupuesto, tal como está puesto en la plataforma.
+      supabase.from("meta_campaigns").select("campaign_id, daily_budget, lifetime_budget").not("campaign_id", "is", null),
       supabase.auth.getUser(),
       supabase.from("campaign_assignees").select("campaign_id, profile_id").order("added_at"),
       // Solo para saber qué leads no lleva nadie (los que se pueden repartir).
@@ -218,6 +223,20 @@ export function CampaignsManager() {
       porCampana.set(clave, actual);
     }
     setAds([...porCampana.values()]);
+
+    // Una campaña de la aplicación puede tener varias de Meta atadas: sus
+    // presupuestos se suman, que es lo que puede gastar en total.
+    const presupuestos = new Map<string, PresupuestoPlataforma>();
+    for (const fila of presupuestosMeta ?? []) {
+      const destino = String(fila.campaign_id);
+      const actual = presupuestos.get(destino) ?? { diario: null, total: null };
+      const diario = fila.daily_budget === null || fila.daily_budget === undefined ? null : Number(fila.daily_budget);
+      const total = fila.lifetime_budget === null || fila.lifetime_budget === undefined ? null : Number(fila.lifetime_budget);
+      if (diario !== null) actual.diario = (actual.diario ?? 0) + diario;
+      if (total !== null) actual.total = (actual.total ?? 0) + total;
+      presupuestos.set(destino, actual);
+    }
+    setPresupuestoDeMeta(presupuestos);
     const user = authData.user;
     if (user) {
       const [{ data: profile }, { data: teamData }] = await Promise.all([
@@ -573,7 +592,27 @@ export function CampaignsManager() {
                 <div><span>Conversión</span><strong>{formatPercent(stats.conversion)}</strong></div>
               </div>
               <div className="campaign-card-footer">
-                <span>Presupuesto <strong>{campaign.budget ? currencyFormatter.format(campaign.budget) : "—"}</strong></span>
+                {(() => {
+                  // El presupuesto que vale es el de la plataforma, que es el que
+                  // de verdad limita el gasto; el escrito a mano se queda para las
+                  // campañas que no son de anuncios (una feria, un buzoneo).
+                  const dePlataforma = presupuestoDeMeta.get(campaign.id);
+                  const total = dePlataforma?.total ?? null;
+                  const diario = dePlataforma?.diario ?? null;
+                  const pasado = total !== null && adsStats.spend > total;
+                  if (total !== null || diario !== null) {
+                    return (
+                      <span title="Lo que hay puesto en la plataforma de anuncios. Se actualiza solo con cada sincronización.">
+                        Presupuesto{" "}
+                        <strong className={pasado ? "campaign-budget-over" : undefined}>
+                          {total !== null ? currencyFormatter.format(total) : `${currencyFormatter.format(diario as number)}/día`}
+                        </strong>
+                        <small className="muted"> · según Meta{pasado ? " · pasado" : ""}</small>
+                      </span>
+                    );
+                  }
+                  return <span>Presupuesto <strong>{campaign.budget ? currencyFormatter.format(campaign.budget) : "—"}</strong>{campaign.budget ? <small className="muted"> · a mano</small> : null}</span>;
+                })()}
                 <span>Valor total <strong>{currencyFormatter.format(stats.value)}</strong></span>
               </div>
               {campaign.directSalesCount > 0 || campaign.directSaleValue > 0 ? (
