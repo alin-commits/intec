@@ -724,7 +724,7 @@ export function ComprasView() {
                           title={fila.proveedorEmail ? `Escribir a ${fila.proveedorEmail}` : "Este proveedor no tiene correo en Sage"}
                           onClick={() => void prepararReclamacion(fila)}>Reclamar</button>
                       ) : null}
-                      {fila.contestado && fila.seguimiento?.proposed_on && !fila.seguimiento.confirmed_on ? (
+                      {fila.seguimiento?.proposed_on && !fila.seguimiento.confirmed_on ? (
                         <button type="button" className="button button-compact"
                           title={`Dar por buena la fecha del ${fila.seguimiento.proposed_on}`}
                           onClick={() => void aceptarFecha(fila)}>Aceptar {fila.seguimiento.proposed_on}</button>

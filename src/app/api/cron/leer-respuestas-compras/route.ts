@@ -120,15 +120,20 @@ export async function GET(request: Request) {
     // el proveedor sigue sin decir cuándo llega, así que se le sigue reclamando.
     if (tipo === "expedicion") {
       resumen.expediciones++;
+      // Si el aviso trae fecha clara —un preaviso de llegada, por ejemplo—, esa
+      // es la mejor fecha que va a dar este pedido: se propone igual que la de
+      // una respuesta escrita. Sigue haciendo falta que alguien la acepte.
       await admin.from("purchase_order_tracking").upsert(
         respuesta.orders.map((pedido) => ({
           company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
           shipping_notice: lectura?.resumen?.slice(0, 500) ?? "Aviso de expedición",
           shipping_notice_at: respuesta.correo.receivedAt,
+          ...(propuesta ? { proposed_on: propuesta, proposed_sure: true } : {}),
           updated_at: new Date().toISOString(),
         })),
         { onConflict: "company_code,year,series,number" },
       );
+      if (propuesta) resumen.conFecha++;
       continue;
     }
     if (tipo !== "respuesta") { resumen.automaticos++; continue; }

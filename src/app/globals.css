@@ -436,6 +436,15 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .table-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 .badge-select { font-size: 11px; font-weight: 750; }
 .recent-inquiries-actions { display: flex; gap: 8px; }
+/*
+  Pero una celda de tabla no puede ser flex: con display:flex el <td> deja de
+  ser celda, no se estira a lo alto de la fila y por debajo asoma el fondo de
+  la tabla. Se nota en las filas de color —una fila vencida salía roja a
+  trozos— y, cuando la celda está vacía, se queda en blanco entera. Sigue
+  siendo celda y los botones se separan con margen, que no necesita flex.
+*/
+td.recent-inquiries-actions { display: table-cell; white-space: nowrap; }
+td.recent-inquiries-actions > * + * { margin-left: 8px; }
 .summary-pill { display: flex; align-items: baseline; gap: 8px; padding: 12px 15px; border-radius: 12px; background: white; border: 1px solid var(--border); }
 .ticket-bulk-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 18px; border-color: var(--primary); background: var(--primary-soft); }
 .ticket-bulk-bar > span { font-size: 13px; color: var(--text); }
