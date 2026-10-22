@@ -63,7 +63,7 @@ test("seriesFor devuelve las series de un canal", () => {
 
 test("filterRows aplica todos los filtros menos los que se saltan", () => {
   const rows = [row("2026-08", 1, "TK", 5, 100), row("2026-09", 1, "CRE", 7, 200), row("2026-08", 2, "TK", 9, 50)];
-  const filters = { ...noFilters, month: "2026-08", channel: "Tienda" };
+  const filters = { ...noFilters, months: ["2026-08"], channel: "Tienda" };
   assert.equal(filterRows(rows, filters, repOf).length, 2);
   assert.equal(filterRows(rows, filters, repOf, ["month"]).length, 2);
   assert.equal(filterRows(rows, filters, repOf, ["channel"]).length, 2);
@@ -78,7 +78,7 @@ test("computeSalesModel: el mes filtra los totales pero no el gráfico ni se fil
     row("2026-08", 1, "CRE", 7, 700),
   ];
   const previousRows = [row("2025-08", 1, "TK", 5, 500)];
-  const model = computeSalesModel({ rows, previousRows, filters: { ...noFilters, month: "2026-08" }, period: yearView, companies, repOf });
+  const model = computeSalesModel({ rows, previousRows, filters: { ...noFilters, months: ["2026-08"] }, period: yearView, companies, repOf });
   assert.equal(model.current.net, 1000);
   assert.equal(model.previous.net, 500);
   // El gráfico enseña todos los meses para poder pulsar otro.
@@ -148,7 +148,7 @@ test("comparar con otras fechas: cada mes con su pareja y qué explica la difere
   assert.deepEqual(model.differences?.rep.map((item) => [item.label, item.change]), [["Ana Ruiz", 2500], ["Sergio Almodóvar Alcaraz", -1000]]);
   assert.deepEqual(model.differences?.channel.map((item) => item.key), ["Crédito", "Tienda"]);
   // Con un mes elegido se compara con su pareja.
-  const april = computeSalesModel({ rows, previousRows, filters: { ...noFilters, month: "2026-04" }, period, companies, repOf });
+  const april = computeSalesModel({ rows, previousRows, filters: { ...noFilters, months: ["2026-04"] }, period, companies, repOf });
   assert.equal(april.current.net, 3000);
   assert.equal(april.previous.net, 1000);
 });

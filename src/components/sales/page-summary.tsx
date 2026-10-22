@@ -6,21 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { CalendarIcon, ConsultasIcon, ConversionIcon, EuroIcon, TarjetasIcon, TrophyIcon, UsuariosIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import {
-  bucketMargin,
-  delta,
-  emptyBucket,
-  euros,
-  filterRows,
-  monthName,
-  sumRows,
-  targetsFor,
-  targetToDate,
-  tenths,
-  ticketFormatter,
-  UNASSIGNED_KEY,
-  variation,
-} from "@/lib/sales-model";
+import { UNASSIGNED_KEY, bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, monthName, soloUnMes, sumRows, targetToDate, targetsFor, tenths, ticketFormatter, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { lostCustomers, type SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals } from "./sales-queries";
@@ -45,13 +31,14 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const discountChange = currentDiscount && previousDiscount ? tenths(currentDiscount.percent - previousDiscount.percent) : null;
   const marginChange = marginDelta ? tenths(currentMargin.percent - previousMargin.percent) : null;
   const points = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} pts`;
-  const selectedMonthIndex = filters.month ? monthly.months.findIndex((month) => month.key === filters.month) : -1;
+  const selectedMonthIndex = soloUnMes(filters) ? monthly.months.findIndex((month) => month.key === soloUnMes(filters)) : -1;
 
   // El objetivo se compara con la venta de su ámbito (sociedad y comercial), sin
   // el filtro de canal: los objetivos no se ponen por canal. Son por año natural,
   // así que con otro periodo no se enseñan.
   const targetYear = period.year;
-  const monthIndex = filters.month ? Number(filters.month.slice(5, 7)) - 1 : null;
+  const unMes = soloUnMes(filters);
+  const monthIndex = unMes ? Number(unMes.slice(5, 7)) - 1 : null;
   const targetSoFar = targetYear !== null
     ? targetToDate(targetsFor(ctx.targets, targetYear, filters.company, filters.repKey), targetYear, today, monthIndex)
     : null;
@@ -66,7 +53,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
     // El último mes cerrado del periodo: el que va por la mitad no dice nada.
     const closed = period.basePartial ? period.months.slice(0, -1) : period.months;
-    const monthKey = filters.month ?? closed[closed.length - 1] ?? null;
+    const monthKey = filters.months[filters.months.length - 1] ?? closed[closed.length - 1] ?? null;
     const trustedFrom = trustedNewCustomersFrom(totals.data.firstMonth);
     const rows = totals.data.monthly.filter((row) => inCompany(row) && monthKey !== null && row.month.startsWith(monthKey));
     const dormant = snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.company);
@@ -90,7 +77,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     <div className="page-stack">
       <section className="kpi-grid kpi-grid-sales">
         <KpiCard
-          label={filters.month ? `Ventas de ${periodName}` : "Ventas"}
+          label={hayMesMarcado(filters) ? `Ventas de ${periodName}` : "Ventas"}
           value={euros(current.net)}
           helper={ctx.comparisonHelper}
           icon={<EuroIcon />}
@@ -150,14 +137,14 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             previous.documents ? previous.net / previous.documents : 0,
           ))}
         />
-        {!filters.month && monthly.currentMonth ? (
+        {!hayMesMarcado(filters) && monthly.currentMonth ? (
           <KpiCard
             label={`Va de ${monthName(monthly.currentMonth.key)}`}
             value={euros(monthly.currentMonth.bucket.net)}
             helper={currentPair ? `frente a los mismos días de ${monthName(currentPair)} de ${currentPair.slice(0, 4)}` : "lo que llevamos de mes"}
             icon={<CalendarIcon />}
             tone="sky"
-            onClick={() => ctx.setFilters({ month: monthly.currentMonth?.key ?? null })}
+            onClick={() => ctx.setFilters({ months: monthly.currentMonth ? [monthly.currentMonth.key] : [] })}
             actionLabel="Filtrar este mes"
             {...(currentPair ? delta(variation(monthly.currentMonth.bucket.net, monthly.currentMonth.beforeNet)) : { delta: "Sin comparación", positive: true })}
           />
@@ -182,7 +169,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
 
       <section className="sales-section">
         <div className="sales-section-heading">
-          <h2>Clientes {filters.month ? `de ${periodName}` : `en ${periodName}`}</h2>
+          <h2>Clientes {hayMesMarcado(filters) ? `de ${periodName}` : `en ${periodName}`}</h2>
           <p>Pulsa una cifra para ver quiénes son, con su teléfono y lo que compran.</p>
         </div>
         <div className="kpi-grid kpi-grid-sales">
@@ -325,7 +312,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             ariaLabel={`Evolución mensual de ventas de ${period.baseLabel}`}
             valueFormatter={euros}
             total={chartMode !== "acumulado"}
-            onSelect={(index) => ctx.toggle("month", monthly.months[index]?.key ?? null)}
+            onSelect={(index) => ctx.toggleMonth(monthly.months[index]?.key ?? null)}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />
         </article>

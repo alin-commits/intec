@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { bucketDiscount, euros, tenths, ticketFormatter, variation, yearlyView, type Bucket } from "@/lib/sales-model";
+import { bucketDiscount, euros, hayMesMarcado, tenths, ticketFormatter, type Bucket, variation, yearlyView } from "@/lib/sales-model";
 import type { SalesContext } from "./sales-context";
 import { DataTable, Panel, type Column } from "./sales-ui";
 
@@ -215,7 +215,7 @@ export function YearsPanels({ ctx }: { ctx: SalesContext }) {
     <>
       <Panel
         title="Año contra año"
-        subtitle={`La venta de cada mes, una línea por año${ctx.filters.month ? " (sin el filtro de mes)" : ""}. Donde un año no tiene datos, su línea se corta`}
+        subtitle={`La venta de cada mes, una línea por año${hayMesMarcado(ctx.filters) ? " (sin el filtro de mes)" : ""}. Donde un año no tiene datos, su línea se corta`}
         className="panel chart-panel sales-board-half"
       >
         <TrendChart data={view.points} series={view.series} ariaLabel="Venta mensual de cada año, uno encima de otro" valueFormatter={euros} />

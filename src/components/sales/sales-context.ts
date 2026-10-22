@@ -72,6 +72,14 @@ export type SalesContext = {
   setFilters: (patch: Partial<SalesFilters>) => void;
   /** Pone un filtro, o lo quita si ya estaba puesto con ese valor. */
   toggle: <K extends keyof SalesFilters>(key: K, value: SalesFilters[K]) => void;
+  /**
+   * Marca o desmarca un mes sin tocar los demás.
+   *
+   * Es lo que hace pulsar una barra del gráfico: con la tecla de mayúsculas
+   * —o pulsando otra barra— se van sumando, que es lo que uno espera de un
+   * filtro de varios. Pasar null los quita todos.
+   */
+  toggleMonth: (key: string | null) => void;
   companies: Company[];
   reps: Rep[];
   families: FamilyName[];

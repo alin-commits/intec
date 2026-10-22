@@ -38,11 +38,11 @@ export type SalesFilters = {
   company: number | null;
   channel: string | null;
   repKey: string | null;
-  /** "YYYY-MM" dentro del año elegido. */
-  month: string | null;
+  /** Los meses marcados ("YYYY-MM") dentro del periodo. Vacío: todos. */
+  months: string[];
   family: string | null;
 };
-export const noFilters: SalesFilters = { company: null, channel: null, repKey: null, month: null, family: null };
+export const noFilters: SalesFilters = { company: null, channel: null, repKey: null, months: [], family: null };
 
 /**
  * Las series de Sage son el canal de venta. Se nombran para que el panel no
@@ -187,6 +187,26 @@ export const monthLabel = (month: string, withYear: boolean) => {
 };
 /** "agosto de 2025", para las frases. */
 export const monthWithYear = (month: string) => `${monthName(month)} de ${month.slice(0, 4)}`;
+
+/**
+ * El mes marcado, cuando hay uno solo.
+ *
+ * Hay sitios que solo tienen sentido con un mes —"las ventas de agosto frente
+ * a las de agosto del año pasado"— y con varios marcados no dicen nada: ahí se
+ * pregunta por este y, si viene vacío, se enseña lo del periodo entero.
+ */
+export const soloUnMes = (filters: SalesFilters) => (filters.months.length === 1 ? filters.months[0] : null);
+
+/** Si hay algún mes marcado. */
+export const hayMesMarcado = (filters: SalesFilters) => filters.months.length > 0;
+
+/** Si una fila entra con los meses marcados. Sin ninguno marcado, entran todas. */
+export const mesMarcado = (filters: SalesFilters, month: string) =>
+  filters.months.length === 0 || filters.months.includes(month);
+
+/** Las parejas de los meses marcados en la comparación. */
+export const parejasDe = (filters: SalesFilters, offset: number | null) =>
+  (offset === null ? [] : filters.months.map((month) => shiftMonth(month, offset)));
 /** "de 2025", pero "del mismo tramo de 2025". */
 const ofPhrase = (versus: string) => (versus.startsWith("el ") ? `del ${versus.slice(3)}` : `de ${versus}`);
 
@@ -318,14 +338,14 @@ export function filterRows(
   filters: SalesFilters,
   repOf: (companyCode: number, repCode: number | null) => RepIdentity,
   skip: Dimension[] = [],
-  monthOverride?: string | null,
+  monthsOverride?: string[],
 ): SummaryRow[] {
-  const month = monthOverride !== undefined ? monthOverride : filters.month;
+  const months = monthsOverride ?? filters.months;
   return rows.filter((row) => {
     if (!skip.includes("company") && filters.company !== null && row.company_code !== filters.company) return false;
     if (!skip.includes("channel") && filters.channel !== null && channelLabel(row.series) !== filters.channel) return false;
     if (!skip.includes("rep") && filters.repKey !== null && repOf(row.company_code, row.rep_code).key !== filters.repKey) return false;
-    if (!skip.includes("month") && month !== null && row.month !== month) return false;
+    if (!skip.includes("month") && months.length > 0 && !months.includes(row.month)) return false;
     return true;
   });
 }
@@ -402,13 +422,13 @@ export function computeSalesModel(input: {
   repOf: (companyCode: number, repCode: number | null) => RepIdentity;
 }) {
   const { rows, previousRows, filters, period, companies, repOf } = input;
-  const pairMonth = pairOf(filters.month, period.monthOffset);
+  const pairMonths = parejasDe(filters, period.monthOffset);
   // Sin una comparación válida del total, el "antes" se queda vacío y las
   // flechas dicen "Sin comparación". Mes a mes se sigue comparando lo que haya.
   const comparedRows = period.comparable ? previousRows : [];
 
   const visible = filterRows(rows, filters, repOf);
-  const visibleBefore = filterRows(comparedRows, filters, repOf, [], pairMonth);
+  const visibleBefore = filterRows(comparedRows, filters, repOf, [], pairMonths.length > 0 ? pairMonths : undefined);
   const current = sumRows(visible);
   const previous = sumRows(visibleBefore);
   const currentMargin = bucketMargin(current);
@@ -506,7 +526,7 @@ export function computeSalesModel(input: {
 
   // ---- Por comercial: sin el filtro de comercial ----
   const forReps = filterRows(rows, filters, repOf, ["rep"]);
-  const forRepsBefore = filterRows(comparedRows, filters, repOf, ["rep"], pairMonth);
+  const forRepsBefore = filterRows(comparedRows, filters, repOf, ["rep"], pairMonths.length > 0 ? pairMonths : undefined);
   const repMap = new Map<string, { name: string; assigned: boolean; isPerson: boolean; bucket: Bucket }>();
   for (const row of forReps) {
     const who = repOf(row.company_code, row.rep_code);
@@ -565,7 +585,7 @@ export function computeSalesModel(input: {
     const desde = period.versus ?? "";
     // Solo se compara a quien ya vendía: el que empezó este año no "cae" ni "sube".
     const comparables = byRep
-      .filter((rep) => rep.isPerson && rep.beforeNet > (filters.month ? 5000 : 50000))
+      .filter((rep) => rep.isPerson && rep.beforeNet > (hayMesMarcado(filters) ? 5000 : 50000))
       .map((rep) => ({ rep, change: ((rep.bucket.net - rep.beforeNet) / rep.beforeNet) * 100 }));
     for (const { rep, change } of comparables.filter((item) => item.change <= -15).sort((a, b) => a.change - b.change).slice(0, 2)) {
       findings.push({ tone: "bad", filter: { repKey: rep.key }, text: `${rep.name} vende un ${formatPercent(Math.abs(change))} menos que en ${desde}: ${euros(rep.bucket.net)} frente a ${euros(rep.beforeNet)}.` });
@@ -637,7 +657,7 @@ export function computeSalesModel(input: {
     // años. Lo que importa es el mes que vende menos que su pareja (el mismo
     // mes del año pasado, si se compara con él). El mes en curso se deja fuera
     // porque va por la mitad.
-    if (!filters.month) {
+    if (!hayMesMarcado(filters)) {
       const ongoing = period.basePartial ? months.length - 1 : months.length;
       months
         .filter((month) => month.index < ongoing && month.pair !== null && month.beforeNet > 0 && month.bucket.net > 0)
@@ -647,7 +667,7 @@ export function computeSalesModel(input: {
         .slice(0, 1)
         .forEach(({ month, change }) => findings.push({
           tone: "bad",
-          filter: { month: month.key },
+          filter: { months: [month.key] },
           text: `En ${monthWithYear(month.key)} se vendió un ${formatPercent(Math.abs(change))} menos que en ${monthWithYear(month.pair ?? month.key)}: ${euros(month.bucket.net)} frente a ${euros(month.beforeNet)}.`,
         }));
     }
@@ -679,12 +699,12 @@ export function computeSalesModel(input: {
         }),
         channel: differencesOf(
           filterRows(rows, filters, repOf, ["channel"]),
-          filterRows(comparedRows, filters, repOf, ["channel"], pairMonth),
+          filterRows(comparedRows, filters, repOf, ["channel"], pairMonths.length > 0 ? pairMonths : undefined),
           (row) => ({ key: channelLabel(row.series), label: channelLabel(row.series) }),
         ),
         company: differencesOf(
           filterRows(rows, filters, repOf, ["company"]),
-          filterRows(comparedRows, filters, repOf, ["company"], pairMonth),
+          filterRows(comparedRows, filters, repOf, ["company"], pairMonths.length > 0 ? pairMonths : undefined),
           (row) => ({ key: String(row.company_code), label: companies.find((company) => company.code === row.company_code)?.name ?? `Sociedad ${row.company_code}` }),
         ),
       }

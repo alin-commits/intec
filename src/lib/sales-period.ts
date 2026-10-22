@@ -33,6 +33,18 @@ export type SalesPeriod = {
   baseCompare: DateRange | null;
   /** Los meses del periodo entero ("2026-08"). */
   months: string[];
+  /**
+   * Los meses marcados, en orden. Vacío es "todos los del periodo".
+   *
+   * Lo que se mira va de `from` a `to`, que es el tramo que los abarca; si hay
+   * huecos —enero y julio, sin lo de en medio— ese tramo trae de más, y
+   * entonces hay que filtrar por esta lista. `scattered` lo dice.
+   */
+  selectedMonths: string[];
+  /** La pareja de cada mes marcado en la comparación, en el mismo orden. */
+  compareMonths: string[];
+  /** Si los meses marcados dejan huecos: el tramo de fechas no basta. */
+  scattered: boolean;
   /** Cuántos meses hay que mover un mes para dar con su pareja en la comparación. */
   monthOffset: number | null;
   compareKind: CompareChoice["kind"];
@@ -150,6 +162,29 @@ export const monthPhrase = (month: string, withYear: boolean) => {
 };
 
 /**
+ * Cómo se llaman varios meses juntos.
+ *
+ * Seguidos se dicen como un tramo —"enero–marzo de 2026"—, y sueltos se
+ * enumeran, que es lo que uno ha marcado. Pasados unos cuantos, enumerarlos no
+ * cabe en ninguna etiqueta y se dice cuántos son: quien marcó siete meses ya
+ * sabe cuáles.
+ */
+export const monthListPhrase = (meses: string[], sueltos: boolean, conAno: boolean) => {
+  if (meses.length === 0) return "";
+  if (meses.length === 1) return monthPhrase(meses[0], conAno);
+  const ano = meses[0].slice(0, 4);
+  const mismoAno = meses.every((mes) => mes.slice(0, 4) === ano);
+  const cola = conAno && mismoAno ? ` de ${ano}` : "";
+  if (!sueltos) {
+    const nombre = (mes: string) => (conAno && !mismoAno ? monthPhrase(mes, true) : monthLong[Number(mes.slice(5, 7)) - 1] ?? mes);
+    return `${nombre(meses[0])}–${nombre(meses[meses.length - 1])}${cola}`;
+  }
+  if (meses.length > 4) return `${meses.length} meses${cola}`;
+  const nombres = meses.map((mes) => (conAno && !mismoAno ? monthPhrase(mes, true) : monthLong[Number(mes.slice(5, 7)) - 1] ?? mes));
+  return `${nombres.slice(0, -1).join(", ")} y ${nombres[nombres.length - 1]}${cola}`;
+};
+
+/**
  * El periodo que se mira y con qué se compara.
  *
  * - Un año en curso acaba hoy y se compara con el mismo tramo del anterior: si
@@ -166,11 +201,12 @@ export const monthPhrase = (month: string, withYear: boolean) => {
 export function resolvePeriod(input: {
   choice: PeriodChoice;
   compare: CompareChoice;
-  month: string | null;
+  /** Los meses marcados. Vacío o sin pasar: el periodo entero. */
+  months?: string[];
   today: Date;
   dataFrom: string | null;
 }): SalesPeriod {
-  const { choice, month, today } = input;
+  const { choice, today } = input;
   const todayKey = dateKey(today);
   const floor = input.dataFrom ?? "2000-01-01";
 
@@ -218,19 +254,40 @@ export function resolvePeriod(input: {
     ? (compare.kind === "year" ? -12 : monthIndex(baseCompare.from) - monthIndex(base.from))
     : null;
 
-  // ---- El mes elegido ----
+  // ---- Los meses marcados ----
   const months = monthsBetween(base.from, base.to);
-  const chosen = month && months.includes(month) ? month : null;
+  // Solo cuentan los que existen en el periodo: marcar marzo y cambiar a un
+  // año que no lo tiene no debe dejar el panel en blanco.
+  const chosenMonths = [...new Set(input.months ?? [])].filter((item) => months.includes(item)).sort();
+  // Marcarlos todos es no filtrar nada, y así los nombres no dicen
+  // "doce meses de 2026" donde antes decían "2026".
+  const selectedMonths = chosenMonths.length === months.length ? [] : chosenMonths;
+  const first = selectedMonths[0];
+  const last = selectedMonths[selectedMonths.length - 1];
+  const scattered = selectedMonths.length > 1
+    && monthsBetween(`${first}-01`, `${last}-01`).length !== selectedMonths.length;
+
+  /** La pareja de un mes en la comparación. */
+  const pairOf = (item: string) => (compare.kind === "year" ? shiftMonth(item, -12) : shiftMonth(item, monthOffset ?? 0));
+  const compareMonths = baseCompare && selectedMonths.length > 0 && (compare.kind === "year" || monthOffset !== null)
+    ? selectedMonths.map(pairOf)
+    : [];
+
   let effective: DateRange = base;
   let effectiveCompare: DateRange | null = baseCompare;
-  if (chosen) {
-    effective = { from: maxKey(`${chosen}-01`, base.from), to: minKey(monthEnd(chosen), base.to) };
+  if (selectedMonths.length > 0) {
+    effective = { from: maxKey(`${first}-01`, base.from), to: minKey(monthEnd(last), base.to) };
     if (baseCompare && compare.kind === "year") {
       effectiveCompare = { from: sameDayYearBefore(effective.from), to: sameDayYearBefore(effective.to) };
     } else if (baseCompare && monthOffset !== null) {
-      const pair = shiftMonth(chosen, monthOffset);
-      const pairFrom = maxKey(`${pair}-01`, baseCompare.from);
-      const pairTo = minKey(minKey(addDays(pairFrom, dayCount(effective.from, effective.to) - 1), monthEnd(pair)), baseCompare.to);
+      const pairFirst = shiftMonth(first, monthOffset);
+      const pairLast = shiftMonth(last, monthOffset);
+      const pairFrom = maxKey(`${pairFirst}-01`, baseCompare.from);
+      const vaPorLaMitad = effective.to === todayKey;
+      const hasta = vaPorLaMitad
+        ? addDays(pairFrom, dayCount(effective.from, effective.to) - 1)
+        : monthEnd(pairLast);
+      const pairTo = minKey(minKey(hasta, monthEnd(pairLast)), baseCompare.to);
       effectiveCompare = pairFrom <= pairTo ? { from: pairFrom, to: pairTo } : null;
     }
   }
@@ -253,13 +310,20 @@ export function resolvePeriod(input: {
     : choice.kind === "all" ? "todos los años"
       : choice.kind === "last12" ? "los últimos 12 meses"
         : rangeLabel(base.from, base.to);
-  const label = chosen ? monthPhrase(chosen, multiYear || choice.kind !== "year") : baseLabel;
+  const conAno = multiYear || choice.kind !== "year";
+  const label = selectedMonths.length === 0
+    ? baseLabel
+    : selectedMonths.length === 1
+      ? monthPhrase(selectedMonths[0], conAno)
+      : monthListPhrase(selectedMonths, scattered, conAno);
   let versus: string | null = null;
   if (effectiveCompare) {
-    if (compare.kind === "year" && choice.kind === "year" && !chosen) {
+    if (compare.kind === "year" && choice.kind === "year" && selectedMonths.length === 0) {
       versus = partial ? `el mismo tramo de ${choice.year - 1}` : String(choice.year - 1);
-    } else if (compare.kind === "year" && chosen) {
-      versus = monthPhrase(shiftMonth(chosen, -12), true);
+    } else if (compare.kind === "year" && selectedMonths.length === 1) {
+      versus = monthPhrase(shiftMonth(selectedMonths[0], -12), true);
+    } else if (compare.kind === "year" && compareMonths.length > 1) {
+      versus = monthListPhrase(compareMonths, scattered, true);
     } else {
       versus = rangeLabel(effectiveCompare.from, effectiveCompare.to);
     }
@@ -273,13 +337,18 @@ export function resolvePeriod(input: {
     basePartial: base.to === todayKey,
     baseCompare,
     months,
+    selectedMonths,
+    compareMonths,
+    scattered,
     monthOffset,
     compareKind: compare.kind,
     year: choice.kind === "year" ? choice.year : null,
     multiYear,
     label,
     baseLabel,
-    shortLabel: choice.kind === "year" && !chosen && !partial ? String(choice.year) : shortRange(effective.from, effective.to),
+    shortLabel: choice.kind === "year" && selectedMonths.length === 0 && !partial
+      ? String(choice.year)
+      : scattered ? `${selectedMonths.length} meses` : shortRange(effective.from, effective.to),
     versus,
     compareShort: effectiveCompare ? shortRange(effectiveCompare.from, effectiveCompare.to) : null,
     baseCompareShort: baseCompare ? shortRange(baseCompare.from, baseCompare.to) : null,

@@ -5,7 +5,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { TrophyIcon, EuroIcon, CalendarIcon } from "@/components/icons";
 import { formatPercent } from "@/lib/format";
-import { euros, filterRows, groupRows, monthLongNames, monthNames, targetsFor, targetToDate, type SummaryRow } from "@/lib/sales-model";
+import { euros, filterRows, groupRows, monthLongNames, monthNames, soloUnMes, targetToDate, targetsFor, type SummaryRow } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
 import type { SalesContext } from "./sales-context";
@@ -67,7 +67,8 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   const realRows = filterRows(ctx.rows, filters, ctx.repOf, ["channel", "month"]);
   const realByMonth = groupRows(realRows, (row) => row.month);
   const real = Array.from({ length: 12 }, (_, index) => realByMonth.get(`${shownYear}-${String(index + 1).padStart(2, "0")}`)?.net ?? 0);
-  const monthIndex = filters.month ? Number(filters.month.slice(5, 7)) - 1 : null;
+  const unMes = soloUnMes(filters);
+  const monthIndex = unMes ? Number(unMes.slice(5, 7)) - 1 : null;
   const soFar = targetToDate(months, shownYear, today, monthIndex);
   const realSoFar = soFar ? soFar.months.reduce((sum, key) => sum + (realByMonth.get(key)?.net ?? 0), 0) : 0;
   const yearTarget = months.reduce<number>((sum, value) => sum + (value ?? 0), 0);
@@ -164,7 +165,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
     <div className="page-stack">
       <section className="kpi-grid kpi-grid-sales">
         <KpiCard
-          label={filters.month ? `Cumplimiento de ${monthLongNames[monthIndex ?? 0]}` : "Cumplimiento a hoy"}
+          label={monthIndex !== null ? `Cumplimiento de ${monthLongNames[monthIndex]}` : "Cumplimiento a hoy"}
           value={soFar ? formatPercent((realSoFar / Math.max(soFar.target, 1)) * 100) : "Sin objetivo"}
           helper={soFar ? `${euros(realSoFar)} de ${euros(soFar.target)}` : "escribe el objetivo abajo"}
           icon={<TrophyIcon />}
@@ -196,7 +197,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
             ]}
             ariaLabel={`Ventas acumuladas contra objetivo en ${shownYear}`}
             total={false}
-            onSelect={(index) => index <= lastMonthIndex && ctx.toggle("month", `${shownYear}-${String(index + 1).padStart(2, "0")}`)}
+            onSelect={(index) => index <= lastMonthIndex && ctx.toggleMonth(`${shownYear}-${String(index + 1).padStart(2, "0")}`)}
             selectedIndex={monthIndex}
           />
         </Panel>

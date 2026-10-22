@@ -1843,6 +1843,31 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 */
 .texto-pendiente { color: #b45309; font-weight: 750; }
 
+/*
+  El filtro de varias opciones con casillas (meses, comerciales).
+
+  El botón imita a los <select> de la barra de filtros para que no desentone,
+  y el panel se abre colgando de él. Ancho mínimo generoso: un panel que baila
+  de ancho según lo que marcas se lee fatal.
+*/
+.multi-select { position: relative; display: grid; gap: 6px; min-width: 0; }
+.multi-select-label { color: var(--muted); font-size: 12px; font-weight: 700; }
+.multi-select-boton { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
+.multi-select-boton:hover { border-color: #cbd2e4; }
+.multi-select-boton.abierto, .multi-select-boton:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.multi-select-resumen { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multi-select-resumen.vacio { color: var(--muted); font-weight: 600; }
+.multi-select-flecha { flex-shrink: 0; width: 0; height: 0; border-top: 5px solid currentColor; border-left: 4px solid transparent; border-right: 4px solid transparent; opacity: .5; }
+.multi-select-panel { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; min-width: 240px; max-width: 320px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: white; box-shadow: 0 16px 40px rgba(15,23,42,.16); }
+.multi-select-buscador { width: 100%; min-height: 34px; margin-bottom: 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; }
+.multi-select-acciones { display: flex; gap: 14px; padding: 0 2px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.multi-select-lista { max-height: 300px; overflow-y: auto; padding-top: 6px; }
+.multi-select-grupo { margin: 8px 0 4px; padding: 0 2px; color: var(--muted); font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }
+.multi-select-opcion { display: flex; align-items: center; gap: 9px; padding: 6px 6px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.multi-select-opcion:hover { background: var(--surface-muted); }
+.multi-select-opcion input { width: 15px; height: 15px; flex-shrink: 0; accent-color: var(--primary); cursor: pointer; }
+.multi-select-vacio { margin: 10px 2px; color: var(--muted); font-size: 12.5px; }
+
 /* Una etiqueta dentro de una celda apilada no se estira a lo ancho de ella. */
 .sales-article > .badge { justify-self: start; }
 

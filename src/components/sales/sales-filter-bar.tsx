@@ -3,6 +3,7 @@
 import type { SalesFilters } from "@/lib/sales-model";
 import { isDateKey, rangeLabel, sameDayYearBefore, type CompareChoice, type PeriodChoice, type SalesPeriod } from "@/lib/sales-period";
 import type { SalesDimension } from "./sales-context";
+import { MultiSelect } from "@/components/ui/multi-select";
 
 /*
   La barra de filtros común a todas las páginas de Ventas. Lo mismo que se
@@ -25,6 +26,7 @@ export function SalesFilterBar({
   compare,
   onCompare,
   chosen,
+  aplicado,
   yearOptions,
   minDate,
   maxDate,
@@ -42,6 +44,8 @@ export function SalesFilterBar({
 }: {
   choice: PeriodChoice;
   onChoice: (choice: PeriodChoice) => void;
+  /** El periodo con los meses marcados ya aplicados, para la frase de abajo. */
+  aplicado?: SalesPeriod;
   compare: CompareChoice;
   onCompare: (compare: CompareChoice) => void;
   /** El periodo que se está eligiendo, ya resuelto: de ahí salen las fechas de partida. */
@@ -96,8 +100,19 @@ export function SalesFilterBar({
 
   // Qué se compara con qué, dicho con palabras y con las fechas de verdad.
   const summary = (() => {
-    const what = rangeLabel(chosen.base.from, chosen.base.to);
+    /*
+      Con meses marcados, esta frase tiene que hablar de ellos. Decir "miras
+      todo 2026" mientras las tarjetas enseñan septiembre y octubre es la clase
+      de detalle por el que luego nadie se fía de un panel.
+    */
+    const conMeses = aplicado && aplicado.selectedMonths.length > 0;
+    const what = conMeses
+      ? `${aplicado.label}${aplicado.scattered ? " (meses sueltos)" : ""}`
+      : rangeLabel(chosen.base.from, chosen.base.to);
     if (all) return `Miras todas las ventas de Sage: ${what}. Sin comparación, porque antes no hay nada.`;
+    if (conMeses && aplicado.compare) return `Miras ${what} y lo comparas con ${aplicado.versus ?? rangeLabel(aplicado.compare.from, aplicado.compare.to)}.`;
+    if (conMeses && aplicado.compareNote) return `Miras ${what}. No se compara: ${aplicado.compareNote}.`;
+    if (conMeses) return `Miras ${what}, sin comparar.`;
     if (chosen.compare) return `Miras ${what} y lo comparas con ${rangeLabel(chosen.compare.from, chosen.compare.to)}.`;
     if (chosen.compareNote) {
       return `Miras ${what}. El total no se compara (${chosen.compareNote})${chosen.baseCompare ? ", pero mes a mes sí" : ""}.`;
@@ -146,14 +161,24 @@ export function SalesFilterBar({
       <p className="sales-period-summary">{summary}</p>
 
       <div className="sales-filter-fields">
-        <label>
-          <span>Mes</span>
-          <select value={requested.month ?? ""} onChange={(event) => onChange({ month: event.target.value || null })}>
-            <option value="">{choice.kind === "year" ? "Todo el año" : "Todo el periodo"}</option>
-            {requested.month && !monthOptions.some((option) => option.value === requested.month) ? <option value={requested.month}>{requested.month}</option> : null}
-            {monthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        {/*
+          Varios meses a la vez: marcar un trimestre o dos semestres sueltos es
+          lo normal, y de uno en uno obligaba a mirar cuatro veces y sumar a mano.
+        */}
+        <MultiSelect
+          label="Meses"
+          opciones={monthOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+            // Agrupados por año solo cuando hay varios: dentro de un año el
+            // encabezado repetido no dice nada.
+            grupo: chosen.multiYear ? option.value.slice(0, 4) : undefined,
+          }))}
+          seleccionadas={requested.months}
+          onChange={(months: string[]) => onChange({ months: [...months].sort() })}
+          textoVacio={choice.kind === "year" ? "Todo el año" : "Todo el periodo"}
+          nombrarHasta={3}
+        />
         <label>
           <span>Sociedad</span>
           <select value={requested.company ?? ""} onChange={(event) => onChange({ company: event.target.value ? Number(event.target.value) : null })}>

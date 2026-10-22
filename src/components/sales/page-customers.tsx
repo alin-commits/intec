@@ -7,7 +7,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, RefreshIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { discountPercent, euros, monthLabel, monthName, monthWithYear, pairOf, ticketFormatter, variation, delta } from "@/lib/sales-model";
+import { delta, discountPercent, euros, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, ticketFormatter, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
@@ -188,7 +188,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
     await rpcAllRows<CustomerRow>("sage_customer_list", listArgs, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]));
 
   const monthKeys = period.months;
-  const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;
+  const selectedMonthIndex = soloUnMes(filters) ? monthKeys.indexOf(soloUnMes(filters)!) : -1;
   const periodName = ctx.periodName;
   const lost = lostCustomers(period);
   const pair = (key: string) => pairOf(key, period.monthOffset) ?? "";
@@ -344,7 +344,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
               ]}
               ariaLabel={`Clientes por mes en ${period.baseLabel}`}
               total={false}
-              onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
+              onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />
           )}
@@ -366,8 +366,8 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
               valueLabel: numberFormatter.format(points[index].activos),
               extra: newTrusted(key) ? `+${numberFormatter.format(points[index].nuevos)}` : "",
             })).reverse()}
-            activeKey={filters.month}
-            onSelect={(key) => ctx.toggle("month", key)}
+            activeKey={soloUnMes(filters)}
+            onSelect={(key) => ctx.toggleMonth(key)}
             empty="Sin clientes en este periodo."
           />
         </Panel>

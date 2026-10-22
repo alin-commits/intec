@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ClockIcon, ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { leadStatusLabels } from "@/lib/constants";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { channelLabel, euros, monthLabel, monthWithYear, UNASSIGNED_KEY } from "@/lib/sales-model";
+import { UNASSIGNED_KEY, channelLabel, euros, mesMarcado, monthLabel, monthWithYear, soloUnMes } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
@@ -86,12 +86,12 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
     if (filters.company !== null && row.company_code !== filters.company) return false;
     if (!skip.includes("channel") && filters.channel !== null && channelLabel(row.series) !== filters.channel) return false;
     if (!skip.includes("rep") && filters.repKey !== null && ctx.repOf(row.company_code, row.rep_code).key !== filters.repKey) return false;
-    if (!skip.includes("month") && filters.month !== null && row.month !== filters.month) return false;
+    if (!skip.includes("month") && !mesMarcado(filters, row.month)) return false;
     return true;
   };
 
   const monthKeys = period.months;
-  const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;
+  const selectedMonthIndex = soloUnMes(filters) ? monthKeys.indexOf(soloUnMes(filters)!) : -1;
   const periodName = ctx.periodName;
 
   // ---- Ofertas ----
@@ -286,7 +286,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
             ]}
             ariaLabel={`Ofertas y pedidos por mes en ${period.baseLabel}`}
             valueFormatter={euros}
-            onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
+            onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />
           {beforeRecords ? (

@@ -2,25 +2,7 @@
 
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import {
-  bucketDiscount,
-  bucketMargin,
-  channelLabel,
-  emptyBucket,
-  euros,
-  filterRows,
-  groupRows,
-  mergeBucket,
-  monthName,
-  monthWithYear,
-  pairOf,
-  tenths,
-  ticketFormatter,
-  UNASSIGNED_KEY,
-  variation,
-  type Bucket,
-  type SummaryRow,
-} from "@/lib/sales-model";
+import { UNASSIGNED_KEY, bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, filterRows, groupRows, hayMesMarcado, mergeBucket, monthName, monthWithYear, pairOf, parejasDe, soloUnMes, tenths, ticketFormatter, type Bucket, type SummaryRow, variation } from "@/lib/sales-model";
 import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -58,13 +40,13 @@ const commissionCell = (bucket: Bucket) => (bucket.commission ? euros(bucket.com
 
 export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const { model, filters, period } = ctx;
-  const pairMonth = pairOf(filters.month, period.monthOffset);
+  const pairMonths = parejasDe(filters, period.monthOffset);
   /** Mes a mes se compara si hay algo cargado al lado, aunque el total no se pueda comparar. */
   const monthCompared = period.baseCompare !== null;
 
   // Canales con su venta del periodo con el que se compara, para la columna de variación.
   const channelNow = model.byChannel.buckets;
-  const channelBefore = groupRows(filterRows(ctx.comparisonAvailable ? ctx.previousRows : [], filters, ctx.repOf, ["channel"], pairMonth), (row) => channelLabel(row.series));
+  const channelBefore = groupRows(filterRows(ctx.comparisonAvailable ? ctx.previousRows : [], filters, ctx.repOf, ["channel"], pairMonths.length > 0 ? pairMonths : undefined), (row) => channelLabel(row.series));
   const channels = [...channelNow]
     .filter(([label]) => model.byChannel.real.has(label) || (channelNow.get(label)?.net ?? 0) !== 0)
     .map(([label, bucket]) => ({ label, bucket, before: channelBefore.get(label)?.net ?? 0 }));
@@ -124,7 +106,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     <div className="page-stack">
       <MarginNotices ctx={ctx} />
 
-      {filters.month ? <DailyPanel ctx={ctx} /> : null}
+      {soloUnMes(filters) ? <DailyPanel ctx={ctx} /> : null}
 
       <section className="sales-board">
         <Panel
@@ -136,8 +118,8 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
             rows={model.monthly.months}
             columns={monthColumns}
             rowKey={(row) => row.key}
-            activeKey={filters.month}
-            onRowClick={(row) => ctx.toggle("month", row.key)}
+            activeKey={soloUnMes(filters)}
+            onRowClick={(row) => ctx.toggleMonth(row.key)}
             footer={model.monthly.months.length > 1 ? (
               <tr>
                 <td className="is-text"><strong>Total</strong></td>
@@ -160,7 +142,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
         <Panel
           title="Comerciales"
-          subtitle={`Venta, margen, descuento (Dto., rebaja sobre tarifa) y ticket de cada uno${filters.month ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
+          subtitle={`Venta, margen, descuento (Dto., rebaja sobre tarifa) y ticket de cada uno${hayMesMarcado(filters) ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
           className="panel table-panel sales-board-half"
         >
           <DataTable
@@ -176,7 +158,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
 
         <Panel
           title="Canales"
-          subtitle={`Venta y margen por canal${filters.month ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
+          subtitle={`Venta y margen por canal${hayMesMarcado(filters) ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
           className="panel table-panel sales-board-half"
         >
           <DataTable

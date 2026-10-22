@@ -15,7 +15,11 @@ import {
 const today = new Date(2026, 8, 30);
 const dataFrom = "2022-08-01";
 const resolve = (choice: PeriodChoice, compare: CompareChoice = { kind: "year" }, month: string | null = null, when = today, floor = dataFrom) =>
-  resolvePeriod({ choice, compare, month, today: when, dataFrom: floor });
+  resolvePeriod({ choice, compare, months: month ? [month] : [], today: when, dataFrom: floor });
+
+/** Para las pruebas de varios meses marcados. */
+const resolveMeses = (choice: PeriodChoice, meses: string[], compare: CompareChoice = { kind: "year" }, when = today, floor = dataFrom) =>
+  resolvePeriod({ choice, compare, months: meses, today: when, dataFrom: floor });
 
 test("el año en curso acaba hoy y se compara con el mismo tramo del anterior", () => {
   const period = resolve({ kind: "year", year: 2026 });
@@ -144,4 +148,78 @@ test("el periodo va y vuelve de la dirección de la página", () => {
   periodToParams(current, { kind: "year", year: 2026 }, { kind: "year" }, 2026);
   assert.equal(current.toString(), "", "lo de siempre no ensucia la dirección");
   assert.equal(periodFromParams(new URLSearchParams("d=2026-02-30~2026-03-01")).choice, null, "una fecha que no existe no vale");
+});
+
+// ---- Varios meses marcados ----
+
+test("tres meses seguidos se miran juntos y se comparan con los suyos del año anterior", () => {
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-01", "2026-02", "2026-03"]);
+  assert.equal(period.from, "2026-01-01");
+  assert.equal(period.to, "2026-03-31");
+  assert.equal(period.scattered, false);
+  assert.deepEqual(period.selectedMonths, ["2026-01", "2026-02", "2026-03"]);
+  assert.deepEqual(period.compareMonths, ["2025-01", "2025-02", "2025-03"]);
+  assert.deepEqual(period.compare, { from: "2025-01-01", to: "2025-03-31" });
+  assert.equal(period.label, "enero–marzo");
+  assert.equal(period.versus, "enero–marzo de 2025");
+});
+
+test("meses sueltos se avisan: el tramo de fechas trae de más", () => {
+  // Enero y julio van de 2026-01-01 a 2026-07-31, que incluye cinco meses que
+  // nadie marcó. Quien use el tramo tiene que saber que no basta.
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-01", "2026-07"]);
+  assert.equal(period.scattered, true);
+  assert.deepEqual(period.selectedMonths, ["2026-01", "2026-07"]);
+  assert.deepEqual(period.compareMonths, ["2025-01", "2025-07"]);
+  assert.equal(period.label, "enero y julio");
+  assert.equal(period.shortLabel, "2 meses");
+});
+
+test("marcarlos todos es no filtrar nada", () => {
+  // Si no, el panel diría "doce meses de 2026" donde siempre dijo "2026".
+  const todos = Array.from({ length: 9 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`);
+  const period = resolveMeses({ kind: "year", year: 2026 }, todos);
+  assert.deepEqual(period.selectedMonths, []);
+  assert.equal(period.label, "2026");
+});
+
+test("un mes que no existe en el periodo se ignora, no deja el panel en blanco", () => {
+  // Se marca marzo de 2026 y luego se cambia a 2025: ese mes no está.
+  const period = resolveMeses({ kind: "year", year: 2025 }, ["2026-03", "2025-05"]);
+  assert.deepEqual(period.selectedMonths, ["2025-05"]);
+  assert.equal(period.label, "mayo");
+});
+
+test("y se ordenan y no se repiten, da igual cómo se marquen", () => {
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-03", "2026-01", "2026-03"]);
+  assert.deepEqual(period.selectedMonths, ["2026-01", "2026-03"]);
+});
+
+test("varios meses contra el periodo anterior, no contra el año", () => {
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-04", "2026-05", "2026-06"], { kind: "previous" });
+  // El año en curso va de enero a hoy (septiembre): el tramo anterior son los
+  // mismos nueve meses de antes, así que abril-junio empareja con julio-septiembre de 2025.
+  assert.equal(period.monthOffset, -9);
+  assert.deepEqual(period.compareMonths, ["2025-07", "2025-08", "2025-09"]);
+  assert.deepEqual(period.compare, { from: "2025-07-01", to: "2025-09-30" });
+});
+
+test("si el último mes marcado va por la mitad, su pareja se corta por los mismos días", () => {
+  // Septiembre de 2026 acaba hoy, día 18: su pareja no es septiembre entero.
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-08", "2026-09"]);
+  // Hoy es el 30 de septiembre: el mes está completo.
+  assert.equal(period.to, "2026-09-30");
+  assert.equal(period.partial, true);
+  assert.deepEqual(period.compare, { from: "2025-08-01", to: "2025-09-30" });
+});
+
+test("sin comparar no hay parejas", () => {
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-01", "2026-02"], { kind: "none" });
+  assert.deepEqual(period.compareMonths, []);
+  assert.equal(period.compare, null);
+});
+
+test("muchos meses sueltos se dicen por su número, que enumerarlos no cabe", () => {
+  const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-01", "2026-03", "2026-05", "2026-07", "2026-09"]);
+  assert.equal(period.label, "5 meses");
 });

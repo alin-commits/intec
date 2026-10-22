@@ -5,7 +5,7 @@ import { DonutChart } from "@/components/charts/donut-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin } from "@/lib/sage-panel";
-import { channelColors, discountPercent, euros, monthLabel, pairOf, tenths, variation } from "@/lib/sales-model";
+import { channelColors, discountPercent, euros, monthLabel, pairOf, soloUnMes, tenths, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
@@ -159,7 +159,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
       anterior: pair ? Math.round(familyByMonth.get(pair) ?? 0) : 0,
     };
   });
-  const selectedMonthIndex = filters.month ? monthKeys.indexOf(filters.month) : -1;
+  const selectedMonthIndex = soloUnMes(filters) ? monthKeys.indexOf(soloUnMes(filters)!) : -1;
 
   // ---- Subfamilias, marcas y artículos ----
   const groupColumns = (label: string): Column<GroupRow>[] => [
@@ -221,7 +221,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
               ]}
               ariaLabel={`Venta mensual de la familia ${ctx.familyName(filters.family)}`}
               valueFormatter={euros}
-              onSelect={(index) => ctx.toggle("month", monthKeys[index] ?? null)}
+              onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />
           </Panel>

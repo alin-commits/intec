@@ -22,6 +22,7 @@ import {
 import {
   against,
   dateKey,
+  monthListPhrase,
   monthPhrase,
   periodFromParams,
   periodToParams,
@@ -78,7 +79,7 @@ function readUrl(): { page: SalesPageKey | null; choice: PeriodChoice | null; co
       company: company && /^\d+$/.test(company) ? Number(company) : null,
       channel: params.get("c") || null,
       repKey: params.get("r") || null,
-      month: month && /^\d{4}-\d{2}$/.test(month) ? month : null,
+      months: (month ?? "").split(",").filter((item) => /^\d{4}-\d{2}$/.test(item)),
       family: params.get("f") || null,
     },
   };
@@ -191,7 +192,7 @@ export function SalesDashboard() {
       setError(null);
       try {
         const supabase = createClient();
-        const { base, baseCompare } = resolvePeriod({ choice, compare: compareChoice, month: null, today, dataFrom });
+        const { base, baseCompare } = resolvePeriod({ choice, compare: compareChoice, months: [], today, dataFrom });
         // Un año son unas 700 filas y todo el histórico pasa de 2.500: se piden
         // por páginas, con un orden fijo para que ninguna se repita ni se pierda.
         const load = (range: DateRange) => fetchAllPages<SummaryRow>((start, end) =>
@@ -246,7 +247,7 @@ export function SalesDashboard() {
     if (page !== "resumen") params.set("p", page);
     periodToParams(params, choice, compareChoice, today.getFullYear());
     if (basis === "factura") params.set("b", "factura");
-    if (requested.month) params.set("m", requested.month);
+    if (requested.months.length > 0) params.set("m", requested.months.join(","));
     if (requested.company !== null) params.set("s", String(requested.company));
     if (requested.channel) params.set("c", requested.channel);
     if (requested.repKey) params.set("r", requested.repKey);
@@ -262,12 +263,12 @@ export function SalesDashboard() {
   const shownChoice = loaded?.choice ?? choice;
   const shownCompare = loaded?.compare ?? compareChoice;
   const shownBase = useMemo(
-    () => resolvePeriod({ choice: shownChoice, compare: shownCompare, month: null, today, dataFrom }),
+    () => resolvePeriod({ choice: shownChoice, compare: shownCompare, months: [], today, dataFrom }),
     [shownChoice, shownCompare, today, dataFrom],
   );
   /** El que se está eligiendo, para rellenar las fechas de la barra de filtros. */
   const requestedBase = useMemo(
-    () => resolvePeriod({ choice, compare: compareChoice, month: null, today, dataFrom }),
+    () => resolvePeriod({ choice, compare: compareChoice, months: [], today, dataFrom }),
     [choice, compareChoice, today, dataFrom],
   );
 
@@ -286,19 +287,19 @@ export function SalesDashboard() {
   const missing = {
     channel: requested.channel !== null && !available.channels.has(requested.channel),
     repKey: requested.repKey !== null && !available.reps.has(requested.repKey),
-    month: requested.month !== null && !shownBase.months.includes(requested.month),
+    month: requested.months.length > 0 && !requested.months.some((item) => shownBase.months.includes(item)),
   };
   const filters = useMemo<SalesFilters>(() => ({
     company: requested.company,
     channel: missing.channel ? null : requested.channel,
     repKey: missing.repKey ? null : requested.repKey,
-    month: missing.month ? null : requested.month,
+    months: requested.months.filter((item) => shownBase.months.includes(item)),
     family: requested.family,
   }), [requested, missing.channel, missing.repKey, missing.month]);
 
   const period = useMemo(
-    () => resolvePeriod({ choice: shownChoice, compare: shownCompare, month: filters.month, today, dataFrom }),
-    [shownChoice, shownCompare, filters.month, today, dataFrom],
+    () => resolvePeriod({ choice: shownChoice, compare: shownCompare, months: filters.months, today, dataFrom }),
+    [shownChoice, shownCompare, filters.months, today, dataFrom],
   );
   const model = useMemo(
     () => computeSalesModel({
@@ -351,15 +352,29 @@ export function SalesDashboard() {
   const toggle = useCallback(<K extends keyof SalesFilters>(key: K, value: SalesFilters[K]) => {
     setRequested((current) => ({ ...current, [key]: current[key] === value ? null : value }));
   }, []);
+  /*
+    Pulsar un mes en un gráfico lo marca, y volver a pulsarlo lo desmarca. Si
+    ya había otros marcados se suma a ellos: el que pulsa una segunda barra
+    quiere ver las dos, no cambiar de una a otra. Para quedarse con uno solo
+    está el "Ninguno" del selector, o desmarcar.
+  */
+  const toggleMonth = useCallback((key: string | null) => {
+    setRequested((current) => {
+      if (key === null) return { ...current, months: [] };
+      const puesto = current.months.includes(key);
+      return { ...current, months: puesto ? current.months.filter((item) => item !== key) : [...current.months, key].sort() };
+    });
+  }, []);
 
   const choosePeriod = useCallback((next: PeriodChoice) => {
     setChoice(next);
     if (next.kind !== "year") return;
     // El mes elegido se lleva al año nuevo; si ese mes aún no ha llegado, se quita.
     setRequested((current) => {
-      if (!current.month) return current;
-      const month = `${next.year}-${current.month.slice(5, 7)}`;
-      return { ...current, month: month > dateKey(today).slice(0, 7) ? null : month };
+      if (current.months.length === 0) return current;
+      const months = current.months.map((item) => `${next.year}-${item.slice(5, 7)}`);
+      const hoyMes = dateKey(today).slice(0, 7);
+      return { ...current, months: months.filter((item) => item <= hoyMes) };
     });
   }, [today]);
   function changeBasis(next: "albaran" | "factura") {
@@ -384,6 +399,7 @@ export function SalesDashboard() {
     filters,
     setFilters,
     toggle,
+    toggleMonth,
     companies,
     reps,
     families,
@@ -450,8 +466,11 @@ export function SalesDashboard() {
     .sort((a, b) => a.label.localeCompare(b.label, "es"));
 
   const chips: ActiveChip[] = [];
-  if (requested.month) {
-    chips.push({ key: "month", label: `Mes: ${monthPhrase(requested.month, true)}`, note: chipNote("month", pageInfo.applies, missing.month) });
+  if (requested.months.length > 0) {
+    const nombres = requested.months.length === 1
+      ? monthPhrase(requested.months[0], true)
+      : monthListPhrase(requested.months, true, true);
+    chips.push({ key: "months", label: `${requested.months.length === 1 ? "Mes" : "Meses"}: ${nombres}`, note: chipNote("month", pageInfo.applies, missing.month) });
   }
   if (requested.company !== null) chips.push({ key: "company", label: companyLabel, note: chipNote("company", pageInfo.applies, false) });
   if (requested.channel) chips.push({ key: "channel", label: `Canal: ${requested.channel}`, note: chipNote("channel", pageInfo.applies, missing.channel) });
@@ -497,6 +516,7 @@ export function SalesDashboard() {
         compare={compareChoice}
         onCompare={setCompareChoice}
         chosen={requestedBase}
+        aplicado={period}
         yearOptions={yearOptions}
         minDate={dataFrom}
         maxDate={dateKey(today)}
