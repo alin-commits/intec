@@ -32,12 +32,13 @@ export const roleLabels: Record<AppRole, string> = {
   employee: "Empleado",
   vault_admin: "Admin. de contraseñas",
   accounting: "Administración",
+  purchasing: "Compras",
 };
 
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
 /** Compras: de momento quien ya ve lo de Sage. Si acaba siendo su propio rol, se añade aquí. */
-export const COMPRAS_ROLES: AppRole[] = ["admin", "direction"];
+export const COMPRAS_ROLES: AppRole[] = ["admin", "direction", "purchasing"];
 export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "commercial", "viewer", "direction"];
 export const RRSS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 export const UNITS_ROLES: AppRole[] = ["admin", "viewer"];
@@ -73,7 +74,7 @@ export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];
 /** Everyone except the employee role, whose only page is Contraseñas. */
 export const DASHBOARD_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "vault_admin"];
 
-export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "accounting", "employee", "vault_admin"];
+export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "accounting", "purchasing", "employee", "vault_admin"];
 
 /**
  * Los roles del gestor de contraseñas no se reparten desde la pantalla de

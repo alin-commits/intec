@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { elegirCorreoDelPedido, meterEnElCuerpo, type CorreoDelPedido } from "../src/lib/compras/graph-hilo.ts";
+import { direccionesDe, elegirCorreoDelPedido, meterEnElCuerpo, type CorreoDelPedido } from "../src/lib/compras/graph-hilo.ts";
 
 function correo(extra: Partial<CorreoDelPedido>): CorreoDelPedido {
   return { id: "1", subject: "Pedidos de compra Intec 123", destinatarios: ["ventas@proveedor.com"], sentDateTime: "2026-10-01T08:00:00Z", ...extra };
@@ -62,4 +62,22 @@ test("el texto entra dentro del cuerpo, con el pedido original debajo", () => {
 test("un borrador sin <body> tampoco se pierde", () => {
   const salida = meterEnElCuerpo("<div>Solo un trozo</div>", "<p>Lo nuestro</p>");
   assert.equal(salida, "<p>Lo nuestro</p><div>Solo un trozo</div>");
+});
+
+test("un proveedor con varios correos en Sage se parte bien", () => {
+  // En la ficha de Sage caben varias direcciones y cada uno las separa como
+  // quiere. Mandarlas como una sola cadena no falla a medias: el servidor la
+  // rechaza entera y el proveedor no recibe nada.
+  assert.deepEqual(direccionesDe("bgarrido@ionsistemas.es;fdominguez@ionsistemas.es"), ["bgarrido@ionsistemas.es", "fdominguez@ionsistemas.es"]);
+  assert.deepEqual(direccionesDe("uno@proveedor.com, dos@proveedor.com"), ["uno@proveedor.com", "dos@proveedor.com"]);
+  assert.deepEqual(direccionesDe("uno@proveedor.com  dos@proveedor.com"), ["uno@proveedor.com", "dos@proveedor.com"]);
+  assert.deepEqual(direccionesDe("<uno@proveedor.com>"), ["uno@proveedor.com"]);
+});
+
+test("y no se repite ni se cuela lo que no es una dirección", () => {
+  assert.deepEqual(direccionesDe("uno@proveedor.com; UNO@Proveedor.com"), ["uno@proveedor.com"]);
+  assert.deepEqual(direccionesDe("preguntar por Marta"), []);
+  assert.deepEqual(direccionesDe("ventas@proveedor.com; preguntar por Marta"), ["ventas@proveedor.com"]);
+  assert.deepEqual(direccionesDe(null), []);
+  assert.deepEqual(direccionesDe(""), []);
 });

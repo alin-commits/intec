@@ -51,3 +51,28 @@ export function meterEnElCuerpo(original: string, html: string): string {
   const corte = abre.index + abre[0].length;
   return original.slice(0, corte) + html + original.slice(corte);
 }
+
+/**
+ * Las direcciones que hay en un campo de correo de Sage.
+ *
+ * En la ficha del proveedor caben varias y cada uno las separa como quiere:
+ * punto y coma, coma o un espacio. Mandarlas como una sola cadena no falla a
+ * medias —el servidor la rechaza entera—, así que el proveedor no recibiría
+ * nada y el registro diría que sí se intentó.
+ */
+export function direccionesDe(campo: string | null | undefined): string[] {
+  if (!campo) return [];
+  const vistas = new Set<string>();
+  const salida: string[] = [];
+  for (const trozo of campo.split(/[;,\s]+/)) {
+    const limpio = trozo.trim().replace(/^<|>$/g, "");
+    // Lo que no parezca una dirección se deja fuera: un nombre suelto o una
+    // nota ("preguntar por Marta") colaría y tiraría el envío entero.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpio)) continue;
+    const clave = limpio.toLowerCase();
+    if (vistas.has(clave)) continue;
+    vistas.add(clave);
+    salida.push(limpio);
+  }
+  return salida;
+}

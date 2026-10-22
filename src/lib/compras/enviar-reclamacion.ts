@@ -4,7 +4,7 @@ import { currencyFormatter } from "@/lib/format";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildReclamacionEmail, type PedidoEnCorreo } from "@/lib/compras/correo-reclamacion";
 import { clavePedido, type GrupoAReclamar } from "@/lib/compras/reclamaciones";
-import { buscarCorreoDelPedido, buzonDeCompras, graphConfigurado, mandarDesdeElBuzon, redirigidoA, responderEnHilo } from "@/lib/compras/graph";
+import { buscarCorreoDelPedido, buzonDeCompras, direccionesDe, graphConfigurado, mandarDesdeElBuzon, redirigidoA, responderEnHilo } from "@/lib/compras/graph";
 
 /*
   Mandar una reclamación: lo mismo para el botón y para el cron.
@@ -100,22 +100,28 @@ export async function prepararReclamacion(
 export async function comoVaASalir(grupo: GrupoAReclamar, correoDeLaFicha: string | null): Promise<{
   via: "graph" | "resend";
   hilo: Awaited<ReturnType<typeof buscarCorreoDelPedido>>;
+  /* Una ficha de Sage puede llevar varias direcciones separadas por ";". */
+  destinatarios: string[];
   destinatario: string | null;
   redirigido: string | null;
   /** De dónde sale, para poder decirlo en la pantalla sin escribirlo a pelo. */
   remitente: string;
 }> {
   const redirigido = redirigidoA();
+  const deLaFicha = direccionesDe(correoDeLaFicha);
   if (!graphConfigurado()) {
-    return { via: "resend", hilo: null, destinatario: redirigido ?? correoDeLaFicha, redirigido, remitente: REMITENTE_COMPRAS };
+    const destinatarios = redirigido ? [redirigido] : deLaFicha;
+    return { via: "resend", destinatarios, hilo: null, destinatario: destinatarios.join(", ") || null, redirigido, remitente: REMITENTE_COMPRAS };
   }
   const hilo = grupo.pedidos.length === 1
     ? await buscarCorreoDelPedido(grupo.companyCode, grupo.pedidos[0].number)
     : null;
   // La dirección del correo original manda sobre la de la ficha: es a la que
   // Sage mandó el pedido, y la de la ficha suele ser un info@ genérico.
-  const destinatario = redirigido ?? hilo?.destinatarios[0] ?? correoDeLaFicha;
-  return { via: "graph", hilo, destinatario, redirigido, remitente: buzonDeCompras() };
+  const destinatarios = redirigido
+    ? [redirigido]
+    : (hilo?.destinatarios.length ? hilo.destinatarios : deLaFicha);
+  return { via: "graph", hilo, destinatarios, destinatario: destinatarios.join(", ") || null, redirigido, remitente: buzonDeCompras() };
 }
 
 export async function enviarReclamacion(
@@ -126,9 +132,10 @@ export async function enviarReclamacion(
   const preparado = await prepararReclamacion(admin, grupo, { firma: opciones.firma });
   const salida = await comoVaASalir(grupo, preparado.destinatario);
   const destinatario = salida.destinatario;
+  const destinatarios = salida.destinatarios;
   const base = { proveedor: preparado.proveedor, asunto: preparado.asunto, html: preparado.html, pedidos: grupo.pedidos.length, destinatario, via: salida.via };
 
-  if (!destinatario) return { ...base, ok: false, motivo: "sin_correo" };
+  if (destinatarios.length === 0) return { ...base, ok: false, motivo: "sin_correo" };
   // Resend necesita su configuración; por el buzón se manda sin ella.
   if (salida.via === "resend" && !isEmailConfigured()) return { ...base, ok: false, motivo: "sin_configurar" };
 
@@ -166,13 +173,13 @@ export async function enviarReclamacion(
   let detalle: string | null = null;
   if (salida.via === "graph") {
     const resultado = salida.hilo
-      ? await responderEnHilo(salida.hilo, preparado.html, destinatario)
-      : await mandarDesdeElBuzon(destinatario, preparado.asunto, preparado.html);
+      ? await responderEnHilo(salida.hilo, preparado.html, destinatarios)
+      : await mandarDesdeElBuzon(destinatarios, preparado.asunto, preparado.html);
     enviado = resultado.ok;
     enHilo = resultado.enHilo;
     detalle = resultado.error ?? null;
   } else {
-    enviado = await sendEmail({ to: destinatario, subject: preparado.asunto, html: preparado.html, from: REMITENTE_COMPRAS });
+    enviado = await sendEmail({ to: destinatarios, subject: preparado.asunto, html: preparado.html, from: REMITENTE_COMPRAS });
     if (!enviado) detalle = "Resend no aceptó el envío.";
   }
   // El correo ya ha salido: cerrar el registro no puede fallar por una columna

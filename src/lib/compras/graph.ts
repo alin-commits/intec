@@ -18,7 +18,7 @@ import "server-only";
   quien llama se vuelve a Resend.
 */
 
-import { elegirCorreoDelPedido, meterEnElCuerpo, type CorreoDelPedido } from "@/lib/compras/graph-hilo";
+import { direccionesDe, elegirCorreoDelPedido, meterEnElCuerpo, type CorreoDelPedido } from "@/lib/compras/graph-hilo";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
@@ -112,7 +112,7 @@ async function pedir(ruta: string, opciones: RequestInit = {}): Promise<Response
 }
 
 export type { CorreoDelPedido };
-export { elegirCorreoDelPedido, meterEnElCuerpo };
+export { direccionesDe, elegirCorreoDelPedido, meterEnElCuerpo };
 
 /** Busca en todo el buzón el correo con el que se mandó ese pedido. */
 export async function buscarCorreoDelPedido(companyCode: number, numero: number): Promise<CorreoDelPedido | null> {
@@ -146,8 +146,11 @@ export type ResultadoGraph = { ok: boolean; enHilo: boolean; destinatario: strin
  * responde al remitente, que somos nosotros —el pedido salió de este buzón—,
  * así que el destinatario hay que rehacerlo con el del correo original.
  */
-export async function responderEnHilo(correo: CorreoDelPedido, html: string, destinatario: string): Promise<ResultadoGraph> {
+export async function responderEnHilo(correo: CorreoDelPedido, html: string, destinatarios: string[]): Promise<ResultadoGraph> {
   const buzon = encodeURIComponent(buzonDeCompras());
+
+  const destinatario = destinatarios.join(", ");
+  if (destinatarios.length === 0) return { ok: false, enHilo: false, destinatario: null, error: "Sin destinatario." };
 
   const creado = await pedir(`/users/${buzon}/messages/${correo.id}/createReply`, { method: "POST" });
   if (!creado) return { ok: false, enHilo: false, destinatario, error: "Sin acceso a Graph." };
@@ -157,7 +160,7 @@ export async function responderEnHilo(correo: CorreoDelPedido, html: string, des
   const actualizado = await pedir(`/users/${buzon}/messages/${borrador.id}`, {
     method: "PATCH",
     body: JSON.stringify({
-      toRecipients: [{ emailAddress: { address: destinatario } }],
+      toRecipients: destinatarios.map((address) => ({ emailAddress: { address } })),
       body: { contentType: "HTML", content: meterEnElCuerpo(borrador.body?.content ?? "", html) },
     }),
   });
@@ -181,15 +184,17 @@ export async function hiloDelUltimoEnviado(asunto: string): Promise<string | nul
 }
 
 /** Un correo nuevo desde el buzón, cuando no se encuentra el del pedido. */
-export async function mandarDesdeElBuzon(destinatario: string, asunto: string, html: string): Promise<ResultadoGraph> {
+export async function mandarDesdeElBuzon(destinatarios: string[], asunto: string, html: string): Promise<ResultadoGraph> {
   const buzon = encodeURIComponent(buzonDeCompras());
+  const destinatario = destinatarios.join(", ");
+  if (destinatarios.length === 0) return { ok: false, enHilo: false, destinatario: null, error: "Sin destinatario." };
   const respuesta = await pedir(`/users/${buzon}/sendMail`, {
     method: "POST",
     body: JSON.stringify({
       message: {
         subject: asunto,
         body: { contentType: "HTML", content: html },
-        toRecipients: [{ emailAddress: { address: destinatario } }],
+        toRecipients: destinatarios.map((address) => ({ emailAddress: { address } })),
       },
       saveToSentItems: true,
     }),

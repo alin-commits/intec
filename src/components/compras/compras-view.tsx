@@ -14,6 +14,7 @@ import { downloadXlsx } from "@/lib/excel-export";
 import { monthKey, todayKey } from "@/lib/dates";
 import { COMPRAS_ROLES, hasAnyRole } from "@/lib/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole } from "@/lib/types";
 
 /*
@@ -231,8 +232,8 @@ export function ComprasView() {
       setAcceso("permitido");
 
       const [pedidosRes, lineasRes, proveedoresRes, seguimientoRes, enviosRes, respuestasRes] = await Promise.all([
-        supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units").gt("pending_units", 0).order("order_date"),
-        supabase.from("sage_purchase_order_lines").select("company_code, year, series, number, line_number, article_code, description, pending_units, expected_on, net_amount").gt("pending_units", 0),
+        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units").gt("pending_units", 0).order("company_code").order("number").range(desde, hasta)),
+        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_order_lines").select("company_code, year, series, number, line_number, article_code, description, pending_units, expected_on, net_amount").gt("pending_units", 0).order("company_code").order("number").order("line_number").range(desde, hasta)),
         supabase.from("sage_suppliers").select("company_code, code, name, email"),
         leerSeguimiento(supabase),
         // El historial. Si sus migraciones no están, se queda vacío y la ficha
@@ -245,7 +246,11 @@ export function ComprasView() {
       // una lista vacía. Así que "no hay datos" y "falta la migración" se ven
       // igual desde aquí, y por eso el aviso de abajo cubre los dos casos en vez
       // de afirmar cuál es.
-      if (pedidosRes.error) { setFalloCarga(pedidosRes.error.message); return; }
+      if (pedidosRes.error) {
+        const fallo = pedidosRes.error as { message?: string };
+        setFalloCarga(fallo.message ?? "No se pudieron leer los pedidos.");
+        return;
+      }
       setPedidos((pedidosRes.data ?? []) as Pedido[]);
       setLineas((lineasRes.data ?? []) as Linea[]);
       setProveedores((proveedoresRes.data ?? []) as Proveedor[]);

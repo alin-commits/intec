@@ -36,14 +36,14 @@ function leerDesplegados(): Record<string, boolean> {
 /*
   El menú, por departamentos.
 
-  Dos reglas que lo hacen soportable para todos:
+  Todo va en su departamento, aunque de momento tenga una sola entrada: así el
+  menú se lee igual hoy que cuando Utilidades tenga el asistente de manuales al
+  lado del gestor de contraseñas, sin que nada cambie de sitio por el camino.
+  Inicio es la excepción, que no es un departamento sino el enlace a casa.
 
-   · Un departamento del que solo veas una entrada no se pliega: se enseña
-     suelta. Si no, un comercial tendría que abrir un desplegable para llegar a
-     lo único que hay dentro, y un empleado vería un menú de puras carpetas.
-   · Los permisos no cambian: cada entrada sigue mirando sus roles, y un
-     departamento sin nada visible no aparece. Agrupar es para leer mejor, no
-     para dar ni quitar acceso.
+  Los permisos no cambian: cada entrada sigue mirando sus roles, y un
+  departamento sin nada visible no aparece. Agrupar es para leer mejor, no para
+  dar ni quitar acceso.
 */
 const departamentos: { id: string; label: string; entradas: Entrada[] }[] = [
   { id: "inicio", label: "Inicio", entradas: [
@@ -183,6 +183,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navRoles: AppRole[] = profile.roles;
   const showConsultaActions = hasAnyRole(profile.roles, ["commercial"]) || (hasAnyRole(profile.roles, ["admin"]) && pathname.startsWith("/consultas"));
 
+  /*
+    Entrar y encontrarse una página vacía.
+
+    Al iniciar sesión todo el mundo va a Inicio, pero no todos los roles lo
+    tienen: compras, administración o un empleado aterrizaban en un panel que
+    no es suyo y sin nada que mirar, teniendo que buscar en el menú dónde está
+    lo que han venido a hacer. Se les lleva a su primera entrada.
+  */
+  useEffect(() => {
+    if (pathname !== "/dashboard" || profile.roles.length === 0) return;
+    if (hasAnyRole(navRoles, DASHBOARD_ROLES)) return;
+    const suya = departamentos
+      .flatMap((departamento) => departamento.entradas)
+      .find((entrada) => entrada.href !== "/dashboard" && (!entrada.roles || hasAnyRole(navRoles, entrada.roles)));
+    if (suya) router.replace(suya.href);
+  }, [pathname, profile.roles, navRoles, router]);
+
   async function signOut() {
     if (configured) {
       forgetCurrentProfile();
@@ -215,6 +232,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               return !entrada.roles || hasAnyRole(navRoles, entrada.roles);
             });
             if (suyas.length === 0) return null;
+            // Inicio no es un departamento: es el enlace a casa.
+            const suelto = departamento.id === "inicio";
 
             const enlace = (entrada: Entrada) => {
               const Icon = entrada.icon;
@@ -227,9 +246,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               );
             };
 
-            // Una sola entrada no se pliega: abrir un desplegable para llegar
-            // a lo único que hay dentro es trabajo de más para nada.
-            if (suyas.length === 1) return enlace(suyas[0]);
+            if (suelto) return enlace(suyas[0]);
 
             const aqui = suyas.some((entrada) => pathname.startsWith(entrada.href));
             const abierto = desplegados[departamento.id] ?? aqui;
