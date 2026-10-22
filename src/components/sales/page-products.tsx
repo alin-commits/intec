@@ -5,7 +5,7 @@ import { DonutChart } from "@/components/charts/donut-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin } from "@/lib/sage-panel";
-import { channelColors, discountPercent, euros, marcado, monthLabel, pairOf, soloUnMes, soloUno, tenths, variation } from "@/lib/sales-model";
+import { channelColors, discountPercent, euros, hayComercialMarcado, marcado, monthLabel, pairOf, repFilterFor, soloUnMes, soloUno, tenths, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
@@ -87,11 +87,27 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   const conMeses = (lista: string[] | undefined) => (lista ? { p_months: lista } : {});
   const conSociedades = ctx.rpc.p_companies ? { p_companies: ctx.rpc.p_companies } : {};
   const conFamilias = ctx.rpc.p_families ? { p_families: ctx.rpc.p_families } : {};
-  const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period.from, period.to, compare, months, compareMonths, reload]), async () => {
+  // El comercial del albarán, que el agente manda desde la versión
+  // «2026-10-22 productos-por-comercial». Solo va cuando hay alguno marcado:
+  // así la pantalla sigue funcionando aunque la base no tenga la migración.
+  const conComerciales = ctx.rpc.p_reps ? { p_reps: ctx.rpc.p_reps } : {};
+  /*
+    El comercial lo trae el agente desde su versión de 2026-10-22, y lo que ya
+    estaba cargado se quedó sin él. Entre aplicar la migración y releer el
+    histórico, filtrar por comercial aquí no devuelve nada, y sin avisar
+    parecería que esa persona no vende productos. Esto mira si ya hay algún
+    reparto con comercial: una fila basta para saberlo.
+  */
+  const hayComercial = useSageQuery<boolean>(hayComercialMarcado(filters) ? JSON.stringify(["familias-con-comercial", reload]) : null, async () => {
+    const { data, error } = await createClient().from("sage_family_sales_daily").select("rep_code").not("rep_code", "is", null).limit(1);
+    return { data: error ? null : (data ?? []).length > 0, error };
+  });
+  const faltaRelectura = hayComercialMarcado(filters) && hayComercial.data === false;
+  const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period.from, period.to, compare, months, compareMonths, ctx.rpc.p_reps, reload]), async () => {
     const supabase = createClient();
     const [now, before] = await Promise.all([
-      supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to, ...conMeses(months) }),
-      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to, ...conMeses(compareMonths) }) : Promise.resolve({ data: [], error: null }),
+      supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to, ...conMeses(months), ...conComerciales }),
+      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to, ...conMeses(compareMonths), ...conComerciales }) : Promise.resolve({ data: [], error: null }),
     ]);
     const error = now.error ?? before.error;
     return { data: error ? null : { now: (now.data ?? []) as FamilyRow[], before: (before.data ?? []) as FamilyRow[] }, error };
@@ -101,16 +117,19 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   const spanFrom = period.baseCompare && period.baseCompare.from < period.base.from ? period.baseCompare.from : period.base.from;
   const spanTo = period.baseCompare && period.baseCompare.to > period.base.to ? period.baseCompare.to : period.base.to;
   const familyMonths = useSageQuery<{ day: string; company_code: number; net_amount: number }[]>(
-    familia !== null ? JSON.stringify(["familia-meses", familia, spanFrom, spanTo, reload]) : null,
+    familia !== null ? JSON.stringify(["familia-meses", familia, spanFrom, spanTo, ctx.rpc.p_reps, reload]) : null,
     async () => {
       const supabase = createClient();
-      return fetchAllPages<{ day: string; company_code: number; net_amount: number }>((start, end) =>
-        supabase.from("sage_family_sales_daily").select("day, company_code, net_amount")
-          .eq("family_code", familia ?? "").gte("day", spanFrom).lte("day", spanTo)
-          .order("id").range(start, end));
+      return fetchAllPages<{ day: string; company_code: number; net_amount: number }>((start, end) => {
+        let consulta = supabase.from("sage_family_sales_daily").select("day, company_code, net_amount")
+          .eq("family_code", familia ?? "").gte("day", spanFrom).lte("day", spanTo);
+        const porComercial = repFilterFor(ctx.rpc.p_reps);
+        if (porComercial) consulta = consulta.or(porComercial);
+        return consulta.order("id").range(start, end);
+      });
     },
   );
-  const articleArgs = { p_from: period.from, p_to: period.to, ...conSociedades, ...conFamilias, ...conMeses(months) };
+  const articleArgs = { p_from: period.from, p_to: period.to, ...conSociedades, ...conFamilias, ...conMeses(months), ...conComerciales };
   const subfamilies = useSageQuery<GroupRow[]>(ctx.detail.articles && familia !== null ? JSON.stringify(["subfamilias", articleArgs, reload]) : null, async () =>
     await createClient().rpc("sage_article_groups", { p_group: "subfamilia", ...articleArgs }));
   const brands = useSageQuery<GroupRow[]>(ctx.detail.articles ? JSON.stringify(["marcas", articleArgs, reload]) : null, async () =>
@@ -203,6 +222,18 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   return (
     <div className="page-stack">
       {families.failed ? <LoadFailed what="la venta por familia" /> : null}
+
+      {faltaRelectura ? (
+        <section className="panel panel-padded">
+          <h3>El reparto por producto todavía no sabe de comerciales</h3>
+          <p className="muted">
+            Lo que hay cargado se leyó de Sage antes de que el agente mandara el comercial de cada albarán, así que
+            filtrar por comercial aquí no devuelve nada. Se arregla copiando al servidor de Sage la versión{" "}
+            <code>2026-10-22 productos-por-comercial</code> del agente y pidiéndole una lectura del histórico entero.
+            Lo demás del panel no se ve afectado.
+          </p>
+        </section>
+      ) : null}
 
       <section className="sales-board">
         <Panel

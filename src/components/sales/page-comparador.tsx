@@ -22,6 +22,7 @@ import {
   ticketFormatter,
   UNASSIGNED_KEY,
   variation,
+  repFilterFor,
 } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -203,7 +204,8 @@ function Familias({ ctx }: { ctx: SalesContext }) {
   const { filters, period } = ctx;
   const familias = filters.families;
   const compare = period.compare;
-  const clave = JSON.stringify(["comparador-familias", familias, period.from, period.to, compare, filters.companies, ctx.reloadKey]);
+  const porComercial = repFilterFor(ctx.rpc.p_reps);
+  const clave = JSON.stringify(["comparador-familias", familias, period.from, period.to, compare, filters.companies, porComercial, ctx.reloadKey]);
 
   const datos = useSageQuery<{ ahora: FamilyDay[]; antes: FamilyDay[] }>(familias.length > 0 ? clave : null, async () => {
     const supabase = createClient();
@@ -213,6 +215,7 @@ function Familias({ ctx }: { ctx: SalesContext }) {
           .select("day, company_code, family_code, net_amount, cost_amount")
           .in("family_code", familias).gte("day", desde).lte("day", hasta);
         if (filters.companies.length > 0) consulta = consulta.in("company_code", filters.companies);
+        if (porComercial) consulta = consulta.or(porComercial);
         return consulta.order("id").range(inicio, fin);
       });
     const [ahora, antes] = await Promise.all([
@@ -272,7 +275,7 @@ function Familias({ ctx }: { ctx: SalesContext }) {
       evolucion={evolucion}
       lineas={filas.map((fila) => ({ key: fila.clave, label: fila.nombre, color: fila.color }))}
       conComparacion={compare !== null}
-      nota="El reparto por familia que manda Sage no trae comercial ni canal: aquí solo cuentan la sociedad y las fechas"
+      nota="El reparto por familia de Sage no trae el canal: aquí cuentan la sociedad, el comercial y las fechas"
     />
   );
 }

@@ -43,7 +43,7 @@ test("el envío nuevo pasa todo, con los nombres de columna de la base de datos"
     offers: [{ companyCode: 1, day: "2026-09-28", series: "OF", repCode: 5, documents: 4, netAmount: 8200 }],
     orders: [],
     families: [{ companyCode: 1, code: "COMP", name: "Compresores" }],
-    familySales: [{ companyCode: 1, day: "2026-09-28", familyCode: "COMP", units: 2, netAmount: 1400, costAmount: 950 }],
+    familySales: [{ companyCode: 1, day: "2026-09-28", familyCode: "COMP", repCode: 5, units: 2, netAmount: 1400, costAmount: 950 }],
     customers: [{ companyCode: 1, month: "2026-09-01", activeCustomers: 120, newCustomers: 7 }],
     backlog: [{ companyCode: 1, repCode: null, count: 3, amount: 4200 }],
     dormant: [{ companyCode: 1, count: 14, amount: 23000.5 }],
@@ -53,8 +53,8 @@ test("el envío nuevo pasa todo, con los nombres de columna de la base de datos"
   const payload = toDatabasePayload(body);
   assert.deepEqual(payload.orders, [], "una lista vacía sí se manda: ese periodo no tiene pedidos");
   assert.deepEqual((payload.family_sales as object[])[0], {
-    company_code: 1, day: "2026-09-28", family_code: "COMP", units: 2, net_amount: 1400, cost_amount: 950, net_without_cost: 0,
-    gross_amount: null,
+    company_code: 1, day: "2026-09-28", family_code: "COMP", rep_code: 5, units: 2, net_amount: 1400, cost_amount: 950,
+    net_without_cost: 0, gross_amount: null,
   });
   assert.deepEqual((payload.schema as object[])[0], { table_name: "CarteraEfectos", column_name: "ImportePendiente", data_type: "decimal" });
   assert.equal(payload.taken_on, "2026-09-28");
@@ -79,7 +79,7 @@ test("los envíos parciales del agente nuevo no tocan las ventas", () => {
   assert.equal(customer.phone, "961234567");
   assert.equal(customer.email, null);
   assert.deepEqual((payload.article_sales as object[])[0], {
-    company_code: 1, month: "2026-09-01", article_code: "CMP-100", family_code: "", subfamily_code: "",
+    company_code: 1, month: "2026-09-01", article_code: "CMP-100", family_code: "", subfamily_code: "", rep_code: null,
     units: 0, documents: 0, net_amount: 9800, cost_amount: 0, net_without_cost: 0, gross_amount: null,
   });
   assert.match(describeIngest(body, { customer_list: 1, article_sales: 1 }), /1 clientes, 1 de venta por artículo/);

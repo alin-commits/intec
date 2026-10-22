@@ -127,7 +127,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-21 compras-2"
+$VersionAgente = "2026-10-22 productos-por-comercial"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -606,8 +606,11 @@ $($cfg.Unir)
 
 function Sql-Familias($cfg, $desdeBloque, $hastaBloque) {
   $codigo = "isnull(ltrim(rtrim(cast($($cfg.Familia) as nvarchar(40)))), '')"
+  # El comercial que firma el albaran, igual que en las ventas: asi el panel
+  # puede partir las familias por comercial y cuadra con lo demas.
+  $comercial = "case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end"
   return @"
-select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, $codigo as Familia,
+select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, $codigo as Familia, $comercial as Comercial,
   sum(isnull($($cfg.Unidades), 0)) as Unidades,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
   sum(isnull($($cfg.Coste), 0)) as Coste,
@@ -617,7 +620,7 @@ select a.CodigoEmpresa, cast(a.FechaAlbaran as date) as Dia, $codigo as Familia,
 $(Sql-UnirLineas $cfg)
 where $(Sql-Entre "a.FechaAlbaran" $desdeBloque $hastaBloque)
   and a.CodigoEmpresa not in ($excluidas)
-group by a.CodigoEmpresa, cast(a.FechaAlbaran as date), $codigo;
+group by a.CodigoEmpresa, cast(a.FechaAlbaran as date), $codigo, $comercial;
 "@
 }
 
@@ -628,6 +631,7 @@ function Filas-Familias($tabla) {
       companyCode = [int]$fila["CodigoEmpresa"]
       day         = ([datetime]$fila["Dia"]).ToString("yyyy-MM-dd")
       familyCode  = (Texto $fila["Familia"] 40)
+      repCode     = (Entero-O-Nulo $fila["Comercial"])
       units       = (Numero $fila["Unidades"])
       netAmount   = (Numero $fila["Neto"])
       costAmount  = (Numero $fila["Coste"])
@@ -686,13 +690,15 @@ function Sql-ArticulosVenta($cfg, $mesDesde, $mesHasta) {
   # SQL Server no deja agrupar por un valor fijo: sin columna de subfamilia, va
   # vacía y fuera del group by.
   $subfamilia = "''"
-  $grupos = @("a.CodigoEmpresa", "convert(char(7), a.FechaAlbaran, 120)", $articulo, $familia)
+  $comercial = "case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end"
+  $grupos = @("a.CodigoEmpresa", "convert(char(7), a.FechaAlbaran, 120)", $articulo, $familia, $comercial)
   if ($cfg.Subfamilia -ne "''") {
     $subfamilia = "isnull(ltrim(rtrim(cast($($cfg.Subfamilia) as nvarchar(40)))), '')"
     $grupos += $subfamilia
   }
   return @"
 select a.CodigoEmpresa, convert(char(7), a.FechaAlbaran, 120) as Mes, $articulo as Articulo, $familia as Familia, $subfamilia as Subfamilia,
+  $comercial as Comercial,
   sum(isnull($($cfg.Unidades), 0)) as Unidades,
   count(distinct concat(a.EjercicioAlbaran, '|', a.SerieAlbaran, '|', a.NumeroAlbaran)) as Documentos,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
@@ -2253,6 +2259,7 @@ if (-not $SoloVentas) {
             articleCode    = (Texto $fila["Articulo"] 40)
             familyCode     = (Texto $fila["Familia"] 40)
             subfamilyCode  = (Texto $fila["Subfamilia"] 40)
+            repCode        = (Entero-O-Nulo $fila["Comercial"])
             units          = (Numero $fila["Unidades"])
             documents      = [int]$fila["Documentos"]
             netAmount      = (Numero $fila["Neto"])

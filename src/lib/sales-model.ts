@@ -335,6 +335,28 @@ export function makeRepOf(reps: Rep[], identities: Map<string, { key: string; la
 }
 
 /**
+ * El filtro de PostgREST para unas fichas 'sociedad:código', cuando hay que
+ * consultar una tabla directamente en vez de llamar a una función.
+ *
+ * Va por parejas y no por código suelto porque el mismo número es otra persona
+ * en otra sociedad: el comercial 5 de una no es el 5 de la otra. Devuelve null
+ * cuando no hay nada que filtrar, y se salta cualquier ficha con una forma
+ * rara, que esto acaba dentro de una cadena de consulta.
+ */
+export function repFilterFor(pairs: string[] | null | undefined): string | null {
+  if (!pairs || pairs.length === 0) return null;
+  const trozos = pairs.flatMap((par) => {
+    const encaja = /^(\d+):(\d+|sin)$/.exec(par);
+    if (!encaja) return [];
+    const [, company, rep] = encaja;
+    return [rep === "sin"
+      ? `and(company_code.eq.${company},rep_code.is.null)`
+      : `and(company_code.eq.${company},rep_code.eq.${rep})`];
+  });
+  return trozos.length > 0 ? trozos.join(",") : null;
+}
+
+/**
  * Las fichas de Sage ('sociedad:código') que corresponden a los comerciales
  * marcados, para filtrar en la base de datos. Nulo = sin filtro.
  *

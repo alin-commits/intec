@@ -14,6 +14,7 @@ import {
   pairOf,
   comercialMarcado,
   hayComercialMarcado,
+  repFilterFor,
   repPairsFor,
   soloUnComercial,
   seriesFor,
@@ -57,6 +58,22 @@ test("repPairsFor junta las fichas de la misma persona en varias sociedades", ()
   assert.deepEqual(repPairsFor(["sin"], reps, identities, [1, 2]), ["1:sin", "2:sin"]);
   assert.deepEqual(repPairsFor(["1-99"], reps, identities, [1]), ["1:99"]);
   assert.equal(repPairsFor([], reps, identities, [1]), null);
+});
+
+test("repFilterFor arma el filtro por parejas, no por código suelto", () => {
+  // El comercial 5 de una sociedad no es el 5 de otra, así que cada ficha va
+  // con la suya; 'sin' son los albaranes que no llevan comercial.
+  assert.equal(repFilterFor(["1:5"]), "and(company_code.eq.1,rep_code.eq.5)");
+  assert.equal(
+    repFilterFor(["1:5", "2:9"]),
+    "and(company_code.eq.1,rep_code.eq.5),and(company_code.eq.2,rep_code.eq.9)",
+  );
+  assert.equal(repFilterFor(["4:sin"]), "and(company_code.eq.4,rep_code.is.null)");
+  assert.equal(repFilterFor([]), null);
+  assert.equal(repFilterFor(null), null);
+  // Lo que no tenga la forma esperada se cae: esto acaba en una consulta.
+  assert.equal(repFilterFor(["1:5", "raro(); drop"]), "and(company_code.eq.1,rep_code.eq.5)");
+  assert.equal(repFilterFor(["nada"]), null);
 });
 
 test("repPairsFor con varios comerciales marcados los junta sin repetir", () => {

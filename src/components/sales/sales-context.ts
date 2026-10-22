@@ -18,7 +18,7 @@ export const salesPages: { key: SalesPageKey; label: string; applies: SalesDimen
   { key: "resumen", label: "Resumen", applies: ["company", "channel", "rep", "month"] },
   { key: "ventas", label: "Ventas y margen", applies: ["company", "channel", "rep", "month"] },
   { key: "comercial", label: "Comercial", applies: ["company", "channel", "rep", "month"] },
-  { key: "productos", label: "Productos", applies: ["company", "month", "family"] },
+  { key: "productos", label: "Productos", applies: ["company", "channel", "rep", "month", "family"] },
   { key: "clientes", label: "Clientes", applies: ["company", "channel", "rep", "month", "family"] },
   // El comparador vive de lo marcado: todos los filtros se aplican, porque son
   // justo lo que compara.
