@@ -14,7 +14,7 @@ import { downloadCsv, type CsvColumn } from "@/lib/csv-export";
 import { downloadXlsx } from "@/lib/excel-export";
 import { monthKey, todayKey } from "@/lib/dates";
 import { COMPRAS_ROLES, hasAnyRole } from "@/lib/constants";
-import { ESTADO_PENDIENTE } from "@/lib/compras/reclamaciones";
+import { estaPendiente, nombreDelEstado } from "@/lib/compras/reclamaciones";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole } from "@/lib/types";
@@ -219,6 +219,12 @@ export function ComprasView() {
   // El periodo. Arranca en el mes en curso, pero la fecha no se puede mirar al
   // pintar, así que el valor lo pone el cargador igual que `hoy`.
   const [vista, setVista] = useState<Vista>("mes");
+  /*
+    Qué estados de Sage se miran. Se abre en pendientes, que es el trabajo; los
+    demás están a un clic porque esconderlos del todo obliga a salirse a Sage
+    para comprobar cualquier duda.
+  */
+  const [estadoSage, setEstadoSage] = useState<"pendientes" | "servidos" | "todos">("pendientes");
   const [mes, setMes] = useState("");
   const [anio, setAnio] = useState(0);
   // Los dos diálogos: el de reclamar (con el correo delante) y el de apuntar
@@ -249,7 +255,7 @@ export function ComprasView() {
       setAcceso("permitido");
 
       const [pedidosRes, lineasRes, proveedoresRes, seguimientoRes, enviosRes, respuestasRes] = await Promise.all([
-        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units, status").gt("pending_units", 0).or(`status.is.null,status.eq.${ESTADO_PENDIENTE}`).order("company_code").order("number").range(desde, hasta)),
+        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units, status").gt("pending_units", 0).order("company_code").order("number").range(desde, hasta)),
         fetchAllPages((desde, hasta) => supabase.from("sage_purchase_order_lines").select("company_code, year, series, number, line_number, article_code, description, pending_units, expected_on, net_amount").gt("pending_units", 0).order("company_code").order("number").order("line_number").range(desde, hasta)),
         supabase.from("sage_suppliers").select("company_code, code, name, email"),
         leerSeguimiento(supabase),
@@ -361,12 +367,18 @@ export function ComprasView() {
     es lo que se está trabajando. Lo de atrás no desaparece —está en "Todo" y
     en los meses anteriores—, pero no entra en los números del día a día.
   */
+  const porEstadoSage = useMemo(() => {
+    if (estadoSage === "todos") return conEstado;
+    const quiero = estadoSage === "pendientes";
+    return conEstado.filter((fila) => estaPendiente(fila.pedido.status) === quiero);
+  }, [conEstado, estadoSage]);
+
   const delPeriodo = useMemo(() => {
-    if (vista === "todo" || !hoy) return conEstado;
+    if (vista === "todo" || !hoy) return porEstadoSage;
     const prefijo = vista === "mes" ? mes : String(anio);
-    if (!prefijo) return conEstado;
-    return conEstado.filter((fila) => fila.pedido.order_date.startsWith(prefijo));
-  }, [conEstado, vista, mes, anio, hoy]);
+    if (!prefijo) return porEstadoSage;
+    return porEstadoSage.filter((fila) => fila.pedido.order_date.startsWith(prefijo));
+  }, [porEstadoSage, vista, mes, anio, hoy]);
 
   /** Los años que hay pedidos, para no ofrecer años vacíos. */
   const anios = useMemo(() => {
@@ -553,6 +565,7 @@ export function ComprasView() {
     { header: "Fecha prevista", value: (fila) => fila.fecha },
     { header: "Vencido", value: (fila) => (fila.vencido ? "Sí" : "No") },
     { header: "Pendiente (€)", value: (fila) => Number(fila.pedido.pending_amount) },
+    { header: "Estado en Sage", value: (fila) => nombreDelEstado(fila.pedido.status) },
     { header: "Reclamado", value: (fila) => (fila.seguimiento?.level ? `${fila.seguimiento.level} ${fila.seguimiento.level === 1 ? "vez" : "veces"}` : "No") },
     { header: "Última reclamación", value: (fila) => fila.seguimiento?.last_chased_at?.slice(0, 10) ?? "" },
     { header: "Ha contestado", value: (fila) => (fila.contestado ? "Sí" : "No") },
@@ -626,9 +639,11 @@ export function ComprasView() {
               </label>
             ) : null}
             <label>
-              <span>Se mira por</span>
-              <select value="pedido" disabled>
-                <option value="pedido">Fecha del pedido</option>
+              <span>Estado en Sage</span>
+              <select value={estadoSage} onChange={(evento) => { setPagina(0); setEstadoSage(evento.target.value as typeof estadoSage); }}>
+                <option value="pendientes">Pendientes</option>
+                <option value="servidos">Servidos y a medias</option>
+                <option value="todos">Todos</option>
               </select>
             </label>
           </div>
@@ -710,6 +725,7 @@ export function ComprasView() {
                         <strong>{fila.pedido.series}{fila.pedido.number}</strong>
                         <small>
                           {fila.pedido.lines} {fila.pedido.lines === 1 ? "línea" : "líneas"}
+                          {estaPendiente(fila.pedido.status) ? "" : ` · ${nombreDelEstado(fila.pedido.status)} en Sage`}
                           {fila.seguimiento?.shipping_notice ? " · material enviado" : ""}
                         </small>
                       </span>
@@ -747,7 +763,7 @@ export function ComprasView() {
                     </td>
                     {/* Los botones hacen lo suyo sin abrir además la ficha. */}
                     <td className="recent-inquiries-actions" onClick={(evento) => evento.stopPropagation()}>
-                      {fila.sinFecha > 0 && fila.pedido.supplier_code ? (
+                      {fila.sinFecha > 0 && fila.pedido.supplier_code && estaPendiente(fila.pedido.status) ? (
                         <button type="button" className="button button-compact button-primary" disabled={!fila.proveedorEmail}
                           title={fila.proveedorEmail ? `Escribir a ${fila.proveedorEmail}` : "Este proveedor no tiene correo en Sage"}
                           onClick={() => void prepararReclamacion(fila)}>Reclamar</button>

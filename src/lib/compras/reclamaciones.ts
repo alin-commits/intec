@@ -26,6 +26,18 @@
 */
 export const ESTADO_PENDIENTE = 0;
 
+/** Cómo se llama cada estado, para enseñarlo tal cual lo llaman en Sage. */
+export const NOMBRE_DEL_ESTADO: Record<string, string> = {
+  "0": "pendiente",
+  "1": "servido a medias",
+  "2": "servido",
+};
+
+export function nombreDelEstado(status: number | null | undefined): string {
+  if (status === null || status === undefined) return "sin estado";
+  return NOMBRE_DEL_ESTADO[String(status)] ?? `estado ${status}`;
+}
+
 export function estaPendiente(status: number | null | undefined): boolean {
   return status === null || status === undefined || status === ESTADO_PENDIENTE;
 }
