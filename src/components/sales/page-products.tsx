@@ -5,7 +5,7 @@ import { DonutChart } from "@/components/charts/donut-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin } from "@/lib/sage-panel";
-import { channelColors, discountPercent, euros, monthLabel, pairOf, soloUnMes, tenths, variation } from "@/lib/sales-model";
+import { channelColors, discountPercent, euros, marcado, monthLabel, pairOf, soloUnMes, soloUno, tenths, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
@@ -63,10 +63,17 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   const { filters, period } = ctx;
   const [subfamily, setSubfamily] = useState<string | null>(null);
   const [brand, setBrand] = useState<string | null>(null);
+  /*
+    Las subfamilias y la evolución son de UNA familia: con dos marcadas no se
+    sabe de cuál serían las subfamilias, así que esos paneles solo salen cuando
+    hay una sola. Lo demás —el reparto por familia, las marcas, los artículos—
+    funciona con las que haya.
+  */
+  const familia = soloUno(filters.families);
   // La subfamilia es de una familia: al cambiar de familia deja de tener sentido.
-  const [subfamilyOf, setSubfamilyOf] = useState<string | null>(filters.family);
-  if (subfamilyOf !== filters.family) {
-    setSubfamilyOf(filters.family);
+  const [subfamilyOf, setSubfamilyOf] = useState<string | null>(familia);
+  if (subfamilyOf !== familia) {
+    setSubfamilyOf(familia);
     setSubfamily(null);
   }
 
@@ -76,11 +83,15 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   // traería de más. Los de la comparación son sus parejas.
   const months = ctx.rpc.p_months;
   const compareMonths = ctx.rpcCompare.p_months;
+  /** Lo que se le pasa a la base solo cuando hay algo marcado. */
+  const conMeses = (lista: string[] | undefined) => (lista ? { p_months: lista } : {});
+  const conSociedades = ctx.rpc.p_companies ? { p_companies: ctx.rpc.p_companies } : {};
+  const conFamilias = ctx.rpc.p_families ? { p_families: ctx.rpc.p_families } : {};
   const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period.from, period.to, compare, months, compareMonths, reload]), async () => {
     const supabase = createClient();
     const [now, before] = await Promise.all([
-      supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to, p_months: months }),
-      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to, p_months: compareMonths }) : Promise.resolve({ data: [], error: null }),
+      supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to, ...conMeses(months) }),
+      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to, ...conMeses(compareMonths) }) : Promise.resolve({ data: [], error: null }),
     ]);
     const error = now.error ?? before.error;
     return { data: error ? null : { now: (now.data ?? []) as FamilyRow[], before: (before.data ?? []) as FamilyRow[] }, error };
@@ -90,17 +101,17 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   const spanFrom = period.baseCompare && period.baseCompare.from < period.base.from ? period.baseCompare.from : period.base.from;
   const spanTo = period.baseCompare && period.baseCompare.to > period.base.to ? period.baseCompare.to : period.base.to;
   const familyMonths = useSageQuery<{ day: string; company_code: number; net_amount: number }[]>(
-    filters.family !== null ? JSON.stringify(["familia-meses", filters.family, spanFrom, spanTo, reload]) : null,
+    familia !== null ? JSON.stringify(["familia-meses", familia, spanFrom, spanTo, reload]) : null,
     async () => {
       const supabase = createClient();
       return fetchAllPages<{ day: string; company_code: number; net_amount: number }>((start, end) =>
         supabase.from("sage_family_sales_daily").select("day, company_code, net_amount")
-          .eq("family_code", filters.family ?? "").gte("day", spanFrom).lte("day", spanTo)
+          .eq("family_code", familia ?? "").gte("day", spanFrom).lte("day", spanTo)
           .order("id").range(start, end));
     },
   );
-  const articleArgs = { p_from: period.from, p_to: period.to, p_company: filters.company, p_family: filters.family, p_months: months };
-  const subfamilies = useSageQuery<GroupRow[]>(ctx.detail.articles && filters.family !== null ? JSON.stringify(["subfamilias", articleArgs, reload]) : null, async () =>
+  const articleArgs = { p_from: period.from, p_to: period.to, ...conSociedades, ...conFamilias, ...conMeses(months) };
+  const subfamilies = useSageQuery<GroupRow[]>(ctx.detail.articles && familia !== null ? JSON.stringify(["subfamilias", articleArgs, reload]) : null, async () =>
     await createClient().rpc("sage_article_groups", { p_group: "subfamilia", ...articleArgs }));
   const brands = useSageQuery<GroupRow[]>(ctx.detail.articles ? JSON.stringify(["marcas", articleArgs, reload]) : null, async () =>
     await createClient().rpc("sage_article_groups", { p_group: "marca", ...articleArgs }));
@@ -108,7 +119,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     await createClient().rpc("sage_article_summary", { ...articleArgs, p_subfamily: subfamily, p_brand: brand, p_limit: 100 }));
 
   // ---- Familias, juntando las que se llaman igual en cada sociedad ----
-  const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
+  const inCompany = (row: { company_code: number }) => marcado(filters.companies, row.company_code);
   const groupFamilies = (list: FamilyRow[]) => {
     const map = new Map<string, { code: string; net: number; units: number; trusted_net: number; trusted_cost: number; trusted_without_cost: number; gross_amount: number; gross_net: number }>();
     for (const row of list.filter(inCompany)) {
@@ -177,7 +188,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     { key: "articulo", header: "Artículo", text: true, render: (row) => (
       <span className="sales-article">
         <strong>{row.name ?? row.article_code}</strong>
-        <small>{row.article_code}{row.brand ? ` · ${row.brand}` : ""}{filters.family === null ? ` · ${ctx.familyName(row.family_code)}` : ""}</small>
+        <small>{row.article_code}{row.brand ? ` · ${row.brand}` : ""}{filters.families.length === 0 ? ` · ${ctx.familyName(row.family_code)}` : ""}</small>
       </span>
     ), sort: (row) => row.name ?? row.article_code },
     { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
@@ -187,7 +198,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents) },
   ];
   const periodName = ctx.periodName;
-  const scope = [filters.family !== null ? ctx.familyName(filters.family) : null, subfamily !== null ? (subfamilies.data ?? []).find((row) => row.code === subfamily)?.name ?? subfamily : null, brand].filter(Boolean).join(" · ");
+  const scope = [familia !== null ? ctx.familyName(familia) : null, subfamily !== null ? (subfamilies.data ?? []).find((row) => row.code === subfamily)?.name ?? subfamily : null, brand].filter(Boolean).join(" · ");
 
   return (
     <div className="page-stack">
@@ -203,17 +214,17 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
             rows={familyRows}
             columns={familyColumns}
             rowKey={(row) => row.code}
-            activeKey={filters.family}
-            onRowClick={(row) => ctx.toggle("family", row.code)}
+            activeKey={familia}
+            onRowClick={(row) => ctx.toggleEnLista("families", row.code)}
             initialSort={{ key: "ventas", desc: true }}
             limit={15}
             empty={families.data ? "Sin ventas por familia en este periodo." : "Cargando…"}
           />
         </Panel>
 
-        {filters.family !== null ? (
+        {familia !== null ? (
           <Panel
-            title={`${ctx.familyName(filters.family)} mes a mes`}
+            title={`${ctx.familyName(familia)} mes a mes`}
             subtitle={`${period.baseCompare ? `Con ${period.baseCompareShort} en gris. ` : ""}Pulsa un mes para filtrar`}
             className="panel chart-panel sales-board-narrow"
           >
@@ -223,7 +234,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
                 ...(period.baseCompare ? [{ key: "anterior", label: period.baseCompareShort ?? "", color: "#cbd5e1" }] : []),
                 { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ]}
-              ariaLabel={`Venta mensual de la familia ${ctx.familyName(filters.family)}`}
+              ariaLabel={`Venta mensual de la familia ${ctx.familyName(familia)}`}
               valueFormatter={euros}
               onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
@@ -236,13 +247,13 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
               centerLabel="ventas"
               ariaLabel="Reparto de la venta por familia"
               valueFormatter={(value) => euros(value)}
-              onSelect={(label) => { const code = codeByName.get(label); if (code !== undefined) ctx.toggle("family", code); }}
+              onSelect={(label) => { const code = codeByName.get(label); if (code !== undefined) ctx.toggleEnLista("families", code); }}
               selectedLabel={null}
             />
           </Panel>
         )}
 
-        {filters.family !== null ? (
+        {familia !== null ? (
           <Panel title="Subfamilias" subtitle={subfamily ? "Pulsa otra vez para quitar el filtro" : "Pulsa una para ver sus artículos"} className="panel table-panel sales-board-half">
             {ctx.detail.articles ? (
               <DataTable
@@ -259,7 +270,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
           </Panel>
         ) : null}
 
-        <Panel title="Marcas" subtitle={brand ? "Pulsa otra vez para quitar el filtro" : "Pulsa una para ver sus artículos"} className={`panel table-panel ${filters.family !== null ? "sales-board-half" : "sales-board-full"}`}>
+        <Panel title="Marcas" subtitle={brand ? "Pulsa otra vez para quitar el filtro" : "Pulsa una para ver sus artículos"} className={`panel table-panel ${familia !== null ? "sales-board-half" : "sales-board-full"}`}>
           {ctx.detail.articles ? (
             <DataTable
               rows={(brands.data ?? []).filter((row) => row.code !== "")}

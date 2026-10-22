@@ -7,7 +7,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, RefreshIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { delta, discountPercent, euros, hayComercialMarcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, ticketFormatter, variation } from "@/lib/sales-model";
+import { delta, discountPercent, euros, hayComercialMarcado, marcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, soloUno, ticketFormatter, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
@@ -66,10 +66,14 @@ function SegmentsPanel({ ctx, periodName }: { ctx: SalesContext; periodName: str
     { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity },
   ];
 
+  // Con una sola familia marcada se puede decir cuál; con varias, el subtítulo
+  // se queda como está y las etiquetas de arriba ya dicen cuáles son.
+  const familiaSola = soloUno(ctx.filters.families);
+
   return (
     <Panel
       title={`Clientes por ${label.toLowerCase()} en ${periodName}`}
-      subtitle={`Según la ficha del cliente en Sage, con los filtros puestos${ctx.filters.family ? ` (los que compran ${ctx.familyName(ctx.filters.family)}, con todo lo que compran)` : ""}. Dto.: rebaja sobre tarifa`}
+      subtitle={`Según la ficha del cliente en Sage, con los filtros puestos${familiaSola ? ` (los que compran ${ctx.familyName(familiaSola)}, con todo lo que compran)` : ""}. Dto.: rebaja sobre tarifa`}
       trailing={(
         <div className="sales-switch is-wrap" role="group" aria-label="Partir la venta por">
           {segmentDimensions.map((item) => (
@@ -113,17 +117,17 @@ function CustomerSearch({ ctx }: { ctx: SalesContext }) {
   }, [text]);
   // Sin comas ni paréntesis, que romperían el filtro de la base.
   const safe = query.replace(/[,()*%\\]/g, " ").replace(/\s+/g, " ").trim();
-  const company = ctx.filters.company;
-  const found = useSageQuery<FoundCustomer[]>(safe.length >= 2 ? JSON.stringify(["buscar-cliente", safe, company]) : null, async () => {
+  const companies = ctx.filters.companies;
+  const found = useSageQuery<FoundCustomer[]>(safe.length >= 2 ? JSON.stringify(["buscar-cliente", safe, companies]) : null, async () => {
     let request = createClient().from("sage_customers")
       .select("company_code, code, name, trade_name, municipality, province")
       .or(`name.ilike.*${safe}*,trade_name.ilike.*${safe}*,code.ilike.${safe}*`)
       .order("name")
       .limit(12);
-    if (company !== null) request = request.eq("company_code", company);
+    if (companies.length > 0) request = request.in("company_code", companies);
     return await request;
   });
-  const multiCompany = ctx.companies.length > 1 && company === null;
+  const multiCompany = ctx.companies.length > 1 && companies.length !== 1;
   const companyName = (code: number) => ctx.companies.find((item) => item.code === code)?.name ?? `Sociedad ${code}`;
   const list = found.data ?? [];
 
@@ -173,7 +177,10 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   // Del periodo y de lo que se le pone al lado, para comparar mes a mes.
   const spanFrom = period.baseCompare && period.baseCompare.from < period.base.from ? period.baseCompare.from : period.base.from;
   const spanTo = period.baseCompare && period.baseCompare.to > period.base.to ? period.baseCompare.to : period.base.to;
-  const monthlyArgs = { p_from: spanFrom, p_to: spanTo, p_company: ctx.rpc.p_company, p_reps: ctx.rpc.p_reps, p_series: ctx.rpc.p_series };
+  const monthlyArgs = {
+    p_from: spanFrom, p_to: spanTo, p_reps: ctx.rpc.p_reps, p_series: ctx.rpc.p_series,
+    ...(ctx.rpc.p_companies ? { p_companies: ctx.rpc.p_companies } : {}),
+  };
   const monthly = useSageQuery<{ rows: MonthlyRow[]; firstDay: string | null }>(ctx.detail.customers ? JSON.stringify(["clientes-mes", monthlyArgs, reload]) : null, async () => {
     const supabase = createClient();
     const [rows, first] = await Promise.all([
@@ -191,6 +198,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   const selectedMonthIndex = soloUnMes(filters) ? monthKeys.indexOf(soloUnMes(filters)!) : -1;
   const periodName = ctx.periodName;
   const lost = lostCustomers(period);
+  const familiaSola = soloUno(filters.families);
   const pair = (key: string) => pairOf(key, period.monthOffset) ?? "";
 
   // En los primeros meses del histórico todos parecen nuevos: no hay nada antes.
@@ -209,7 +217,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         anterior: Number(byMonth.get(pair(key))?.activos ?? 0),
       }));
     }
-    const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
+    const inCompany = (row: { company_code: number }) => marcado(filters.companies, row.company_code);
     const byMonth = new Map<string, { active: number; fresh: number }>();
     for (const row of (totals.data?.monthly ?? []).filter(inCompany)) {
       const key = row.month.slice(0, 7);
@@ -259,7 +267,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
     { key: "ultima", header: "Última compra", render: (row) => shortDate(row.last_purchase), sort: (row) => row.last_purchase ?? "" },
   ];
 
-  const dormant = totals.data ? snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.company) : null;
+  const dormant = totals.data ? snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.companies) : null;
 
   return (
     <div className="page-stack">
@@ -277,7 +285,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
             <div className="sales-section-heading">
               <h2>Clientes de {periodName}</h2>
               <p>
-                Pulsa una cifra para ver quiénes son. {filters.family ? `Solo los que compran ${ctx.familyName(filters.family)}. ` : ""}
+                Pulsa una cifra para ver quiénes son. {familiaSola ? `Solo los que compran ${ctx.familyName(familiaSola)}. ` : ""}
                 {ctx.comparisonAvailable ? `Las flechas comparan ${ctx.comparisonHelper}.` : ""}
               </p>
             </div>
@@ -331,7 +339,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
       <section className="sales-board">
         <Panel
           title={`Clientes por mes en ${period.baseLabel}`}
-          subtitle={`Cuántos compran cada mes${showNew ? " y cuántos por primera vez" : ""}${hasBefore ? `, con ${period.baseCompareShort} en gris` : ""}${!ctx.detail.customers && filters.company === null ? " (suma de sociedades)" : ""}. Pulsa un mes para ver sus clientes`}
+          subtitle={`Cuántos compran cada mes${showNew ? " y cuántos por primera vez" : ""}${hasBefore ? `, con ${period.baseCompareShort} en gris` : ""}${!ctx.detail.customers && filters.companies.length === 0 ? " (suma de sociedades)" : ""}. Pulsa un mes para ver sus clientes`}
           className="panel chart-panel sales-board-wide"
         >
           {monthly.failed ? <LoadFailed what="los clientes por mes" /> : (
@@ -348,7 +356,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />
           )}
-          {!ctx.detail.customers && (filters.channel || hayComercialMarcado(filters) || filters.family) ? (
+          {!ctx.detail.customers && (filters.channels.length > 0 || hayComercialMarcado(filters) || filters.families.length > 0) ? (
             <p className="sales-section-note">Estos totales no se pueden partir por canal, comercial ni familia: son de la sociedad entera.</p>
           ) : null}
         </Panel>

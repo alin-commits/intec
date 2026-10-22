@@ -5,7 +5,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { TrophyIcon, EuroIcon, CalendarIcon } from "@/components/icons";
 import { formatPercent } from "@/lib/format";
-import { euros, filterRows, groupRows, monthLongNames, monthNames, soloUnComercial, soloUnMes, type SummaryRow, targetsFor, targetToDate } from "@/lib/sales-model";
+import { euros, filterRows, groupRows, monthLongNames, monthNames, soloUnComercial, soloUnMes, soloUno, type SummaryRow, targetsFor, targetToDate } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
 import type { SalesContext } from "./sales-context";
@@ -49,12 +49,13 @@ function TargetsNeedYear({ ctx }: { ctx: SalesContext }) {
 
 function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: number }) {
   const { filters, today } = ctx;
-  const months = targetsFor(ctx.targets, shownYear, filters.company, filters.repKeys);
-  const scopeKey = JSON.stringify([shownYear, filters.company, filters.repKeys, ctx.targets]);
+  const months = targetsFor(ctx.targets, shownYear, filters.companies, filters.repKeys);
+  const scopeKey = JSON.stringify([shownYear, filters.companies, filters.repKeys, ctx.targets]);
   // Los objetivos se guardan de uno en uno: un importe repartido entre varios
   // comerciales habría que decidir cómo se parte, y eso lo dice Dirección.
   const repKey = soloUnComercial(filters);
-  const editable = filters.repKeys.length <= 1;
+  const company = soloUno(filters.companies);
+  const editable = filters.repKeys.length <= 1 && filters.companies.length <= 1;
   const [draft, setDraft] = useState<string[]>(() => months.map(formatInput));
   const [draftKey, setDraftKey] = useState(scopeKey);
   const [saving, setSaving] = useState(false);
@@ -88,7 +89,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   }));
 
   const scopeLabel = [
-    filters.company === null ? "Todo el grupo" : ctx.companyLabel,
+    filters.companies.length === 0 ? "Todo el grupo" : ctx.companyLabel,
     filters.repKeys.length === 0 ? null
       : filters.repKeys.length === 1 ? ctx.repName(filters.repKeys[0])
         : `${filters.repKeys.length} comerciales`,
@@ -103,7 +104,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
     setSaving(true);
     setMessage(null);
     const supabase = createClient();
-    const existing = ctx.targets.filter((target) => target.year === shownYear && target.company_code === filters.company && target.rep_key === repKey);
+    const existing = ctx.targets.filter((target) => target.year === shownYear && target.company_code === company && target.rep_key === repKey);
     const byMonth = new Map(existing.map((target) => [target.month, target]));
     const errors: string[] = [];
     for (let index = 0; index < 12; index += 1) {
@@ -122,7 +123,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
         if (current) {
           await writeRows(supabase.from("sales_targets").update({ amount: value }).eq("id", current.id), "No se pudo guardar el objetivo.");
         } else {
-          const { error } = await supabase.from("sales_targets").insert({ year: shownYear, month: index + 1, company_code: filters.company, rep_key: repKey, amount: value });
+          const { error } = await supabase.from("sales_targets").insert({ year: shownYear, month: index + 1, company_code: company, rep_key: repKey, amount: value });
           if (error) throw error;
         }
       } catch { errors.push(monthLongNames[index]); }
@@ -212,7 +213,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
           title="Objetivo por mes"
           subtitle={editable
             ? `De: ${scopeLabel}. Cambia la sociedad o el comercial arriba para poner el suyo`
-            : `De: ${scopeLabel}. Arriba se ve la suma de sus objetivos; para cambiar uno, déjalo marcado a él solo`}
+            : `De: ${scopeLabel}. Arriba se ve la suma de los objetivos; para cambiar uno, déjalo marcado a él solo`}
           className="panel panel-padded sales-board-narrow"
         >
           <div className="sales-targets-actions">
@@ -251,7 +252,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
           </div>
           <div className="sales-targets-footer">
             {message ? <span className={message.tone === "ok" ? "sales-up" : "sales-down"} role="status">{message.text}</span>
-              : <span className="muted">{editable ? "Deja vacío un mes para quitarle el objetivo." : "Los objetivos se ponen de un comercial a la vez."}</span>}
+              : <span className="muted">{editable ? "Deja vacío un mes para quitarle el objetivo." : "Los objetivos se ponen de uno en uno: una sociedad y un comercial."}</span>}
             <button type="button" className="button button-primary" onClick={() => void save()} disabled={saving || !editable}>{saving ? "Guardando…" : "Guardar"}</button>
           </div>
         </Panel>

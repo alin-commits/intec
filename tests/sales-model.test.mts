@@ -82,18 +82,23 @@ test("los comerciales marcados filtran igual que los meses", () => {
   assert.equal(comercialMarcado({ ...noFilters, repKeys: ["sin"] }, key), false);
 });
 
-test("seriesFor devuelve las series de un canal", () => {
-  assert.deepEqual(seriesFor("Tienda", ["TK", "CRE", "B2C"]), ["TK"]);
-  assert.equal(seriesFor(null, ["TK"]), null);
+test("seriesFor devuelve las series de los canales marcados", () => {
+  assert.deepEqual(seriesFor(["Tienda"], ["TK", "CRE", "B2C"]), ["TK"]);
+  // Dos canales marcados traen las series de los dos, en el orden de siempre.
+  assert.deepEqual(seriesFor(["Tienda", "Crédito"], ["TK", "CRE", "B2C"]), ["TK", "CRE"]);
+  assert.equal(seriesFor([], ["TK"]), null);
 });
 
 test("filterRows aplica todos los filtros menos los que se saltan", () => {
   const rows = [row("2026-08", 1, "TK", 5, 100), row("2026-09", 1, "CRE", 7, 200), row("2026-08", 2, "TK", 9, 50)];
-  const filters = { ...noFilters, months: ["2026-08"], channel: "Tienda" };
+  const filters = { ...noFilters, months: ["2026-08"], channels: ["Tienda"] };
   assert.equal(filterRows(rows, filters, repOf).length, 2);
   assert.equal(filterRows(rows, filters, repOf, ["month"]).length, 2);
   assert.equal(filterRows(rows, filters, repOf, ["channel"]).length, 2);
-  assert.equal(filterRows(rows, { ...filters, company: 1 }, repOf).length, 1);
+  assert.equal(filterRows(rows, { ...filters, companies: [1] }, repOf).length, 1);
+  // Dos sociedades marcadas: entran las filas de las dos.
+  assert.equal(filterRows(rows, { ...noFilters, companies: [1, 2] }, repOf).length, 3);
+  assert.equal(filterRows(rows, { ...noFilters, companies: [2] }, repOf).length, 1);
   assert.equal(filterRows(rows, { ...noFilters, repKeys: [repOf(1, 5).key] }, repOf).length, 2);
   // Dos comerciales marcados: entran las filas de los dos.
   assert.equal(filterRows(rows, { ...noFilters, repKeys: [repOf(1, 5).key, repOf(1, 7).key] }, repOf).length, 3);
@@ -220,7 +225,7 @@ test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los dí
     { id: "b", year: 2026, month: 9, company_code: null, rep_key: null, amount: 3000 },
     { id: "c", year: 2026, month: 9, company_code: 1, rep_key: null, amount: 999 },
   ];
-  const months = targetsFor(targets, 2026, null, []);
+  const months = targetsFor(targets, 2026, [], []);
   assert.equal(months[7], 1000);
   assert.equal(months[8], 3000);
   assert.equal(months[0], null);
@@ -230,7 +235,7 @@ test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los dí
   assert.equal(soFar?.target, 1000 + 3000 * (15 / 30));
   assert.deepEqual(targetToDate(months, 2026, today, 7)?.months, ["2026-08"]);
   assert.equal(targetToDate(months, 2026, today, 0), null);
-  assert.equal(targetsFor(targets, 2026, 1, [])[8], 999);
+  assert.equal(targetsFor(targets, 2026, [1], [])[8], 999);
 });
 
 test("targetsFor con varios comerciales marcados suma los objetivos de cada uno", () => {
@@ -241,10 +246,10 @@ test("targetsFor con varios comerciales marcados suma los objetivos de cada uno"
     { id: "d", year: 2026, month: 10, company_code: null, rep_key: "ana", amount: 2000 },
   ];
   // Sin ninguno marcado, el objetivo del ámbito entero, no la suma de la gente.
-  assert.equal(targetsFor(targets, 2026, null, [])[8], 9000);
-  assert.equal(targetsFor(targets, 2026, null, ["ana"])[8], 1000);
-  assert.equal(targetsFor(targets, 2026, null, ["ana", "luis"])[8], 1500);
+  assert.equal(targetsFor(targets, 2026, [], [])[8], 9000);
+  assert.equal(targetsFor(targets, 2026, [], ["ana"])[8], 1000);
+  assert.equal(targetsFor(targets, 2026, [], ["ana", "luis"])[8], 1500);
   // Un mes que solo tiene objetivo de uno de los dos sale con el suyo.
-  assert.equal(targetsFor(targets, 2026, null, ["ana", "luis"])[9], 2000);
-  assert.equal(targetsFor(targets, 2026, null, ["luis"])[9], null);
+  assert.equal(targetsFor(targets, 2026, [], ["ana", "luis"])[9], 2000);
+  assert.equal(targetsFor(targets, 2026, [], ["luis"])[9], null);
 });

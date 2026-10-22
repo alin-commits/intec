@@ -70,9 +70,13 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
   }
 
   const { period, rpc } = ctx;
-  const base = { p_from: period.from, p_to: period.to, p_company: rpc.p_company, p_reps: rpc.p_reps, p_series: rpc.p_series, p_months: rpc.p_months };
+  const base = {
+    p_from: period.from, p_to: period.to, p_reps: rpc.p_reps, p_series: rpc.p_series,
+    ...(rpc.p_companies ? { p_companies: rpc.p_companies } : {}),
+    ...(rpc.p_months ? { p_months: rpc.p_months } : {}),
+  };
   const args = request?.type === "clientes"
-    ? { ...base, p_kind: request.kind, p_family: rpc.p_family, p_days: request.days ?? 30 }
+    ? { ...base, p_kind: request.kind, ...(rpc.p_families ? { p_families: rpc.p_families } : {}), p_days: request.days ?? 30 }
     : request ? { ...base, p_kind: request.kind } : null;
   const fn = request?.type === "clientes" ? "sage_customer_list" : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
   const key = request && args ? JSON.stringify([fn, args, ctx.reloadKey]) : null;

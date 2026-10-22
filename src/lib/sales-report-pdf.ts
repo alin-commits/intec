@@ -66,12 +66,14 @@ function filtrosPuestos(input: SalesReportInput): string[] {
   if (period.selectedMonths.length > 0) {
     dichos.push(`${period.selectedMonths.length === 1 ? "Mes" : "Meses"}: ${monthListPhrase(period.selectedMonths, period.scattered, true)}`);
   }
-  if (filters.channel) dichos.push(`Canal: ${filters.channel}`);
+  if (filters.channels.length > 0) dichos.push(`${filters.channels.length === 1 ? "Canal" : "Canales"}: ${filters.channels.join(", ")}`);
   if (hayComercialMarcado(filters)) {
     const nombres = filters.repKeys.map(repName);
     dichos.push(`${nombres.length === 1 ? "Comercial" : "Comerciales"}: ${nombres.join(", ")}`);
   }
-  if (filters.family) dichos.push(`Familia: ${familyName(filters.family)}`);
+  if (filters.families.length > 0) {
+    dichos.push(`${filters.families.length === 1 ? "Familia" : "Familias"}: ${filters.families.map(familyName).join(", ")}`);
+  }
   return dichos;
 }
 
@@ -180,7 +182,7 @@ function tablas(input: SalesReportInput): ReportTable[] {
   }
 
   // ---- Por sociedad: solo si se miran varias ----
-  if (filters.company === null && model.byCompany.length > 1) {
+  if (filters.companies.length === 0 && model.byCompany.length > 1) {
     lista.push({
       title: "Por sociedad",
       head: ["Sociedad", "Ventas", "% del total", "Margen", "Margen %", "Albaranes", "Ticket medio"],
@@ -198,7 +200,7 @@ function tablas(input: SalesReportInput): ReportTable[] {
   }
 
   // ---- Por canal: solo si se miran varios ----
-  if (filters.channel === null && model.byChannel.items.length > 1) {
+  if (filters.channels.length === 0 && model.byChannel.items.length > 1) {
     lista.push({
       title: "Por canal",
       head: ["Canal", "Ventas", "% del total", "Margen %", "Albaranes"],

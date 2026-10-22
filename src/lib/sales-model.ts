@@ -33,17 +33,39 @@ export type Company = { code: number; name: string; is_active: boolean };
 export type Rep = { company_code: number; code: number; name: string; is_person: boolean };
 export type SyncRun = { started_at: string; ok: boolean; covered_from: string | null; covered_to: string | null };
 
-/** Lo que se filtra pulsando, como en Power BI. Nulo = sin filtro. */
+/**
+ * Lo que se filtra pulsando, como en Power BI.
+ *
+ * Todos son listas y todos funcionan igual: vacía quiere decir "todas", que es
+ * lo que espera cualquiera de un filtro y evita la pantalla en blanco al
+ * desmarcar lo último. Marcar varias cosas suma, no resta.
+ */
 export type SalesFilters = {
-  company: number | null;
-  channel: string | null;
+  /** Las sociedades marcadas. Vacío: todas. */
+  companies: number[];
+  /** Los canales marcados. Vacío: todos. */
+  channels: string[];
   /** Los comerciales marcados. Vacío: todos. */
   repKeys: string[];
   /** Los meses marcados ("YYYY-MM") dentro del periodo. Vacío: todos. */
   months: string[];
-  family: string | null;
+  /** Las familias marcadas. Vacío: todas. */
+  families: string[];
 };
-export const noFilters: SalesFilters = { company: null, channel: null, repKeys: [], months: [], family: null };
+export const noFilters: SalesFilters = { companies: [], channels: [], repKeys: [], months: [], families: [] };
+
+/**
+ * El único valor marcado, o null si no hay ninguno o hay varios.
+ *
+ * Hay sitios que solo tienen sentido con uno —resaltar su fila, el desglose de
+ * una familia en subfamilias, "las ventas de agosto frente a agosto"— y con
+ * varios no dicen nada: ahí se pregunta por esto y, si viene vacío, se enseña
+ * lo del periodo entero.
+ */
+export const soloUno = <T>(marcados: T[]): T | null => (marcados.length === 1 ? marcados[0] : null);
+
+/** Si algo pasa el filtro. Sin nada marcado pasan todos. */
+export const marcado = <T>(marcados: T[], valor: T) => marcados.length === 0 || marcados.includes(valor);
 
 /**
  * Las series de Sage son el canal de venta. Se nombran para que el panel no
@@ -196,14 +218,13 @@ export const monthWithYear = (month: string) => `${monthName(month)} de ${month.
  * a las de agosto del año pasado"— y con varios marcados no dicen nada: ahí se
  * pregunta por este y, si viene vacío, se enseña lo del periodo entero.
  */
-export const soloUnMes = (filters: SalesFilters) => (filters.months.length === 1 ? filters.months[0] : null);
+export const soloUnMes = (filters: SalesFilters) => soloUno(filters.months);
 
 /** Si hay algún mes marcado. */
 export const hayMesMarcado = (filters: SalesFilters) => filters.months.length > 0;
 
 /** Si una fila entra con los meses marcados. Sin ninguno marcado, entran todas. */
-export const mesMarcado = (filters: SalesFilters, month: string) =>
-  filters.months.length === 0 || filters.months.includes(month);
+export const mesMarcado = (filters: SalesFilters, month: string) => marcado(filters.months, month);
 
 /** Las parejas de los meses marcados en la comparación. */
 export const parejasDe = (filters: SalesFilters, offset: number | null) =>
@@ -215,14 +236,13 @@ export const parejasDe = (filters: SalesFilters, offset: number | null) =>
  * Igual que con los meses: los sitios que hablan de "este comercial" en
  * singular —resaltar su fila, sus objetivos— preguntan por este.
  */
-export const soloUnComercial = (filters: SalesFilters) => (filters.repKeys.length === 1 ? filters.repKeys[0] : null);
+export const soloUnComercial = (filters: SalesFilters) => soloUno(filters.repKeys);
 
 /** Si hay algún comercial marcado. */
 export const hayComercialMarcado = (filters: SalesFilters) => filters.repKeys.length > 0;
 
 /** Si una fila entra con los comerciales marcados. Sin ninguno, entran todas. */
-export const comercialMarcado = (filters: SalesFilters, key: string) =>
-  filters.repKeys.length === 0 || filters.repKeys.includes(key);
+export const comercialMarcado = (filters: SalesFilters, key: string) => marcado(filters.repKeys, key);
 /** "de 2025", pero "del mismo tramo de 2025". */
 const ofPhrase = (versus: string) => (versus.startsWith("el ") ? `del ${versus.slice(3)}` : `de ${versus}`);
 
@@ -341,10 +361,13 @@ export function repPairsFor(repKeys: string[], reps: Rep[], identities: Map<stri
   return [...pairs];
 }
 
-/** Las series de Sage que forman un canal del panel (varias pueden dar el mismo nombre). */
-export function seriesFor(channel: string | null, allSeries: string[]): string[] | null {
-  if (channel === null) return null;
-  return allSeries.filter((series) => channelLabel(series) === channel);
+/**
+ * Las series de Sage que forman los canales marcados (varias series pueden dar
+ * el mismo nombre de canal). Nulo = sin filtro.
+ */
+export function seriesFor(channels: string[], allSeries: string[]): string[] | null {
+  if (channels.length === 0) return null;
+  return allSeries.filter((series) => channels.includes(channelLabel(series)));
 }
 
 /** Lo que el panel señala solo, para que no haya que ir buscándolo. */
@@ -371,8 +394,8 @@ export function filterRows(
 ): SummaryRow[] {
   const months = monthsOverride ?? filters.months;
   return rows.filter((row) => {
-    if (!skip.includes("company") && filters.company !== null && row.company_code !== filters.company) return false;
-    if (!skip.includes("channel") && filters.channel !== null && channelLabel(row.series) !== filters.channel) return false;
+    if (!skip.includes("company") && !marcado(filters.companies, row.company_code)) return false;
+    if (!skip.includes("channel") && !marcado(filters.channels, channelLabel(row.series))) return false;
     if (!skip.includes("rep") && !comercialMarcado(filters, repOf(row.company_code, row.rep_code).key)) return false;
     if (!skip.includes("month") && months.length > 0 && !months.includes(row.month)) return false;
     return true;
@@ -399,10 +422,13 @@ export type SalesTarget = { id: string; year: number; month: number; company_cod
  * objetivo). El ámbito es la sociedad y el comercial elegidos: el objetivo del
  * grupo no se reparte solo entre sociedades, porque eso lo decide Dirección.
  */
-export function targetsFor(targets: SalesTarget[], year: number, company: number | null, repKeys: string[]): (number | null)[] {
+export function targetsFor(targets: SalesTarget[], year: number, companies: number[], repKeys: string[]): (number | null)[] {
   const months: (number | null)[] = Array.from({ length: 12 }, () => null);
   for (const target of targets) {
-    if (target.year !== year || target.company_code !== company) continue;
+    // Sin sociedades marcadas, el objetivo del grupo; con varias, la suma de
+    // las suyas, igual que con los comerciales.
+    const deSuSociedad = companies.length === 0 ? target.company_code === null : target.company_code !== null && companies.includes(target.company_code);
+    if (target.year !== year || !deSuSociedad) continue;
     // Sin comerciales marcados, el objetivo del ámbito entero; con varios, la
     // suma de los suyos, para que el cumplimiento siga queriendo decir lo mismo.
     const suyo = repKeys.length === 0
@@ -646,7 +672,7 @@ export function computeSalesModel(input: {
         .sort((a, b) => (a.margin?.percent ?? 0) - (b.margin?.percent ?? 0))
         .slice(0, 1)
         .filter((item) => (item.margin?.percent ?? 0) <= media - 8)
-        .forEach((item) => findings.push({ tone: "warn", filter: { channel: item.label }, text: `El canal con peor margen es ${item.label}: ${euros(item.net)} al ${formatPercent(item.margin?.percent ?? 0)}.` }));
+        .forEach((item) => findings.push({ tone: "warn", filter: { channels: [item.label] }, text: `El canal con peor margen es ${item.label}: ${euros(item.net)} al ${formatPercent(item.margin?.percent ?? 0)}.` }));
     }
     // Si tres personas son media empresa, eso es un riesgo, no un dato.
     const personas = byRep.filter((rep) => rep.isPerson);

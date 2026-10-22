@@ -38,7 +38,7 @@ import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { SageRefreshButton } from "@/components/sage-refresh-button";
 import { SageFreshness } from "@/components/sage-freshness";
 import { chipNote, SalesFilterBar, type ActiveChip } from "./sales-filter-bar";
-import { salesPages, type CustomerRef, type FamilyName, type ListRequest, type SageDetail, type SalesContext, type SalesPageKey } from "./sales-context";
+import { type CustomerRef, type FamilyName, type ListRequest, type SageDetail, type SalesContext, type SalesPageKey, salesPages, type SalesRpcArgs } from "./sales-context";
 import { SalesListModal } from "./sales-list-modal";
 import { CustomerSheet } from "./customer-sheet";
 import { SummaryPage } from "./page-summary";
@@ -70,19 +70,26 @@ function readUrl(): { page: SalesPageKey | null; choice: PeriodChoice | null; co
   const params = new URLSearchParams(window.location.search);
   const page = params.get("p");
   const month = params.get("m");
-  const company = params.get("s");
+  const companies = params.get("s");
   return {
     page: salesPages.some((item) => item.key === page) ? (page as SalesPageKey) : null,
     ...periodFromParams(params),
     basis: params.get("b") === "factura" ? "factura" : null,
     filters: {
-      company: company && /^\d+$/.test(company) ? Number(company) : null,
-      channel: params.get("c") || null,
+      companies: (companies ?? "").split(",").filter((item) => /^\d+$/.test(item)).map(Number),
+      channels: (params.get("c") ?? "").split(",").filter(Boolean),
       repKeys: (params.get("r") ?? "").split(",").filter(Boolean),
       months: (month ?? "").split(",").filter((item) => /^\d{4}-\d{2}$/.test(item)),
-      family: params.get("f") || null,
+      families: (params.get("f") ?? "").split(",").filter(Boolean),
     },
   };
+}
+
+/** "Tienda y Web", o "4 marcados" cuando son demasiados para leerlos. */
+function juntar(nombres: string[]): string {
+  if (nombres.length === 1) return nombres[0];
+  if (nombres.length === 2) return nombres.join(" y ");
+  return `${nombres.length} marcados`;
 }
 
 export function SalesDashboard() {
@@ -249,10 +256,10 @@ export function SalesDashboard() {
     periodToParams(params, choice, compareChoice, today.getFullYear());
     if (basis === "factura") params.set("b", "factura");
     if (requested.months.length > 0) params.set("m", requested.months.join(","));
-    if (requested.company !== null) params.set("s", String(requested.company));
-    if (requested.channel) params.set("c", requested.channel);
+    if (requested.companies.length > 0) params.set("s", requested.companies.join(","));
+    if (requested.channels.length > 0) params.set("c", requested.channels.join(","));
     if (requested.repKeys.length > 0) params.set("r", requested.repKeys.join(","));
-    if (requested.family) params.set("f", requested.family);
+    if (requested.families.length > 0) params.set("f", requested.families.join(","));
     const query = params.toString();
     const next = `${window.location.pathname}${query ? `?${query}` : ""}`;
     if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, "", next);
@@ -286,17 +293,17 @@ export function SalesDashboard() {
     reps: new Set(rows.map((row) => repOf(row.company_code, row.rep_code).key)),
   }), [rows, repOf]);
   const missing = {
-    channel: requested.channel !== null && !available.channels.has(requested.channel),
+    channel: requested.channels.length > 0 && !requested.channels.some((item) => available.channels.has(item)),
     repKey: requested.repKeys.length > 0 && !requested.repKeys.some((item) => available.reps.has(item)),
     month: requested.months.length > 0 && !requested.months.some((item) => shownBase.months.includes(item)),
   };
   const filters = useMemo<SalesFilters>(() => ({
-    company: requested.company,
-    channel: missing.channel ? null : requested.channel,
+    companies: requested.companies,
+    channels: requested.channels.filter((item) => available.channels.has(item)),
     repKeys: requested.repKeys.filter((item) => available.reps.has(item)),
     months: requested.months.filter((item) => shownBase.months.includes(item)),
-    family: requested.family,
-  }), [requested, missing.channel, available.reps, shownBase.months]);
+    families: requested.families,
+  }), [requested, available.channels, available.reps, shownBase.months]);
 
   const period = useMemo(
     () => resolvePeriod({ choice: shownChoice, compare: shownCompare, months: filters.months, today, dataFrom }),
@@ -325,22 +332,22 @@ export function SalesDashboard() {
     () => [...new Set([...rows, ...previousRows].map((row) => row.series))],
     [rows, previousRows],
   );
-  const rpc = useMemo(() => ({
-    p_company: filters.company,
+  const rpc = useMemo<SalesRpcArgs>(() => ({
     p_reps: repPairsFor(filters.repKeys, reps, identities, companies.map((company) => company.code)),
-    p_series: seriesFor(filters.channel, allSeries),
-    p_family: filters.family,
+    p_series: seriesFor(filters.channels, allSeries),
+    ...(filters.companies.length > 0 ? { p_companies: filters.companies } : {}),
+    ...(filters.families.length > 0 ? { p_families: filters.families } : {}),
     // La lista de meses solo se manda cuando hace falta: si los marcados van
     // seguidos, el tramo de fechas ya los describe exactamente y preguntar por
     // meses no cambiaría nada. Con huecos —enero y julio— el tramo traería de
     // más y la lista es la única manera de que cuadre.
-    p_months: period.scattered ? period.selectedMonths : null,
+    ...(period.scattered ? { p_months: period.selectedMonths } : {}),
   }), [filters, reps, identities, companies, allSeries, period.scattered, period.selectedMonths]);
   // Lo mismo para el periodo de al lado, con sus parejas.
-  const rpcCompare = useMemo(
-    () => ({ ...rpc, p_months: period.scattered && period.compareMonths.length > 0 ? period.compareMonths : null }),
-    [rpc, period.scattered, period.compareMonths],
-  );
+  const rpcCompare = useMemo<SalesRpcArgs>(() => {
+    const parejas = period.scattered ? period.compareMonths : [];
+    return { ...rpc, ...(parejas.length > 0 ? { p_months: parejas } : { p_months: undefined }) };
+  }, [rpc, period.scattered, period.compareMonths]);
 
   const repLabels = useMemo(() => {
     const map = new Map<string, string>([[UNASSIGNED_KEY, "Sin comercial asignado"]]);
@@ -380,6 +387,20 @@ export function SalesDashboard() {
     });
   }, []);
 
+  /**
+   * Marcar o desmarcar un valor de cualquier filtro, sin tocar los demás.
+   *
+   * Es lo que hace pulsar una barra o una fila: la primera la marca, otra se
+   * suma y volver a pulsarla la quita.
+   */
+  const toggleEnLista = useCallback(<K extends keyof SalesFilters>(key: K, value: SalesFilters[K][number]) => {
+    setRequested((current) => {
+      const lista = current[key] as SalesFilters[K][number][];
+      const puesto = lista.includes(value);
+      return { ...current, [key]: puesto ? lista.filter((item) => item !== value) : [...lista, value] };
+    });
+  }, []);
+
   /* Lo mismo con los comerciales: pulsar su fila o su barra los va sumando. */
   const toggleRep = useCallback((key: string | null) => {
     setRequested((current) => {
@@ -406,9 +427,10 @@ export function SalesDashboard() {
     if (choice.kind === "year" && allowed.length > 0 && !allowed.includes(choice.year)) choosePeriod({ kind: "year", year: allowed[0] });
   }
 
-  const companyLabel = filters.company === null
+  const nombreDeSociedad = (code: number) => companies.find((item) => item.code === code)?.name ?? `Sociedad ${code}`;
+  const companyLabel = filters.companies.length === 0
     ? "todas las sociedades"
-    : companies.find((item) => item.code === filters.company)?.name ?? `Sociedad ${filters.company}`;
+    : juntar(filters.companies.map(nombreDeSociedad));
   const comparisonHelper = period.compare && period.versus
     ? `${against(period.versus)}${sameDays(period) ? " (mismos días)" : ""}`
     : period.compareNote ? `sin comparación: ${period.compareNote}` : "sin comparar";
@@ -423,6 +445,7 @@ export function SalesDashboard() {
     toggle,
     toggleMonth,
     toggleRep,
+    toggleEnLista,
     companies,
     reps,
     families,
@@ -496,19 +519,29 @@ export function SalesDashboard() {
       : monthListPhrase(requested.months, true, true);
     chips.push({ key: "months", label: `${requested.months.length === 1 ? "Mes" : "Meses"}: ${nombres}`, note: chipNote("month", pageInfo.applies, missing.month) });
   }
-  if (requested.company !== null) chips.push({ key: "company", label: companyLabel, note: chipNote("company", pageInfo.applies, false) });
-  if (requested.channel) chips.push({ key: "channel", label: `Canal: ${requested.channel}`, note: chipNote("channel", pageInfo.applies, missing.channel) });
+  if (requested.companies.length > 0) chips.push({ key: "companies", label: companyLabel, note: chipNote("company", pageInfo.applies, false) });
+  if (requested.channels.length > 0) {
+    chips.push({
+      key: "channels",
+      label: `${requested.channels.length === 1 ? "Canal" : "Canales"}: ${juntar(requested.channels)}`,
+      note: chipNote("channel", pageInfo.applies, missing.channel),
+    });
+  }
   if (requested.repKeys.length > 0) {
     const nombres = requested.repKeys.map(repName);
     chips.push({
       key: "repKeys",
-      label: nombres.length === 1
-        ? `Comercial: ${nombres[0]}`
-        : `Comerciales: ${nombres.length <= 2 ? nombres.join(" y ") : `${nombres.length} marcados`}`,
+      label: `${nombres.length === 1 ? "Comercial" : "Comerciales"}: ${juntar(nombres)}`,
       note: chipNote("rep", pageInfo.applies, missing.repKey),
     });
   }
-  if (requested.family) chips.push({ key: "family", label: `Familia: ${familyName(requested.family)}`, note: chipNote("family", pageInfo.applies, false) });
+  if (requested.families.length > 0) {
+    chips.push({
+      key: "families",
+      label: `${requested.families.length === 1 ? "Familia" : "Familias"}: ${juntar(requested.families.map(familyName))}`,
+      note: chipNote("family", pageInfo.applies, false),
+    });
+  }
 
   const invoiceStart = new Date(`${INVOICE_DATES_FROM}T12:00:00`).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
 
@@ -590,7 +623,7 @@ export function SalesDashboard() {
         onBasis={changeBasis}
         requested={requested}
         monthOptions={monthOptions}
-        companyOptions={companies.filter((company) => company.is_active || company.code === requested.company).map((company) => ({ value: String(company.code), label: company.name }))}
+        companyOptions={companies.filter((company) => company.is_active || requested.companies.includes(company.code)).map((company) => ({ value: String(company.code), label: company.name }))}
         channelOptions={[...model.byChannel.real].sort((a, b) => a.localeCompare(b, "es"))}
         repOptions={repOptions}
         familyOptions={familyOptions}

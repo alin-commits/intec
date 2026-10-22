@@ -2,7 +2,7 @@
 
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { type Bucket, bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, filterRows, groupRows, hayMesMarcado, mergeBucket, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, type SummaryRow, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { type Bucket, bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, filterRows, groupRows, hayMesMarcado, mergeBucket, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, type SummaryRow, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -165,8 +165,8 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
             rows={channels}
             columns={channelColumns}
             rowKey={(row) => row.label}
-            activeKey={filters.channel}
-            onRowClick={(row) => model.byChannel.real.has(row.label) && ctx.toggle("channel", row.label)}
+            activeKey={soloUno(filters.channels)}
+            onRowClick={(row) => model.byChannel.real.has(row.label) && ctx.toggleEnLista("channels", row.label)}
             initialSort={{ key: "ventas", desc: true }}
           />
         </Panel>

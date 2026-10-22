@@ -6,7 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { CalendarIcon, ConsultasIcon, ConversionIcon, EuroIcon, TarjetasIcon, TrophyIcon, UsuariosIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, monthName, soloUnComercial, soloUnMes, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, monthName, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { lostCustomers, type SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals } from "./sales-queries";
@@ -40,7 +40,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const unMes = soloUnMes(filters);
   const monthIndex = unMes ? Number(unMes.slice(5, 7)) - 1 : null;
   const targetSoFar = targetYear !== null
-    ? targetToDate(targetsFor(ctx.targets, targetYear, filters.company, filters.repKeys), targetYear, today, monthIndex)
+    ? targetToDate(targetsFor(ctx.targets, targetYear, filters.companies, filters.repKeys), targetYear, today, monthIndex)
     : null;
   // Solo los meses que tienen objetivo: si falta el de marzo, su venta no cuenta.
   const targetReal = targetSoFar
@@ -50,13 +50,13 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   // Clientes: con el detalle nuevo de Sage, las cifras con nombre; sin él, los totales de antes.
   const customerFallback = (() => {
     if (ctx.detail.customers || !totals.data) return null;
-    const inCompany = (row: { company_code: number }) => filters.company === null || row.company_code === filters.company;
+    const inCompany = (row: { company_code: number }) => marcado(filters.companies, row.company_code);
     // El último mes cerrado del periodo: el que va por la mitad no dice nada.
     const closed = period.basePartial ? period.months.slice(0, -1) : period.months;
     const monthKey = filters.months[filters.months.length - 1] ?? closed[closed.length - 1] ?? null;
     const trustedFrom = trustedNewCustomersFrom(totals.data.firstMonth);
     const rows = totals.data.monthly.filter((row) => inCompany(row) && monthKey !== null && row.month.startsWith(monthKey));
-    const dormant = snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.company);
+    const dormant = snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.companies);
     return {
       monthKey,
       active: rows.length > 0 ? rows.reduce((sum, row) => sum + Number(row.active_customers), 0) : null,
@@ -66,7 +66,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
       dormant,
     };
   })();
-  const backlog = totals.data ? snapshotTotal(totals.data.snapshots, "pedidos_pendientes", filters.company) : null;
+  const backlog = totals.data ? snapshotTotal(totals.data.snapshots, "pedidos_pendientes", filters.companies) : null;
   const periodName = ctx.periodName;
   const lost = lostCustomers(period);
   // El mes en curso contra los mismos días de su pareja: solo cuando se compara
@@ -154,7 +154,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             label="Objetivo"
             value={targetSoFar ? formatPercent((targetReal / Math.max(targetSoFar.target, 1)) * 100) : "Sin fijar"}
             helper={targetSoFar
-              ? `${euros(targetReal)} de ${euros(targetSoFar.target)} a hoy${filters.channel ? " (sin filtro de canal)" : ""}`
+              ? `${euros(targetReal)} de ${euros(targetSoFar.target)} a hoy${filters.channels.length > 0 ? " (sin filtro de canal)" : ""}`
               : "pon el objetivo de ventas en la página Objetivos"}
             icon={<TrophyIcon />}
             tone={targetSoFar ? (targetReal >= targetSoFar.target ? "emerald" : "rose") : "amber"}
@@ -231,7 +231,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
               <KpiCard
                 label={customerFallback?.monthKey ? `Clientes en ${monthName(customerFallback.monthKey)}` : "Clientes con compra"}
                 value={customerFallback?.active !== null && customerFallback?.active !== undefined ? numberFormatter.format(customerFallback.active) : "—"}
-                helper={filters.company === null ? "suma de sociedades" : "con alguna compra ese mes"}
+                helper={filters.companies.length === 0 ? "suma de sociedades" : "con alguna compra ese mes"}
                 delta="Sin comparación"
                 icon={<UsuariosIcon />}
                 tone="sky"
@@ -378,7 +378,7 @@ function share(part: number, total: number) {
 /** Rosquilla y lista de canales, con su margen, que filtran al pulsar. */
 export function ChannelPanel({ ctx, className }: { ctx: SalesContext; className: string }) {
   const { byChannel } = ctx.model;
-  const active = ctx.filters.channel;
+  const active = soloUno(ctx.filters.channels);
   return (
     <article className={className}>
       <div className="panel-heading">
@@ -396,7 +396,7 @@ export function ChannelPanel({ ctx, className }: { ctx: SalesContext; className:
         ariaLabel="Reparto de las ventas por canal"
         emptyMessage="Sin datos en este periodo."
         showLegend={false}
-        onSelect={(label) => byChannel.real.has(label) && ctx.toggle("channel", label)}
+        onSelect={(label) => byChannel.real.has(label) && ctx.toggleEnLista("channels", label)}
         selectedLabel={active}
       />
       <div className="sales-channel-head" aria-hidden="true">
@@ -420,7 +420,7 @@ export function ChannelPanel({ ctx, className }: { ctx: SalesContext; className:
           return (
             <li key={item.label}>
               {real ? (
-                <button type="button" className={`sales-channel-row${active === item.label ? " is-active" : ""}`} onClick={() => ctx.toggle("channel", item.label)} aria-pressed={active === item.label}>
+                <button type="button" className={`sales-channel-row${active === item.label ? " is-active" : ""}`} onClick={() => ctx.toggleEnLista("channels", item.label)} aria-pressed={active === item.label}>
                   {content}
                 </button>
               ) : (
@@ -437,7 +437,7 @@ export function ChannelPanel({ ctx, className }: { ctx: SalesContext; className:
 /** Las sociedades, que filtran al pulsar su fila. */
 export function CompanyTable({ ctx }: { ctx: SalesContext }) {
   const { byCompany, companiesTotal, companiesMargin } = ctx.model;
-  const active = ctx.filters.company;
+  const active = soloUno(ctx.filters.companies);
   return (
     <article className="panel table-panel sales-board-third">
       <div className="panel-heading">
@@ -454,10 +454,10 @@ export function CompanyTable({ ctx }: { ctx: SalesContext }) {
               <tr
                 key={company.code}
                 className={active === company.code ? "is-active" : undefined}
-                onClick={() => ctx.toggle("company", company.code)}
+                onClick={() => ctx.toggleEnLista("companies", company.code)}
               >
                 <td>
-                  <button type="button" className="sales-row-button" aria-pressed={active === company.code} onClick={(event) => { event.stopPropagation(); ctx.toggle("company", company.code); }}>
+                  <button type="button" className="sales-row-button" aria-pressed={active === company.code} onClick={(event) => { event.stopPropagation(); ctx.toggleEnLista("companies", company.code); }}>
                     {company.name}
                   </button>
                 </td>

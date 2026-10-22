@@ -65,11 +65,20 @@ export type SageDetail = { customers: boolean; articles: boolean; offers: boolea
  * meses marcados dejan huecos.
  */
 export type SalesRpcArgs = {
-  p_company: number | null;
   p_reps: string[] | null;
   p_series: string[] | null;
-  p_family: string | null;
-  p_months: string[] | null;
+  /**
+   * Estos tres solo están cuando hay algo marcado.
+   *
+   * No es por ahorrar: son los parámetros que añaden las migraciones de los
+   * filtros de varios, y mandar uno que la función todavía no tiene es un
+   * error de la base. Dejándolos fuera mientras no se usan, el panel sigue
+   * funcionando igual que siempre aunque la migración no esté puesta, y solo
+   * hace falta para filtrar por varias cosas a la vez.
+   */
+  p_companies?: number[];
+  p_families?: string[];
+  p_months?: string[];
 };
 
 export type SalesContext = {
@@ -98,6 +107,11 @@ export type SalesContext = {
   toggleMonth: (key: string | null) => void;
   /** Marca o desmarca un comercial sin tocar los demás. Null los quita todos. */
   toggleRep: (key: string | null) => void;
+  /**
+   * Lo mismo para cualquier filtro: marca el valor si no estaba y lo quita si
+   * estaba. Es lo que hace pulsar una barra o una fila de un gráfico.
+   */
+  toggleEnLista: <K extends keyof SalesFilters>(key: K, value: SalesFilters[K][number]) => void;
   companies: Company[];
   reps: Rep[];
   families: FamilyName[];

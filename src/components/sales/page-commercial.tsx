@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ClockIcon, ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { leadStatusLabels } from "@/lib/constants";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { channelLabel, comercialMarcado, euros, mesMarcado, monthLabel, monthWithYear, soloUnComercial, soloUnMes, UNASSIGNED_KEY } from "@/lib/sales-model";
+import { channelLabel, comercialMarcado, euros, marcado, mesMarcado, monthLabel, monthWithYear, soloUnComercial, soloUnMes, UNASSIGNED_KEY } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
@@ -83,8 +83,8 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
 
   /** Si una fila entra con los filtros del panel (menos los que se pidan saltar). */
   const keep = (row: Dimensions, skip: ("month" | "rep" | "channel")[] = []) => {
-    if (filters.company !== null && row.company_code !== filters.company) return false;
-    if (!skip.includes("channel") && filters.channel !== null && channelLabel(row.series) !== filters.channel) return false;
+    if (!marcado(filters.companies, row.company_code)) return false;
+    if (!skip.includes("channel") && !marcado(filters.channels, channelLabel(row.series))) return false;
     if (!skip.includes("rep") && !comercialMarcado(filters, ctx.repOf(row.company_code, row.rep_code).key)) return false;
     if (!skip.includes("month") && !mesMarcado(filters, row.month)) return false;
     return true;
@@ -198,7 +198,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
   };
 
   // ---- Cartera de la foto diaria (antes del detalle por pedido) ----
-  const backlogSnapshot = totals.data ? snapshotTotal(totals.data.snapshots, "pedidos_pendientes", filters.company) : null;
+  const backlogSnapshot = totals.data ? snapshotTotal(totals.data.snapshots, "pedidos_pendientes", filters.companies) : null;
 
   // ---- Leads de la web (Hub) ----
   const leadList = leads.data ?? [];
@@ -242,7 +242,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
               <KpiCard label="De oferta a pedido" value={timed ? days(total(offerRows, "days_to_order") / timed) : "—"} helper="de media, en las convertidas" delta="Sin comparación" icon={<ClockIcon />} tone="sky" />
             </>
           ) : (
-            <KpiCard label="Ofertas" value={euros(oldTotals.oferta.net)} helper={`${numberFormatter.format(oldTotals.oferta.count)} ofertas${filters.channel ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<DocumentIcon />} tone="indigo" />
+            <KpiCard label="Ofertas" value={euros(oldTotals.oferta.net)} helper={`${numberFormatter.format(oldTotals.oferta.count)} ofertas${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<DocumentIcon />} tone="indigo" />
           )}
           {ctx.detail.orders ? (
             <>
@@ -255,7 +255,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
               <KpiCard label="Plazo de servicio" value={served ? days(total(orderRows, "days_to_serve") / served) : "—"} helper="del pedido al primer albarán" delta="Sin comparación" icon={<CalendarIcon />} tone="sky" />
             </>
           ) : (
-            <KpiCard label="Pedidos" value={euros(oldTotals.pedido.net)} helper={`${numberFormatter.format(oldTotals.pedido.count)} pedidos${filters.channel ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<ConsultasIcon />} tone="sky" />
+            <KpiCard label="Pedidos" value={euros(oldTotals.pedido.net)} helper={`${numberFormatter.format(oldTotals.pedido.count)} pedidos${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<ConsultasIcon />} tone="sky" />
           )}
           {!ctx.detail.orders && backlogSnapshot ? (
             <KpiCard label="Cartera por servir" value={euros(backlogSnapshot.amount)} helper={`${numberFormatter.format(backlogSnapshot.count)} pedidos de los últimos 12 meses`} delta="Sin comparación" icon={<WalletIcon />} tone="amber" />

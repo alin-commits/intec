@@ -179,26 +179,27 @@ export function SalesFilterBar({
           textoVacio={choice.kind === "year" ? "Todo el año" : "Todo el periodo"}
           nombrarHasta={3}
         />
-        <label>
-          <span>Sociedad</span>
-          <select value={requested.company ?? ""} onChange={(event) => onChange({ company: event.target.value ? Number(event.target.value) : null })}>
-            <option value="">Todas</option>
-            {companyOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>Canal</span>
-          <select value={requested.channel ?? ""} onChange={(event) => onChange({ channel: event.target.value || null })}>
-            <option value="">Todos</option>
-            {requested.channel && !channelOptions.includes(requested.channel) ? <option value={requested.channel}>{requested.channel}</option> : null}
-            {channelOptions.map((label) => <option key={label} value={label}>{label}</option>)}
-          </select>
-        </label>
         {/*
-          Varios comerciales a la vez, por lo mismo que los meses: comparar dos
-          zonas o ver el equipo de alguien es media pantalla de trabajo, y de uno
-          en uno no se puede.
+          Todos los filtros van con casillas, por lo mismo que los meses:
+          comparar dos sociedades, dos canales o el equipo de alguien es media
+          pantalla de trabajo, y de uno en uno no se puede. El único que sigue
+          siendo de uno es "Fecha que manda", que no es un filtro: es desde qué
+          fecha se mira todo, y no tiene sentido mirarlo por dos a la vez.
         */}
+        <MultiSelect
+          label="Sociedad"
+          opciones={companyOptions.map((option) => ({ value: String(option.value), label: option.label }))}
+          seleccionadas={requested.companies.map(String)}
+          onChange={(valores: string[]) => onChange({ companies: valores.map(Number) })}
+          textoVacio="Todas"
+        />
+        <MultiSelect
+          label="Canal"
+          opciones={channelOptions.map((label) => ({ value: label, label }))}
+          seleccionadas={requested.channels}
+          onChange={(channels: string[]) => onChange({ channels })}
+          textoVacio="Todos"
+        />
         <MultiSelect
           label="Comercial"
           opciones={repOptions}
@@ -206,13 +207,13 @@ export function SalesFilterBar({
           onChange={(repKeys: string[]) => onChange({ repKeys })}
           textoVacio="Todos"
         />
-        <label>
-          <span>Familia</span>
-          <select value={requested.family ?? ""} onChange={(event) => onChange({ family: event.target.value || null })}>
-            <option value="">Todas</option>
-            {familyOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        <MultiSelect
+          label="Familia"
+          opciones={familyOptions.map((option) => ({ value: String(option.value), label: option.label }))}
+          seleccionadas={requested.families}
+          onChange={(families: string[]) => onChange({ families })}
+          textoVacio="Todas"
+        />
         <label>
           <span>Fecha que manda</span>
           <select value={basis} onChange={(event) => onBasis(event.target.value as "albaran" | "factura")}>
@@ -248,12 +249,11 @@ export function SalesFilterBar({
 /**
  * Quitar un filtro desde su etiqueta.
  *
- * Los de uno solo se quitan poniéndolos a nulo; los de varios, con la lista
- * vacía: un nulo ahí dejaría el panel sin nada que recorrer.
+ * Todos son listas, así que quitarlos es dejarlas vacías: un nulo ahí dejaría
+ * el panel sin nada que recorrer.
  */
 function sinFiltro(key: string): Partial<SalesFilters> {
-  if (key === "months" || key === "repKeys") return { [key]: [] };
-  return { [key]: null } as Partial<SalesFilters>;
+  return { [key]: [] } as Partial<SalesFilters>;
 }
 
 /** Por qué un filtro puesto no se aplica en la página que se está viendo. */

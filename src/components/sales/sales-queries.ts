@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { latestSnapshot, type SnapshotRow } from "@/lib/sage-panel";
+import { marcado } from "@/lib/sales-model";
 import type { SalesContext } from "./sales-context";
 import { useSageQuery } from "./sales-ui";
 
@@ -91,10 +92,10 @@ export function useCustomerTotals(ctx: SalesContext) {
 }
 
 /** La última foto de una métrica, en la sociedad elegida. */
-export function snapshotTotal(snapshots: SnapshotRow[], metric: SnapshotRow["metric"], company: number | null) {
+export function snapshotTotal(snapshots: SnapshotRow[], metric: SnapshotRow["metric"], companies: number[]) {
   const latest = latestSnapshot(snapshots, metric);
   if (!latest.takenOn) return null;
-  const rows = latest.rows.filter((row) => company === null || row.company_code === company);
+  const rows = latest.rows.filter((row) => marcado(companies, row.company_code));
   return {
     takenOn: latest.takenOn,
     rows,
