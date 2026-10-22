@@ -45,8 +45,24 @@ export type SalesPeriod = {
   compareMonths: string[];
   /** Si los meses marcados dejan huecos: el tramo de fechas no basta. */
   scattered: boolean;
-  /** Cuántos meses hay que mover un mes para dar con su pareja en la comparación. */
+  /**
+   * Cuántos meses hay que mover un mes del periodo entero para dar con su
+   * pareja. Es lo que usa la tabla de mes a mes, que los enseña todos.
+   */
   monthOffset: number | null;
+  /**
+   * Lo mismo, pero para los meses marcados.
+   *
+   * No siempre coinciden. Mirando 2026 contra «el periodo justo anterior», el
+   * periodo entero se compara con los 295 días de antes (del 12 de marzo al 31
+   * de diciembre de 2025), y de ahí sale un desfase de diez meses. Aplicárselo
+   * a enero–marzo daría «marzo–mayo de 2025», que no es el periodo justo
+   * anterior de nada: lo que va al lado de enero–marzo son los tres meses de
+   * justo antes, octubre–diciembre.
+   *
+   * Nulo cuando no hay meses marcados o no hay con qué comparar.
+   */
+  selectionOffset: number | null;
   compareKind: CompareChoice["kind"];
   /** El año, si se mira un año natural: los objetivos solo tienen sentido así. */
   year: number | null;
@@ -267,11 +283,28 @@ export function resolvePeriod(input: {
   const scattered = selectedMonths.length > 1
     && monthsBetween(`${first}-01`, `${last}-01`).length !== selectedMonths.length;
 
-  /** La pareja de un mes en la comparación. */
-  const pairOf = (item: string) => (compare.kind === "year" ? shiftMonth(item, -12) : shiftMonth(item, monthOffset ?? 0));
-  const compareMonths = baseCompare && selectedMonths.length > 0 && (compare.kind === "year" || monthOffset !== null)
-    ? selectedMonths.map(pairOf)
-    : [];
+  /*
+    El desfase de lo marcado. Con el año anterior es siempre doce meses; con
+    «el periodo justo anterior» son tantos meses como abarca lo marcado, para
+    que lo de al lado sea justo lo de antes; con un rango a mano se hereda el
+    del periodo entero, que es lo único que se puede saber.
+  */
+  const spanMonths = selectedMonths.length > 0
+    ? monthIndex(`${last}-01`) - monthIndex(`${first}-01`) + 1
+    : 0;
+  const selectionOffset = !baseCompare || selectedMonths.length === 0
+    ? null
+    : compare.kind === "year" ? -12
+      : compare.kind === "previous" ? -spanMonths
+        : monthOffset;
+  // Con «el periodo justo anterior», la pareja de lo marcado puede caer dentro
+  // del propio periodo: agosto se compara con julio, y julio está en las filas
+  // de lo que se mira, no en las del periodo de al lado. Quien las busque tiene
+  // que mirar en los dos sitios (lo hace computeSalesModel).
+
+  /** La pareja de un mes marcado. */
+  const pairOf = (item: string) => shiftMonth(item, selectionOffset ?? 0);
+  const compareMonths = selectionOffset !== null ? selectedMonths.map(pairOf) : [];
 
   let effective: DateRange = base;
   let effectiveCompare: DateRange | null = baseCompare;
@@ -279,15 +312,23 @@ export function resolvePeriod(input: {
     effective = { from: maxKey(`${first}-01`, base.from), to: minKey(monthEnd(last), base.to) };
     if (baseCompare && compare.kind === "year") {
       effectiveCompare = { from: sameDayYearBefore(effective.from), to: sameDayYearBefore(effective.to) };
-    } else if (baseCompare && monthOffset !== null) {
-      const pairFirst = shiftMonth(first, monthOffset);
-      const pairLast = shiftMonth(last, monthOffset);
-      const pairFrom = maxKey(`${pairFirst}-01`, baseCompare.from);
+    } else if (baseCompare && selectionOffset !== null) {
+      const pairFirst = shiftMonth(first, selectionOffset);
+      const pairLast = shiftMonth(last, selectionOffset);
+      /*
+        Hasta dónde puede llegar la pareja. Con un rango puesto a mano no se
+        sale de lo que se pidió; con el periodo justo anterior los límites son
+        el primer dato y hoy, porque la pareja puede caer dentro del propio
+        periodo (agosto se compara con julio) y eso es correcto.
+      */
+      const suelo = compare.kind === "range" ? maxKey(baseCompare.from, floor) : floor;
+      const techo = compare.kind === "range" ? minKey(baseCompare.to, todayKey) : todayKey;
+      const pairFrom = maxKey(`${pairFirst}-01`, suelo);
       const vaPorLaMitad = effective.to === todayKey;
       const hasta = vaPorLaMitad
         ? addDays(pairFrom, dayCount(effective.from, effective.to) - 1)
         : monthEnd(pairLast);
-      const pairTo = minKey(minKey(hasta, monthEnd(pairLast)), baseCompare.to);
+      const pairTo = minKey(minKey(hasta, monthEnd(pairLast)), techo);
       effectiveCompare = pairFrom <= pairTo ? { from: pairFrom, to: pairTo } : null;
     }
   }
@@ -341,6 +382,7 @@ export function resolvePeriod(input: {
     compareMonths,
     scattered,
     monthOffset,
+    selectionOffset,
     compareKind: compare.kind,
     year: choice.kind === "year" ? choice.year : null,
     multiYear,

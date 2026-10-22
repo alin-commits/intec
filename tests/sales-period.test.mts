@@ -195,13 +195,37 @@ test("y se ordenan y no se repiten, da igual cómo se marquen", () => {
   assert.deepEqual(period.selectedMonths, ["2026-01", "2026-03"]);
 });
 
-test("varios meses contra el periodo anterior, no contra el año", () => {
+test("varios meses contra el periodo anterior: lo de justo antes de lo marcado", () => {
   const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-04", "2026-05", "2026-06"], { kind: "previous" });
-  // El año en curso va de enero a hoy (septiembre): el tramo anterior son los
-  // mismos nueve meses de antes, así que abril-junio empareja con julio-septiembre de 2025.
+  /*
+    El periodo entero (enero a hoy) se compara con los nueve meses de antes, y
+    de ahí sale un desfase de nueve meses para la tabla de mes a mes.
+
+    Pero lo marcado es otra cosa: el periodo justo anterior a abril-junio son
+    los tres meses de justo antes, enero-marzo, no el hueco que le tocaría en
+    una ventana de nueve meses del año pasado. Si no, marcar tres meses daría
+    una comparación que nadie sabría explicar.
+  */
   assert.equal(period.monthOffset, -9);
-  assert.deepEqual(period.compareMonths, ["2025-07", "2025-08", "2025-09"]);
-  assert.deepEqual(period.compare, { from: "2025-07-01", to: "2025-09-30" });
+  assert.equal(period.selectionOffset, -3);
+  assert.deepEqual(period.compareMonths, ["2026-01", "2026-02", "2026-03"]);
+  assert.deepEqual(period.compare, { from: "2026-01-01", to: "2026-03-31" });
+});
+
+test("el periodo justo anterior no hereda un desfase de una ventana que empieza a mitad de mes", () => {
+  /*
+    El fallo que se vio en pantalla: mirando 2026 a 22 de octubre contra «el
+    periodo justo anterior», el tramo de al lado son 295 días que empiezan el
+    12 de marzo de 2025. Aplicarle ese desfase a enero-marzo daba «12 de marzo
+    a 31 de mayo de 2025», que no es el periodo anterior de nada.
+  */
+  const octubre = new Date(2026, 9, 22);
+  const entero = resolveMeses({ kind: "year", year: 2026 }, [], { kind: "previous" }, octubre);
+  assert.deepEqual(entero.compare, { from: "2025-03-12", to: "2025-12-31" });
+
+  const marcados = resolveMeses({ kind: "year", year: 2026 }, ["2026-01", "2026-02", "2026-03"], { kind: "previous" }, octubre);
+  assert.deepEqual(marcados.compare, { from: "2025-10-01", to: "2025-12-31" });
+  assert.deepEqual(marcados.compareMonths, ["2025-10", "2025-11", "2025-12"]);
 });
 
 test("si el último mes marcado va por la mitad, su pareja se corta por los mismos días", () => {

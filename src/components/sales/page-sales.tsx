@@ -40,7 +40,7 @@ const commissionCell = (bucket: Bucket) => (bucket.commission ? euros(bucket.com
 
 export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const { model, filters, period } = ctx;
-  const pairMonths = parejasDe(filters, period.monthOffset);
+  const pairMonths = parejasDe(filters, period.selectionOffset);
   /** Mes a mes se compara si hay algo cargado al lado, aunque el total no se pueda comparar. */
   const monthCompared = period.baseCompare !== null;
 
@@ -111,7 +111,15 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
       <section className="sales-board">
         <Panel
           title={`Mes a mes en ${period.baseLabel}`}
-          subtitle="Pulsa un mes para filtrar todo el panel; pulsa una cabecera para ordenar"
+          /*
+            Esta tabla enseña todos los meses aunque haya unos marcados, para
+            poder pulsar otro. Por eso su columna de comparación lleva las
+            fechas del periodo entero y no las de lo marcado, que salen arriba:
+            si no se dice, parece que una de las dos está mal.
+          */
+          subtitle={hayMesMarcado(filters)
+            ? `Salen todos los meses, no solo los marcados, para poder pulsar otro. La columna compara con ${period.baseCompareShort ?? "el periodo anterior"}`
+            : "Pulsa un mes para filtrar todo el panel; pulsa una cabecera para ordenar"}
           className="panel table-panel sales-board-full"
         >
           <DataTable

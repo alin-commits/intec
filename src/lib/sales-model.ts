@@ -255,6 +255,8 @@ export type PeriodView = {
   months: string[];
   /** Cuántos meses hay que mover un mes para dar con su pareja; null si no se compara. */
   monthOffset: number | null;
+  /** El desfase de los meses marcados, que no siempre es el del periodo entero. */
+  selectionOffset: number | null;
   /** Si el total se puede comparar (hay comparación y tiene datos). */
   comparable: boolean;
   /** Tras "que en": "2025", "el mismo tramo de 2025", "agosto de 2025"... */
@@ -484,13 +486,22 @@ export function computeSalesModel(input: {
   repOf: (companyCode: number, repCode: number | null) => RepIdentity;
 }) {
   const { rows, previousRows, filters, period, companies, repOf } = input;
-  const pairMonths = parejasDe(filters, period.monthOffset);
+  const pairMonths = parejasDe(filters, period.selectionOffset);
   // Sin una comparación válida del total, el "antes" se queda vacío y las
   // flechas dicen "Sin comparación". Mes a mes se sigue comparando lo que haya.
   const comparedRows = period.comparable ? previousRows : [];
+  /*
+    Dónde buscar la pareja de los meses marcados.
+
+    Comparando con «el periodo justo anterior», la pareja de agosto es julio, y
+    julio está en las filas de lo que se mira, no en las del periodo de al
+    lado. Así que se busca en los dos sitios. No se suma nada dos veces: la
+    pareja de un mes marcado siempre es un mes distinto de los marcados.
+  */
+  const beforeRows = pairMonths.length > 0 && period.comparable ? [...previousRows, ...rows] : comparedRows;
 
   const visible = filterRows(rows, filters, repOf);
-  const visibleBefore = filterRows(comparedRows, filters, repOf, [], pairMonths.length > 0 ? pairMonths : undefined);
+  const visibleBefore = filterRows(beforeRows, filters, repOf, [], pairMonths.length > 0 ? pairMonths : undefined);
   const current = sumRows(visible);
   const previous = sumRows(visibleBefore);
   const currentMargin = bucketMargin(current);
@@ -588,7 +599,7 @@ export function computeSalesModel(input: {
 
   // ---- Por comercial: sin el filtro de comercial ----
   const forReps = filterRows(rows, filters, repOf, ["rep"]);
-  const forRepsBefore = filterRows(comparedRows, filters, repOf, ["rep"], pairMonths.length > 0 ? pairMonths : undefined);
+  const forRepsBefore = filterRows(beforeRows, filters, repOf, ["rep"], pairMonths.length > 0 ? pairMonths : undefined);
   const repMap = new Map<string, { name: string; assigned: boolean; isPerson: boolean; bucket: Bucket }>();
   for (const row of forReps) {
     const who = repOf(row.company_code, row.rep_code);
@@ -761,12 +772,12 @@ export function computeSalesModel(input: {
         }),
         channel: differencesOf(
           filterRows(rows, filters, repOf, ["channel"]),
-          filterRows(comparedRows, filters, repOf, ["channel"], pairMonths.length > 0 ? pairMonths : undefined),
+          filterRows(beforeRows, filters, repOf, ["channel"], pairMonths.length > 0 ? pairMonths : undefined),
           (row) => ({ key: channelLabel(row.series), label: channelLabel(row.series) }),
         ),
         company: differencesOf(
           filterRows(rows, filters, repOf, ["company"]),
-          filterRows(comparedRows, filters, repOf, ["company"], pairMonths.length > 0 ? pairMonths : undefined),
+          filterRows(beforeRows, filters, repOf, ["company"], pairMonths.length > 0 ? pairMonths : undefined),
           (row) => ({ key: String(row.company_code), label: companies.find((company) => company.code === row.company_code)?.name ?? `Sociedad ${row.company_code}` }),
         ),
       }

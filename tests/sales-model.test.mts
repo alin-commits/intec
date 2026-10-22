@@ -40,7 +40,7 @@ const row = (month: string, company: number, series: string, rep: number | null,
 
 /** El año 2026 hasta septiembre, contra el mismo tramo de 2025. */
 const months2026 = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"];
-const yearView: PeriodView = { months: months2026, monthOffset: -12, comparable: true, versus: "el mismo tramo de 2025", basePartial: true, multiYear: false };
+const yearView: PeriodView = { months: months2026, monthOffset: -12, selectionOffset: -12, comparable: true, versus: "el mismo tramo de 2025", basePartial: true, multiYear: false };
 const companies = [{ code: 1, name: "Intec", is_active: true }];
 
 test("pairOf: la pareja de un mes en la comparación", () => {
@@ -168,8 +168,11 @@ test("el panel señala al comercial que más rebaja y la subida del descuento", 
 
 test("comparar con otras fechas: cada mes con su pareja y qué explica la diferencia", () => {
   // Marzo-junio de 2026 contra noviembre de 2025-febrero de 2026 (el periodo anterior).
+  // monthOffset: la tabla de mes a mes empareja cada mes con el suyo de la
+  // ventana anterior. selectionOffset: lo que se marque se compara con lo de
+  // justo antes, y abajo se marca un mes solo.
   const period: PeriodView = {
-    months: ["2026-03", "2026-04", "2026-05", "2026-06"], monthOffset: -4, comparable: true,
+    months: ["2026-03", "2026-04", "2026-05", "2026-06"], monthOffset: -4, selectionOffset: -1, comparable: true,
     versus: "noviembre de 2025–febrero de 2026", basePartial: false, multiYear: false,
   };
   const rows = [row("2026-03", 1, "TK", 5, 1000), row("2026-04", 1, "CRE", 7, 3000), row("2026-06", 1, "CRE", 7, 500)];
@@ -182,7 +185,8 @@ test("comparar con otras fechas: cada mes con su pareja y qué explica la difere
   // Sergio baja 1.000 y Ana sube 2.500: la lista va de lo que más sube a lo que más baja.
   assert.deepEqual(model.differences?.rep.map((item) => [item.label, item.change]), [["Ana Ruiz", 2500], ["Sergio Almodóvar Alcaraz", -1000]]);
   assert.deepEqual(model.differences?.channel.map((item) => item.key), ["Crédito", "Tienda"]);
-  // Con un mes elegido se compara con su pareja.
+  // Con un mes marcado se compara con el de justo antes, que está en las filas
+  // de lo que se mira y no en las del periodo de al lado: marzo vendió 1.000.
   const april = computeSalesModel({ rows, previousRows, filters: { ...noFilters, months: ["2026-04"] }, period, companies, repOf });
   assert.equal(april.current.net, 3000);
   assert.equal(april.previous.net, 1000);

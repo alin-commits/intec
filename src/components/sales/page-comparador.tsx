@@ -59,6 +59,8 @@ type Comparado = {
   color: string;
 };
 
+const conSigno = (valor: number) => `${valor >= 0 ? "+" : "-"}${euros(Math.abs(valor))}`;
+
 const cambio = (ahora: number, antes: number) => {
   const valor = variation(ahora, antes);
   if (valor === null) return <span className="muted">—</span>;
@@ -92,7 +94,43 @@ function columnas(total: number, conComparacion: boolean, queEs: string): Column
   return lista;
 }
 
-/** Un bloque: las barras, la tabla y, si hay meses de sobra, la evolución. */
+/**
+ * Quién sube y quién baja, en barras a los dos lados del cero.
+ *
+ * Es lo mismo que dice la columna «Variación» de la tabla, pero de un vistazo:
+ * a la izquierda en rojo lo que cae, a la derecha en verde lo que crece, y el
+ * largo de cada barra en proporción al que más se mueve.
+ */
+function SubeYBaja({ filas }: { filas: Comparado[] }) {
+  const movidas = filas.filter((fila) => fila.antes > 0 || fila.bucket.net > 0);
+  const max = Math.max(...movidas.map((fila) => Math.abs(fila.bucket.net - fila.antes)), 1);
+  if (movidas.length === 0) return <p className="muted">Nada que comparar: no hay cifras del periodo anterior.</p>;
+  return (
+    <ol className="sales-diff">
+      {[...movidas].sort((a, b) => (b.bucket.net - b.antes) - (a.bucket.net - a.antes)).map((fila) => {
+        const diferencia = fila.bucket.net - fila.antes;
+        const ancho = `${Math.max(2, (Math.abs(diferencia) / max) * 100)}%`;
+        return (
+          <li key={fila.clave}>
+            <div className="sales-diff-row" title={`${fila.nombre}: ${euros(fila.antes)} → ${euros(fila.bucket.net)}`}>
+              <span className="sales-diff-who">
+                <span className="sales-diff-name">{fila.nombre}</span>
+                <small className="sales-diff-detail">{euros(fila.antes)} → {euros(fila.bucket.net)}</small>
+              </span>
+              <span className="sales-diff-track" aria-hidden="true">
+                <span className="sales-diff-half is-down">{diferencia < 0 ? <i style={{ width: ancho }} /> : null}</span>
+                <span className="sales-diff-half is-up">{diferencia > 0 ? <i style={{ width: ancho }} /> : null}</span>
+              </span>
+              <strong className={`sales-diff-value ${diferencia >= 0 ? "sales-up" : "sales-down"}`}>{conSigno(diferencia)}</strong>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Un bloque: las barras, el sube y baja, la evolución y la tabla. */
 function Bloque({
   titulo, queEs, filas, meses, evolucion, lineas, conComparacion, nota,
 }: {
@@ -108,14 +146,22 @@ function Bloque({
 }) {
   const total = filas.reduce((suma, fila) => suma + fila.bucket.net, 0);
   if (filas.length === 0) return null;
+  const mejor = [...filas].sort((a, b) => b.bucket.net - a.bucket.net)[0];
+  const parte = total > 0 ? (mejor.bucket.net / total) * 100 : 0;
 
   return (
     <section className="sales-board">
       <Panel
         title={titulo}
-        subtitle={`${filas.length} ${filas.length === 1 ? "marcado" : "marcados"}${conComparacion ? ", con lo que vendió cada uno en el periodo anterior" : ""}`}
-        className={evolucion && meses.length >= MESES_PARA_EVOLUCION ? "panel chart-panel sales-board-half" : "panel chart-panel sales-board-full"}
+        subtitle={`${filas.length} ${filas.length === 1 ? "marcado" : "marcados"}, ${euros(total)} entre todos`}
+        className={conComparacion ? "panel chart-panel sales-board-half" : "panel chart-panel sales-board-full"}
       >
+        {filas.length > 1 ? (
+          <p className="sales-diff-summary">
+            El que más vende es <strong>{mejor.nombre}</strong>, con <strong>{euros(mejor.bucket.net)}</strong>
+            {total > 0 ? <> — el <strong>{formatPercent(parte)}</strong> de lo marcado</> : null}.
+          </p>
+        ) : null}
         <BarChart
           items={filas.map((fila) => ({ label: fila.nombre, value: Math.round(fila.bucket.net), color: fila.color }))}
           ariaLabel={`Ventas de ${titulo.toLowerCase()}`}
@@ -125,7 +171,7 @@ function Bloque({
       </Panel>
 
       {evolucion && meses.length >= MESES_PARA_EVOLUCION ? (
-        <Panel title={`${titulo}, mes a mes`} subtitle={lineas.length === 1 ? "En orden de mes, no de quién vende más" : "Cada uno por su lado, en orden"} className="panel chart-panel sales-board-half">
+        <Panel title={`${titulo}, mes a mes`} subtitle={lineas.length === 1 ? "En orden de mes, no de quién vende más" : "Cada uno por su lado, en orden"} className="panel chart-panel sales-board-full">
           <TrendChart
             data={evolucion}
             series={lineas}
@@ -137,6 +183,12 @@ function Bloque({
       ) : null}
 
       {/* La tabla, a lo ancho: con ocho columnas en media pantalla no se lee. */}
+      {conComparacion ? (
+        <Panel title="Quién sube y quién baja" subtitle="Lo que gana o pierde cada uno contra el periodo anterior" className="panel sales-board-half">
+          <SubeYBaja filas={filas} />
+        </Panel>
+      ) : null}
+
       <Panel title="Las cifras" subtitle={nota ?? "Ordena pulsando la cabecera"} className="panel table-panel sales-board-full">
         <DataTable rows={filas} columns={columnas(total, conComparacion, queEs)} rowKey={(fila) => fila.clave} initialSort={{ key: "ventas", desc: true }} />
       </Panel>
@@ -227,7 +279,7 @@ function Familias({ ctx }: { ctx: SalesContext }) {
 
 export function ComparadorPage({ ctx }: { ctx: SalesContext }) {
   const { filters, period, repOf } = ctx;
-  const pares = parejasDe(filters, period.monthOffset);
+  const pares = parejasDe(filters, period.selectionOffset);
   const hayAlgoMarcado = filters.months.length > 0 || filters.companies.length > 0
     || filters.channels.length > 0 || filters.repKeys.length > 0 || filters.families.length > 0;
 
@@ -260,8 +312,11 @@ export function ComparadorPage({ ctx }: { ctx: SalesContext }) {
     const antes = new Map<string, number>();
     // Los meses se emparejan con el suyo del periodo anterior; lo demás, con
     // su mismo valor dentro de ese periodo.
+    // La pareja de un mes marcado puede estar en lo que se mira (agosto contra
+    // julio), no solo en el periodo de al lado: se busca en los dos sitios.
+    const dondeBuscar = [...ctx.previousRows, ...ctx.rows];
     const filasAntes = dim === "month"
-      ? filterRows(ctx.previousRows, filters, repOf, ["month"])
+      ? filterRows(dondeBuscar, filters, repOf, ["month"])
       : filterRows(ctx.previousRows, filters, repOf, [dim], pares.length > 0 ? pares : undefined);
     for (const fila of filasAntes) {
       const clave = valorDe(fila, dim);
@@ -269,7 +324,7 @@ export function ComparadorPage({ ctx }: { ctx: SalesContext }) {
     }
 
     const filas: Comparado[] = marcados.map((clave, indice) => {
-      const pareja = dim === "month" ? pairOf(clave, period.monthOffset) : clave;
+      const pareja = dim === "month" ? pairOf(clave, period.selectionOffset) : clave;
       return {
         clave,
         nombre: nombre(clave),
