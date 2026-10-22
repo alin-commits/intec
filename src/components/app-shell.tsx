@@ -17,23 +17,69 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
 import type { AppRole } from "@/lib/types";
 
-const navigation: { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] }[] = [
-  { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
-  { href: "/ventas", label: "Ventas", icon: EuroIcon, roles: SALES_ROLES },
+type Entrada = { href: string; label: string; icon: () => ReactNode; roles?: AppRole[] };
+
+const CLAVE_DESPLEGADOS = "intec.menu-desplegados";
+
+/** Lo que dejaste abierto la última vez. En el servidor no hay navegador. */
+function leerDesplegados(): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  try {
+    const crudo = window.localStorage.getItem(CLAVE_DESPLEGADOS);
+    const valor = crudo ? (JSON.parse(crudo) as unknown) : null;
+    return valor && typeof valor === "object" ? (valor as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/*
+  El menú, por departamentos.
+
+  Dos reglas que lo hacen soportable para todos:
+
+   · Un departamento del que solo veas una entrada no se pliega: se enseña
+     suelta. Si no, un comercial tendría que abrir un desplegable para llegar a
+     lo único que hay dentro, y un empleado vería un menú de puras carpetas.
+   · Los permisos no cambian: cada entrada sigue mirando sus roles, y un
+     departamento sin nada visible no aparece. Agrupar es para leer mejor, no
+     para dar ni quitar acceso.
+*/
+const departamentos: { id: string; label: string; entradas: Entrada[] }[] = [
+  { id: "inicio", label: "Inicio", entradas: [
+    { href: "/dashboard", label: "Inicio", icon: DashboardIcon, roles: DASHBOARD_ROLES },
+  ] },
+  { id: "comercial", label: "Comercial", entradas: [
+    { href: "/ventas", label: "Ventas", icon: EuroIcon, roles: SALES_ROLES },
+    { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
+    { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
+    { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
+  ] },
+  { id: "compras", label: "Compras", entradas: [
+    { href: "/compras", label: "Compras", icon: ComprasIcon, roles: COMPRAS_ROLES },
+  ] },
   // Lo del día y los pagos por confirming: un departamento, una entrada con pestañas.
-  { href: "/administracion", label: "Administración", icon: InboxIcon, roles: PAYMENTS_ROLES },
-  { href: "/consultas", label: "Consultas", icon: ConsultasIcon, roles: CONSULTAS_ROLES },
-  { href: "/compras", label: "Compras", icon: ComprasIcon, roles: COMPRAS_ROLES },
-  { href: "/leads", label: "Leads", icon: LeadsIcon, roles: LEADS_ROLES },
-  { href: "/crm", label: "CRM", icon: CrmIcon, roles: CRM_ROLES },
-  // Campañas, redes sociales, publicidad, mailing y gastos: un departamento, una entrada con pestañas.
-  { href: "/marketing", label: "Marketing", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
-  { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
-  { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
-  { href: "/tarjetas", label: "Tarjetas", icon: TarjetasIcon, roles: CARDS_ROLES },
-  // Everyone with an account can reach the vault; what they see inside is decided per credential.
-  { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon },
-  { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
+  { id: "administracion", label: "Administración", entradas: [
+    { href: "/administracion", label: "Administración", icon: InboxIcon, roles: PAYMENTS_ROLES },
+  ] },
+  { id: "marketing", label: "Marketing", entradas: [
+    // Campañas, redes sociales, publicidad, mailing y gastos: una entrada con pestañas.
+    { href: "/marketing", label: "Marketing", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
+    { href: "/tarjetas", label: "Tarjetas", icon: TarjetasIcon, roles: CARDS_ROLES },
+  ] },
+  { id: "informatica", label: "Informática", entradas: [
+    { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
+  ] },
+  { id: "interno", label: "Interno", entradas: [
+    { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
+    { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
+  ] },
+  // Aquí irá el asistente de manuales. De momento solo el gestor de
+  // contraseñas, que lo alcanza cualquiera con cuenta: lo que ve dentro se
+  // decide credencial a credencial.
+  { id: "utilidades", label: "Utilidades", entradas: [
+    { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon },
+  ] },
 ];
 
 const pageTitles: Record<string, string> = {
@@ -65,6 +111,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [cuentasDePrueba, setCuentasDePrueba] = useState<CuentaDePrueba[]>([]);
   const [hasAssignedCard, setHasAssignedCard] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  /*
+    Qué departamentos has dejado abiertos. Lo que no esté aquí se decide solo:
+    abierto si estás dentro, cerrado si no. Se guarda en este navegador, que es
+    una comodidad tuya y no un dato de la empresa.
+  */
+  const [desplegados, setDesplegados] = useState<Record<string, boolean>>(() => leerDesplegados());
+
+  function cambiarDesplegado(id: string, abierto: boolean) {
+    setDesplegados((actual) => {
+      const siguiente = { ...actual, [id]: abierto };
+      try {
+        window.localStorage.setItem(CLAVE_DESPLEGADOS, JSON.stringify(siguiente));
+      } catch {
+        // Sin almacén el menú funciona igual; solo se olvida al recargar.
+      }
+      return siguiente;
+    });
+  }
   const [lastPathname, setLastPathname] = useState(pathname);
   if (pathname !== lastPathname) {
     setLastPathname(pathname);
@@ -145,16 +209,40 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
-          {navigation.filter((item) => {
-            if (item.href === "/tarjetas" && hasAssignedCard) return true;
-            return !item.roles || hasAnyRole(navRoles, item.roles);
-          }).map((item) => {
-            const active = pathname.startsWith(item.href);
-            const Icon = item.icon;
+          {departamentos.map((departamento) => {
+            const suyas = departamento.entradas.filter((entrada) => {
+              if (entrada.href === "/tarjetas" && hasAssignedCard) return true;
+              return !entrada.roles || hasAnyRole(navRoles, entrada.roles);
+            });
+            if (suyas.length === 0) return null;
+
+            const enlace = (entrada: Entrada) => {
+              const Icon = entrada.icon;
+              return (
+                <Link href={entrada.href} key={entrada.href}
+                  className={pathname.startsWith(entrada.href) ? "nav-link active" : "nav-link"}
+                  onClick={() => setMobileNavOpen(false)}>
+                  <span className="nav-icon"><Icon /></span>{entrada.label}
+                </Link>
+              );
+            };
+
+            // Una sola entrada no se pliega: abrir un desplegable para llegar
+            // a lo único que hay dentro es trabajo de más para nada.
+            if (suyas.length === 1) return enlace(suyas[0]);
+
+            const aqui = suyas.some((entrada) => pathname.startsWith(entrada.href));
+            const abierto = desplegados[departamento.id] ?? aqui;
             return (
-              <Link href={item.href} key={item.href} className={active ? "nav-link active" : "nav-link"}>
-                <span className="nav-icon"><Icon /></span>{item.label}
-              </Link>
+              <div className="nav-grupo" key={departamento.id}>
+                <button type="button" className="nav-grupo-titulo" aria-expanded={abierto}
+                  onClick={() => cambiarDesplegado(departamento.id, !abierto)}>
+                  <span className={abierto ? "nav-grupo-flecha abierta" : "nav-grupo-flecha"} aria-hidden="true" />
+                  {departamento.label}
+                  {!abierto && aqui ? <span className="nav-grupo-punto" aria-hidden="true" /> : null}
+                </button>
+                {abierto ? <div className="nav-grupo-enlaces">{suyas.map(enlace)}</div> : null}
+              </div>
             );
           })}
         </nav>

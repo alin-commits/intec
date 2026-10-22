@@ -711,7 +711,7 @@ export function ComprasView() {
                         <span className="sales-article" title={fila.seguimiento?.reply_summary ?? undefined}>
                           <span className="badge badge-active">ha contestado</span>
                           {fila.seguimiento?.confirmed_on
-                            ? <small>da el {fila.seguimiento.confirmed_on} · falta pasarlo a Sage</small>
+                            ? <small>da el {fila.seguimiento.confirmed_on} · <strong className="texto-pendiente">falta pasarlo a Sage</strong></small>
                             : fila.seguimiento?.proposed_on
                               ? <small>propone el {fila.seguimiento.proposed_on}</small>
                               : <small>sin fecha todavía</small>}
@@ -948,7 +948,7 @@ function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
           </p>
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
             {!fila.fecha && fila.seguimiento?.confirmed_on
-              ? "dada por buena aquí · falta pasarla a Sage"
+              ? <>dada por buena aquí · <strong className="texto-pendiente">falta pasarla a Sage</strong></>
               : fila.sinFecha > 0
                 ? `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin confirmar`
                 : "todas las líneas confirmadas"}

@@ -47,6 +47,21 @@ a:focus-visible, button:focus-visible, .nav-link:focus-visible { outline: 2px so
 .nav-link:hover { background: #f4f5fa; color: var(--text); }
 .nav-link.active { background: var(--primary); color: white; box-shadow: 0 6px 16px rgba(51,44,128,.25); }
 .nav-icon { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+/*
+  El menú agrupado por departamentos. El título es un botón: abre y cierra, y
+  lo que dejes abierto se recuerda en tu navegador. Cuando un departamento
+  está cerrado pero estás dentro de él, un punto lo señala para que no parezca
+  que la página en la que estás no sale en ninguna parte.
+*/
+.nav-grupo { display: grid; }
+.nav-grupo-titulo { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px; padding: 0 12px; margin-top: 6px; border: 0; border-radius: 11px; background: transparent; cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; text-align: left; }
+.nav-grupo-titulo:hover { background: #f4f5fa; color: var(--text); }
+.nav-grupo-flecha { width: 0; height: 0; flex-shrink: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .15s ease; }
+.nav-grupo-flecha.abierta { transform: rotate(90deg); }
+.nav-grupo-punto { width: 6px; height: 6px; border-radius: 999px; background: var(--primary); }
+/* Sangrados para que se vea de un vistazo de qué departamento cuelgan. */
+.nav-grupo-enlaces { display: grid; gap: 2px; padding-left: 10px; }
 .nav-icon svg { width: 20px; height: 20px; }
 .sidebar-bottom { margin-top: auto; display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .main-content { min-width: 0; padding: 28px 34px 50px; }
@@ -1820,6 +1835,13 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
   .historial li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .historial-cuando { padding-top: 0; }
 }
+
+/*
+  Lo que queda por hacer, dicho para que se vea. Un "falta pasarlo a Sage" en
+  gris claro, del mismo tamaño que el resto, no avisa de nada: es la única
+  parte de esa fila que pide que alguien haga algo.
+*/
+.texto-pendiente { color: #b45309; font-weight: 750; }
 
 /* Una etiqueta dentro de una celda apilada no se estira a lo ancho de ella. */
 .sales-article > .badge { justify-self: start; }
