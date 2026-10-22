@@ -1757,6 +1757,34 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .sales-diff-half.is-up i { background: var(--success); border-radius: 0 999px 999px 0; }
 .sales-diff-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sales-diff-detail { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+  El aviso que lleva al comparador. Flota abajo en el centro: a la derecha se
+  lo come el distintivo de desarrollo de Next, y arriba taparía los filtros,
+  que es justo lo que la persona está tocando cuando sale.
+*/
+.aviso-comparador {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 14px;
+  max-width: min(640px, calc(100vw - 32px)); padding: 12px 14px 12px 18px;
+  border: 1px solid var(--border); border-radius: 14px; background: white;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .18);
+  font-size: 13.5px; color: var(--text);
+  animation: aviso-comparador-entra .22s ease-out;
+}
+.aviso-comparador strong { font-weight: 750; }
+.aviso-comparador .button { flex-shrink: 0; }
+.aviso-comparador-cerrar {
+  flex-shrink: 0; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.aviso-comparador-cerrar:hover { background: var(--surface-muted); color: var(--text); }
+@keyframes aviso-comparador-entra { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (max-width: 640px) {
+  .aviso-comparador { flex-wrap: wrap; gap: 10px; padding: 12px 14px; bottom: 12px; }
+  .aviso-comparador .button { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .aviso-comparador { animation: none; } }
+
 .sales-need-year { display: grid; gap: 10px; justify-items: start; }
 .sales-need-year h2, .sales-need-year p { margin: 0; }
 @media (max-width: 640px) {
@@ -1852,10 +1880,17 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 */
 .multi-select { position: relative; display: grid; gap: 6px; min-width: 0; }
 .multi-select-label { color: var(--muted); font-size: 12px; font-weight: 700; }
-.multi-select-boton { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
+/*
+  El botón no puede crecer con su texto: los nombres de familia de Sage son de
+  cuarenta letras y, sin esto, el botón se sale de su columna y se monta encima
+  del filtro de al lado. Un hijo de flex no se encoge por debajo de su contenido
+  salvo que se le diga (min-width), así que los puntos suspensivos del resumen
+  no servían de nada.
+*/
+.multi-select-boton { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; max-width: 100%; min-width: 0; min-height: 38px; padding: 0 10px; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: white; color: var(--text); font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
 .multi-select-boton:hover { border-color: #cbd2e4; }
 .multi-select-boton.abierto, .multi-select-boton:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
-.multi-select-resumen { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multi-select-resumen { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .multi-select-resumen.vacio { color: var(--muted); font-weight: 600; }
 .multi-select-flecha { flex-shrink: 0; width: 0; height: 0; border-top: 5px solid currentColor; border-left: 4px solid transparent; border-right: 4px solid transparent; opacity: .5; }
 .multi-select-panel { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; min-width: 240px; max-width: 320px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: white; box-shadow: 0 16px 40px rgba(15,23,42,.16); }

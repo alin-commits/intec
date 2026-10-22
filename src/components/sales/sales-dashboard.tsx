@@ -47,6 +47,7 @@ import { CommercialPage } from "./page-commercial";
 import { ProductsPage } from "./page-products";
 import { CustomersPage } from "./page-customers";
 import { ComparadorPage } from "./page-comparador";
+import { AvisoComparador } from "./aviso-comparador";
 import { TargetsPage } from "./page-targets";
 import { PageLoader } from "@/components/ui/page-loader";
 
@@ -318,6 +319,7 @@ export function SalesDashboard() {
       period: {
         months: period.months,
         monthOffset: period.monthOffset,
+        selectionOffset: period.selectionOffset,
         comparable: period.compare !== null,
         versus: period.versus,
         basePartial: period.basePartial,
@@ -664,6 +666,14 @@ export function SalesDashboard() {
         {page === "productos" ? <ProductsPage ctx={context} /> : null}
         {page === "clientes" ? <CustomersPage ctx={context} /> : null}
         {page === "comparador" ? <ComparadorPage ctx={context} /> : null}
+
+        {/* Quien marca varias cosas casi siempre quiere verlas una contra otra. */}
+        {page !== "comparador" ? (
+          <AvisoComparador
+            marcados={requested.months.length + requested.companies.length + requested.channels.length + requested.repKeys.length + requested.families.length}
+            onIr={() => setPage("comparador")}
+          />
+        ) : null}
         {page === "objetivos" ? <TargetsPage ctx={context} /> : null}
       </div>
 

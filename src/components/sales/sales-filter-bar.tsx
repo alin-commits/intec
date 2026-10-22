@@ -213,6 +213,9 @@ export function SalesFilterBar({
           seleccionadas={requested.families}
           onChange={(families: string[]) => onChange({ families })}
           textoVacio="Todas"
+          /* Los nombres de familia de Sage son larguísimos: con dos marcadas el
+             botón ya no puede decirlas, así que dice cuántas son. */
+          nombrarHasta={1}
         />
         <label>
           <span>Fecha que manda</span>
