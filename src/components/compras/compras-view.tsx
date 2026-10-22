@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { KpiCard } from "@/components/kpi-card";
 import { CalendarIcon, ClockIcon, EuroIcon, XCircleIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
@@ -197,6 +198,19 @@ export function ComprasView() {
   const [respuestas, setRespuestas] = useState<RespuestaRecibida[]>([]);
   /** El pedido cuya ficha está abierta. */
   const [ficha, setFicha] = useState<string | null>(null);
+  /*
+    Se puede llegar con un pedido ya elegido: del aviso de entrada, o de un
+    enlace que alguien se pase por chat. La ficha se abre sola, mire el mes que
+    mire el filtro, porque busca entre todos los pedidos y no entre los del
+    periodo.
+  */
+  const searchParams = useSearchParams();
+  const pedidoDeLaUrl = searchParams.get("pedido") ?? "";
+  const [pedidoYaAbierto, setPedidoYaAbierto] = useState("");
+  if (pedidoDeLaUrl && pedidoDeLaUrl !== pedidoYaAbierto) {
+    setPedidoYaAbierto(pedidoDeLaUrl);
+    setFicha(pedidoDeLaUrl);
+  }
   /** Si la migración de reclamaciones todavía no está, se avisa en vez de callar. */
   const [faltaMigracion, setFaltaMigracion] = useState(false);
   // El periodo. Arranca en el mes en curso, pero la fecha no se puede mirar al
@@ -789,7 +803,7 @@ export function ComprasView() {
         ) : null}
       </Modal>
 
-      <Modal open={Boolean(ficha)} title={fichaAbierta ? `Pedido ${fichaAbierta.pedido.series}${fichaAbierta.pedido.number}` : "Pedido"}
+      <Modal open={Boolean(fichaAbierta)} title={fichaAbierta ? `Pedido ${fichaAbierta.pedido.series}${fichaAbierta.pedido.number}` : "Pedido"}
         eyebrow={fichaAbierta?.proveedorNombre} onClose={() => setFicha(null)} scrollInside large>
         {fichaAbierta && ficha ? (
           <FichaDelPedido

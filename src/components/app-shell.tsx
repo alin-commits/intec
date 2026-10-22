@@ -8,6 +8,7 @@ import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
 import { AvisoExtension } from "@/components/aviso-extension";
 import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
+import { AvisoCompras } from "@/components/compras/aviso-compras";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
@@ -283,6 +284,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         <AvisoExtension />
         {/* Los leads sin tocar se le recuerdan a quien los lleva, no a quien mira. */}
         {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <PendingLeadsNotice userId={profile.id} /> : null}
+        {/*
+          A quien lleva compras. Dirección entra también porque hoy es quien lo
+          lleva, y el aviso solo aparece cuando hay algo que hacer. Al
+          administrador que solo pasa por aquí no se le molesta.
+        */}
+        {configured && profile.id && !pathname.startsWith("/compras") && hasAnyRole(profile.roles, ["purchasing", "direction"]) ? <AvisoCompras userId={profile.id} /> : null}
         <header className="topbar">
           {isDashboard ? (
             <div className="topbar-title">
