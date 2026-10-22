@@ -1863,9 +1863,15 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .multi-select-acciones { display: flex; gap: 14px; padding: 0 2px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .multi-select-lista { max-height: 300px; overflow-y: auto; padding-top: 6px; }
 .multi-select-grupo { margin: 8px 0 4px; padding: 0 2px; color: var(--muted); font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }
-.multi-select-opcion { display: flex; align-items: center; gap: 9px; padding: 6px 6px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.multi-select-opcion:hover { background: var(--surface-muted); }
-.multi-select-opcion input { width: 15px; height: 15px; flex-shrink: 0; accent-color: var(--primary); cursor: pointer; }
+/*
+  Las opciones se escriben con más peso del que harían falta porque el filtro
+  vive dentro de .sales-filter-fields, que pone todos sus label en grid y sus
+  span en gris pequeño: sin esto la casilla se va a una línea y el mes a otra.
+*/
+.multi-select-panel .multi-select-opcion { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 8px; cursor: pointer; }
+.multi-select-panel .multi-select-opcion:hover { background: var(--surface-muted); }
+.multi-select-panel .multi-select-opcion input { width: 15px; height: 15px; flex-shrink: 0; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.multi-select-panel .multi-select-opcion > span { min-width: 0; color: var(--text); font-size: 13px; font-weight: 600; letter-spacing: normal; text-transform: none; }
 .multi-select-vacio { margin: 10px 2px; color: var(--muted); font-size: 12.5px; }
 
 /* Una etiqueta dentro de una celda apilada no se estira a lo ancho de ella. */

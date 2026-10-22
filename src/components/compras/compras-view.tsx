@@ -232,6 +232,7 @@ export function ComprasView() {
   const [reclamando, setReclamando] = useState<Reclamacion | null>(null);
   const [contestando, setContestando] = useState<{ llave: string; pedido: Pedido; proveedor: string } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [buscando, setBuscando] = useState(false);
 
   useEffect(() => {
     let vivo = true;
@@ -518,6 +519,31 @@ export function ComprasView() {
     await recargarSeguimiento();
   }
 
+  /**
+   * Pedirle al buzón lo que haya llegado desde la última pasada.
+   *
+   * Solo lee: no sale ningún correo de aquí. Se cuenta lo que ha encontrado
+   * para que se note que ha hecho algo aunque no haya nada nuevo.
+   */
+  async function buscarRespuestas() {
+    if (buscando) return;
+    setBuscando(true);
+    try {
+      const respuesta = await fetch("/api/compras/leer-respuestas", { method: "POST" });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) { setAviso(datos.error ?? "No se pudo leer el buzón."); return; }
+      const nuevas = Number(datos.respuestas ?? 0) + Number(datos.expediciones ?? 0);
+      setAviso(nuevas > 0
+        ? `${nuevas} ${nuevas === 1 ? "respuesta nueva" : "respuestas nuevas"}${Number(datos.conFecha ?? 0) > 0 ? `, ${datos.conFecha} con fecha` : ""}.`
+        : "Nada nuevo en el buzón.");
+      await recargarSeguimiento();
+    } catch {
+      setAviso("No se pudo leer el buzón.");
+    } finally {
+      setBuscando(false);
+    }
+  }
+
   async function recargarSeguimiento() {
     const supabase = createClient();
     const { data } = await supabase.from("purchase_order_tracking")
@@ -596,14 +622,25 @@ export function ComprasView() {
             fecha ya no se reclama aunque el resto del pedido siga a medias. Los datos los trae el agente de Sage.
           </p>
         </div>
-        {ordenadas.length > 0 ? (
-          <div className="panel-heading-trailing">
-            <button type="button" className="button button-compact button-secondary"
-              onClick={() => void downloadXlsx("pedidos_a_proveedor.xlsx", [{ name: "Pendientes", columns: columnas, rows: ordenadas }] as never[])}>Exportar Excel</button>
-            <button type="button" className="button button-compact button-secondary"
-              onClick={() => downloadCsv("pedidos_a_proveedor.csv", ordenadas, columnas)}>CSV</button>
-          </div>
-        ) : null}
+        <div className="panel-heading-trailing">
+          {/*
+            El buzón se lee solo una vez al día (es lo que deja el plan de
+            Vercel), así que una respuesta de media mañana no se vería hasta
+            mañana. Esto la busca ahora.
+          */}
+          <button type="button" className="button button-compact button-secondary"
+            onClick={() => void buscarRespuestas()} disabled={buscando}>
+            {buscando ? "Buscando…" : "Buscar respuestas"}
+          </button>
+          {ordenadas.length > 0 ? (
+            <>
+              <button type="button" className="button button-compact button-secondary"
+                onClick={() => void downloadXlsx("pedidos_a_proveedor.xlsx", [{ name: "Pendientes", columns: columnas, rows: ordenadas }] as never[])}>Exportar Excel</button>
+              <button type="button" className="button button-compact button-secondary"
+                onClick={() => downloadCsv("pedidos_a_proveedor.csv", ordenadas, columnas)}>CSV</button>
+            </>
+          ) : null}
+        </div>
       </section>
 
       {pedidos.length === 0 ? (

@@ -27,7 +27,7 @@
     },
     {
       "path": "/api/cron/leer-respuestas-compras",
-      "schedule": "0 7,9,11,13,15 * * 1-5"
+      "schedule": "0 8 * * 1-5"
     }
   ]
 }

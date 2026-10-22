@@ -39,6 +39,20 @@ export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "dir
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
 /** Compras: de momento quien ya ve lo de Sage. Si acaba siendo su propio rol, se añade aquí. */
 export const COMPRAS_ROLES: AppRole[] = ["admin", "direction", "purchasing"];
+/**
+ * A quién NO le sale el aviso de compras aunque tenga el rol.
+ *
+ * Quien administra la plataforma o lleva dirección suele tener también el rol
+ * de compras para poder entrar a la pantalla. Si con tenerlo bastara, el aviso
+ * les saldría cada vez que abren cualquier página, por un trabajo que no es
+ * suyo, y en dos días nadie lo lee. Así que estos roles mandan sobre el otro.
+ */
+export const AVISO_COMPRAS_NO_ROLES: AppRole[] = ["owner", "admin", "direction"];
+
+/** Si a alguien le toca el aviso de entrada de compras. */
+export function leTocaElAvisoDeCompras(roles: AppRole[]): boolean {
+  return hasAnyRole(roles, ["purchasing"]) && !hasAnyRole(roles, AVISO_COMPRAS_NO_ROLES);
+}
 export const CAMPAIGNS_ROLES: AppRole[] = ["admin", "marketing", "commercial", "viewer", "direction"];
 export const RRSS_ROLES: AppRole[] = ["admin", "marketing", "viewer", "direction"];
 export const UNITS_ROLES: AppRole[] = ["admin", "viewer"];

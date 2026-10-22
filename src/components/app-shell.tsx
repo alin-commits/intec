@@ -12,7 +12,7 @@ import { AvisoCompras } from "@/components/compras/aviso-compras";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -291,7 +291,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           Tampoco sale estando ya en Compras: está para llevarte allí, no para
           taparte la pantalla a la que querías llegar.
         */}
-        {configured && profile.id && !pathname.startsWith("/compras") && hasAnyRole(profile.roles, ["purchasing"]) ? <AvisoCompras userId={profile.id} /> : null}
+        {configured && profile.id && !pathname.startsWith("/compras") && leTocaElAvisoDeCompras(profile.roles) ? <AvisoCompras userId={profile.id} /> : null}
         <header className="topbar">
           {isDashboard ? (
             <div className="topbar-title">
