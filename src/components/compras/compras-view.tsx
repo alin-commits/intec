@@ -89,6 +89,9 @@ type Seguimiento = {
   replied_at: string | null; confirmed_on: string | null; notes: string | null;
   /** Lo que el bot entendió de la respuesta del proveedor. */
   proposed_on: string | null; proposed_sure: boolean | null; reply_summary: string | null;
+  confirmed_at: string | null; confirmed_source: string | null;
+  /** El último aviso de expedición: el material ha salido, pero sigue sin haber fecha. */
+  shipping_notice: string | null; shipping_notice_at: string | null;
 };
 
 /** El correo preparado, tal como va a salir, antes de darle a enviar. */
@@ -112,6 +115,37 @@ type Reclamacion = {
   remitente?: string;
 };
 
+/** Un correo que salió. */
+type EnvioHecho = {
+  id: string;
+  company_code: number;
+  supplier_code: string;
+  level: number;
+  kind: string;
+  sent_at: string;
+  to_email: string | null;
+  ok: boolean;
+  message: string | null;
+  via: string | null;
+  in_thread: boolean | null;
+  orders: { year: number; series: string; number: number }[];
+};
+
+/** Un correo que llegó. */
+type RespuestaRecibida = {
+  message_id: string;
+  company_code: number;
+  supplier_code: string;
+  from_email: string | null;
+  subject: string | null;
+  received_at: string;
+  kind: string;
+  summary: string | null;
+  proposed_on: string | null;
+  proposed_sure: boolean | null;
+  orders: { year: number; series: string; number: number }[];
+};
+
 /** Qué periodo se está mirando. "todo" existe porque el atasco es de hace meses. */
 type Vista = "mes" | "anio" | "todo";
 
@@ -125,9 +159,9 @@ function diasDesde(dia: string, hoy: string): number {
   return Math.max(0, Math.round((hasta - desde) / 86_400_000));
 }
 
-const COLUMNAS_SEGUIMIENTO = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, notes, proposed_on, proposed_sure, reply_summary";
+const COLUMNAS_SEGUIMIENTO = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, confirmed_at, confirmed_source, notes, proposed_on, proposed_sure, reply_summary, shipping_notice, shipping_notice_at";
 /** Lo mismo sin lo que trae la migración de reclamaciones. */
-const COLUMNAS_SEGUIMIENTO_VIEJAS = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, notes";
+const COLUMNAS_SEGUIMIENTO_VIEJAS = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, confirmed_at, confirmed_source, notes";
 
 /**
  * El seguimiento, aguantando que la migración de reclamaciones no esté puesta.
@@ -141,7 +175,7 @@ async function leerSeguimiento(supabase: ReturnType<typeof createClient>): Promi
   if (!primera.error) return { filas: (primera.data ?? []) as Seguimiento[], faltaMigracion: false };
   if (primera.error.code !== "42703") return { filas: [], faltaMigracion: false };
   const segunda = await supabase.from("purchase_order_tracking").select(COLUMNAS_SEGUIMIENTO_VIEJAS);
-  return { filas: (segunda.data ?? []).map((fila) => ({ ...fila, proposed_on: null, proposed_sure: false, reply_summary: null })) as Seguimiento[], faltaMigracion: true };
+  return { filas: (segunda.data ?? []).map((fila) => ({ ...fila, proposed_on: null, proposed_sure: false, reply_summary: null, shipping_notice: null, shipping_notice_at: null })) as Seguimiento[], faltaMigracion: true };
 }
 
 export function ComprasView() {
@@ -159,6 +193,10 @@ export function ComprasView() {
   const [pagina, setPagina] = useState(0);
   const [abierto, setAbierto] = useState<string | null>(null);
   const [seguimientos, setSeguimientos] = useState<Seguimiento[]>([]);
+  const [envios, setEnvios] = useState<EnvioHecho[]>([]);
+  const [respuestas, setRespuestas] = useState<RespuestaRecibida[]>([]);
+  /** El pedido cuya ficha está abierta. */
+  const [ficha, setFicha] = useState<string | null>(null);
   /** Si la migración de reclamaciones todavía no está, se avisa en vez de callar. */
   const [faltaMigracion, setFaltaMigracion] = useState(false);
   // El periodo. Arranca en el mes en curso, pero la fecha no se puede mirar al
@@ -193,11 +231,15 @@ export function ComprasView() {
       if (!hasAnyRole(roles, COMPRAS_ROLES)) { setAcceso("denegado"); return; }
       setAcceso("permitido");
 
-      const [pedidosRes, lineasRes, proveedoresRes, seguimientoRes] = await Promise.all([
+      const [pedidosRes, lineasRes, proveedoresRes, seguimientoRes, enviosRes, respuestasRes] = await Promise.all([
         supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units").gt("pending_units", 0).order("order_date"),
         supabase.from("sage_purchase_order_lines").select("company_code, year, series, number, line_number, article_code, description, pending_units, expected_on, net_amount").gt("pending_units", 0),
         supabase.from("sage_suppliers").select("company_code, code, name, email"),
         leerSeguimiento(supabase),
+        // El historial. Si sus migraciones no están, se queda vacío y la ficha
+        // lo dice; el resto de la pantalla no se entera.
+        supabase.from("purchase_order_chases").select("id, company_code, supplier_code, level, kind, sent_at, to_email, ok, message, via, in_thread, orders").order("sent_at", { ascending: false }),
+        supabase.from("purchase_order_replies").select("message_id, company_code, supplier_code, from_email, subject, received_at, kind, summary, proposed_on, proposed_sure, orders").order("received_at", { ascending: false }),
       ]);
       if (!vivo) return;
       // Ojo: si la tabla todavía no existe, PostgREST no da error — devuelve
@@ -210,6 +252,8 @@ export function ComprasView() {
       setProveedores((proveedoresRes.data ?? []) as Proveedor[]);
       setSeguimientos(seguimientoRes.filas);
       setFaltaMigracion(seguimientoRes.faltaMigracion);
+      setEnvios((enviosRes.data ?? []) as EnvioHecho[]);
+      setRespuestas((respuestasRes.data ?? []) as RespuestaRecibida[]);
     })();
     return () => { vivo = false; };
   }, [configured]);
@@ -252,6 +296,24 @@ export function ComprasView() {
     }
     return mapa;
   }, [pedidos, lineasPorPedido]);
+
+  /*
+    Los correos de cada pedido. Un mismo correo puede ir de varios pedidos —al
+    agrupar por proveedor—, así que se indexa por cada uno de los suyos y no al
+    revés.
+  */
+  function porPedido<T extends { company_code: number; orders: { year: number; series: string; number: number }[] }>(filas: T[]) {
+    const mapa = new Map<string, T[]>();
+    for (const fila of filas) {
+      for (const pedido of fila.orders ?? []) {
+        const llave = clave({ company_code: fila.company_code, year: pedido.year, series: pedido.series, number: pedido.number });
+        mapa.set(llave, [...(mapa.get(llave) ?? []), fila]);
+      }
+    }
+    return mapa;
+  }
+  const enviosDe = useMemo(() => porPedido(envios), [envios]);
+  const respuestasDe = useMemo(() => porPedido(respuestas), [respuestas]);
 
   const seguimientoDe = useMemo(() => {
     const mapa = new Map<string, Seguimiento>();
@@ -457,6 +519,8 @@ export function ComprasView() {
     await recargarSeguimiento();
   }
 
+  const fichaAbierta = useMemo(() => conEstado.find((fila) => clave(fila.pedido) === ficha) ?? null, [conEstado, ficha]);
+
   const columnas: CsvColumn<(typeof conEstado)[number]>[] = [
     { header: "Sociedad", value: (fila) => fila.pedido.company_code },
     { header: "Pedido", value: (fila) => `${fila.pedido.series}${fila.pedido.number}` },
@@ -615,7 +679,13 @@ export function ComprasView() {
                 const suyas = lineasPorPedido.get(llave) ?? [];
                 return [
                   <tr key={llave} className={fila.vencido ? "fila-vencida" : undefined}>
-                    <td><strong>{fila.pedido.series}{fila.pedido.number}</strong><small className="muted"> · {fila.pedido.lines} líneas</small></td>
+                    <td>
+                      <button type="button" className="text-link" onClick={() => setFicha(llave)} title="Ver la ficha del pedido">
+                        <strong>{fila.pedido.series}{fila.pedido.number}</strong>
+                      </button>
+                      <small className="muted"> · {fila.pedido.lines} líneas</small>
+                      {fila.seguimiento?.shipping_notice ? <><br /><small className="badge badge-active">material enviado</small></> : null}
+                    </td>
                     <td>
                       <span className="sales-article">
                         <strong>{fila.proveedorNombre}</strong>
@@ -729,6 +799,19 @@ export function ComprasView() {
         ) : null}
       </Modal>
 
+      <Modal open={Boolean(ficha)} title={fichaAbierta ? `Pedido ${fichaAbierta.pedido.series}${fichaAbierta.pedido.number}` : "Pedido"}
+        eyebrow={fichaAbierta?.proveedorNombre} onClose={() => setFicha(null)} scrollInside large>
+        {fichaAbierta && ficha ? (
+          <FichaDelPedido
+            fila={fichaAbierta}
+            lineas={lineasPorPedido.get(ficha) ?? []}
+            envios={enviosDe.get(ficha) ?? []}
+            respuestas={respuestasDe.get(ficha) ?? []}
+            hoy={hoy}
+          />
+        ) : null}
+      </Modal>
+
       <Modal open={Boolean(contestando)} title="Ha contestado el proveedor" eyebrow={contestando?.proveedor} onClose={() => setContestando(null)}>
         {contestando ? <FormularioContestado onGuardar={guardarContestado} onCancelar={() => setContestando(null)} /> : null}
       </Modal>
@@ -778,5 +861,158 @@ function FormularioContestado({ onGuardar, onCancelar }: {
         <button type="submit" className="button" disabled={guardando}>{guardando ? "Guardando…" : "Apuntar"}</button>
       </div>
     </form>
+  );
+}
+
+/** Cómo se llama cada escalón, para no enseñar un número suelto. */
+const NOMBRE_DEL_ESCALON: Record<number, string> = { 1: "primer aviso", 2: "segundo aviso", 3: "tercer aviso" };
+const NOMBRE_DEL_TIPO: Record<string, string> = {
+  respuesta: "Responde el proveedor",
+  expedicion: "Aviso de expedición",
+  automatico: "Respuesta automática",
+  otro: "Correo sin relación",
+};
+
+/** Un momento de la vida del pedido, para pintarlos todos en orden. */
+type Hito = { cuando: string; titulo: string; detalle: string | null; tono: "salida" | "entrada" | "aviso" };
+
+/**
+ * La ficha de un pedido: lo que es, lo que falta y todo lo que ha pasado.
+ *
+ * El historial se arma juntando los correos que salieron, los que llegaron y
+ * lo que entendió la IA, ordenados por fecha. Contesta la pregunta que de
+ * verdad se hace uno delante de un pedido atascado: qué hemos hecho con esto
+ * y qué nos han dicho.
+ */
+function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
+  fila: { pedido: Pedido; sinFecha: number; fecha: string | null; vencido: boolean; proveedorNombre: string; proveedorEmail: string | null; seguimiento: Seguimiento | null };
+  lineas: Linea[];
+  envios: EnvioHecho[];
+  respuestas: RespuestaRecibida[];
+  hoy: string;
+}) {
+  const hitos: Hito[] = [{
+    cuando: fila.pedido.order_date,
+    titulo: "Se hizo el pedido",
+    detalle: `${fila.pedido.lines} ${fila.pedido.lines === 1 ? "línea" : "líneas"} · ${currencyFormatter.format(Number(fila.pedido.net_amount))}`,
+    tono: "salida",
+  }];
+
+  for (const envio of envios) {
+    const comoSalio = envio.via === "graph"
+      ? (envio.in_thread ? "respondiendo sobre el correo del pedido" : "correo nuevo desde el buzón de compras")
+      : "por el servidor, en nombre del buzón de compras";
+    hitos.push({
+      cuando: envio.sent_at,
+      titulo: envio.ok
+        ? `Se reclamó la fecha · ${NOMBRE_DEL_ESCALON[envio.level] ?? `aviso ${envio.level}`}${envio.kind === "manual" ? " (a mano)" : ""}`
+        : "Intento de reclamación fallido",
+      detalle: [envio.to_email ? `a ${envio.to_email}` : null, comoSalio, envio.message].filter(Boolean).join(" · ") || null,
+      tono: envio.ok ? "salida" : "aviso",
+    });
+  }
+
+  for (const recibida of respuestas) {
+    const fecha = recibida.proposed_on
+      ? `propone el ${recibida.proposed_on}${recibida.proposed_sure ? "" : " (sin confirmar del todo)"}`
+      : null;
+    hitos.push({
+      cuando: recibida.received_at,
+      titulo: NOMBRE_DEL_TIPO[recibida.kind] ?? "Correo recibido",
+      detalle: [recibida.summary, fecha, recibida.from_email ? `de ${recibida.from_email}` : null].filter(Boolean).join(" · ") || recibida.subject,
+      tono: recibida.kind === "respuesta" ? "entrada" : "aviso",
+    });
+  }
+
+  if (fila.seguimiento?.confirmed_at && fila.seguimiento.confirmed_on) {
+    hitos.push({
+      cuando: fila.seguimiento.confirmed_at,
+      titulo: `Fecha dada por buena: ${fila.seguimiento.confirmed_on}`,
+      detalle: fila.seguimiento.confirmed_source === "ia" ? "aceptando la que entendió el bot" : "a mano",
+      tono: "entrada",
+    });
+  }
+  if (fila.seguimiento?.notes) {
+    hitos.push({ cuando: fila.seguimiento.replied_at ?? "", titulo: "Nota", detalle: fila.seguimiento.notes, tono: "aviso" });
+  }
+
+  hitos.sort((a, b) => (a.cuando ?? "").localeCompare(b.cuando ?? ""));
+  const sinHistorial = envios.length === 0 && respuestas.length === 0;
+
+  return (
+    <div className="page-stack">
+      <section className="kpi-grid kpi-grid-3">
+        <div className="panel panel-padded">
+          <span className="eyebrow">Proveedor</span>
+          <p style={{ margin: "4px 0 0" }}><strong>{fila.proveedorNombre}</strong></p>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>{fila.proveedorEmail ?? "sin correo en Sage"}</p>
+        </div>
+        <div className="panel panel-padded">
+          <span className="eyebrow">Pendiente</span>
+          <p style={{ margin: "4px 0 0" }}><strong>{currencyFormatter.format(Number(fila.pedido.pending_amount))}</strong></p>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>{hoy ? `${numberFormatter.format(diasDesde(fila.pedido.order_date, hoy))} días esperando` : ""}</p>
+        </div>
+        <div className="panel panel-padded">
+          <span className="eyebrow">Fecha prevista</span>
+          <p style={{ margin: "4px 0 0" }}>
+            {fila.fecha
+              ? <strong>{fila.fecha}{fila.vencido ? " · vencida" : ""}</strong>
+              : <strong>Sin fecha</strong>}
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            {fila.sinFecha > 0 ? `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin confirmar` : "todas las líneas confirmadas"}
+          </p>
+        </div>
+      </section>
+
+      {fila.seguimiento?.shipping_notice ? (
+        <section className="panel panel-padded">
+          <span className="eyebrow">Material enviado</span>
+          <p style={{ margin: "4px 0 0" }}>{fila.seguimiento.shipping_notice}</p>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            Llegó un aviso de expedición{fila.seguimiento.shipping_notice_at ? ` el ${fila.seguimiento.shipping_notice_at.slice(0, 10)}` : ""}.
+            Sigue sin haber fecha de entrega, así que el pedido se sigue reclamando.
+          </p>
+        </section>
+      ) : null}
+
+      <section className="panel panel-padded">
+        <h3 style={{ marginTop: 0 }}>Qué ha pasado</h3>
+        {sinHistorial ? (
+          <p className="muted">Todavía no se le ha reclamado nada y no ha llegado ninguna respuesta.</p>
+        ) : null}
+        <ul className="lineas-pedido">
+            {hitos.map((hito, indice) => (
+              <li key={`${hito.cuando}-${indice}`}>
+                <span>
+                  <strong>{hito.titulo}</strong>
+                  {hito.detalle ? <small className="muted"> · {hito.detalle}</small> : null}
+                </span>
+                <span className={hito.tono === "entrada" ? "badge badge-active" : hito.tono === "aviso" ? "badge badge-lost" : "badge"}>
+                  {(hito.cuando ?? "").slice(0, 10)}
+                </span>
+              </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="panel panel-padded">
+        <h3 style={{ marginTop: 0 }}>Líneas pendientes</h3>
+        <ul className="lineas-pedido">
+          {lineas.map((linea) => (
+            <li key={linea.line_number}>
+              <span>
+                <strong>{linea.description || linea.article_code || `Línea ${linea.line_number}`}</strong>
+                <small className="muted"> · {numberFormatter.format(Number(linea.pending_units))} pendientes</small>
+              </span>
+              {linea.expected_on
+                ? <span className="badge badge-active">{linea.expected_on}</span>
+                : <span className="badge badge-lost">sin fecha</span>}
+            </li>
+          ))}
+          {lineas.length === 0 ? <li><span className="muted">Las líneas de este pedido todavía no han llegado de Sage.</span></li> : null}
+        </ul>
+      </section>
+    </div>
   );
 }

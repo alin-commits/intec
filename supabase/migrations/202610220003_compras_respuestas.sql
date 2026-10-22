@@ -81,3 +81,27 @@ drop policy if exists purchase_order_replies_read on public.purchase_order_repli
 create policy purchase_order_replies_read on public.purchase_order_replies
   for select to authenticated
   using ((select public.current_user_has_any_role(array['admin', 'direction']::app_role[])));
+
+-- ---------- Qué clase de correo es ----------
+-- Añadido después de ver correos de verdad: no es "persona o máquina". Un aviso
+-- de expedición lo manda un sistema, pero dice que el material ha salido, y eso
+-- a compras le importa tanto como una fecha. Tirarlo con las newsletters sería
+-- perder información que ya teníamos delante.
+--
+--   respuesta  → alguien del proveedor contesta sobre el pedido
+--   expedicion → el material ha salido: albarán, seguimiento, preaviso
+--   automatico → fuera de la oficina, acuses, no entregado
+--   otro       → publicidad, tarifas, facturas
+
+alter table public.purchase_order_replies add column if not exists kind text not null default 'respuesta'
+  check (kind in ('respuesta', 'expedicion', 'automatico', 'otro'));
+
+comment on column public.purchase_order_replies.kind is
+  'Qué clase de correo es. Solo "respuesta" marca el pedido como contestado; "expedicion" se enseña pero no para la reclamación.';
+
+-- Lo último que se supo del pedido por correo, para enseñarlo sin rebuscar.
+alter table public.purchase_order_tracking add column if not exists shipping_notice text;
+alter table public.purchase_order_tracking add column if not exists shipping_notice_at timestamptz;
+
+comment on column public.purchase_order_tracking.shipping_notice is
+  'El último aviso de expedición que llegó de este pedido. No cuenta como respuesta: el proveedor sigue sin decir cuándo llega.';

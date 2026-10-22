@@ -5,7 +5,7 @@ import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { todayKey } from "@/lib/dates";
 import { buzonDeCompras, cuerpoDelCorreo, graphConfigurado, leerEntrada } from "@/lib/compras/graph";
 import { pareceAutomatico, reconocerRespuestas, type CorreoRecibido, type ReclamacionMandada } from "@/lib/compras/respuestas";
-import { leerRespuesta } from "@/lib/compras/leer-respuesta";
+import { iaConfigurada, leerRespuesta } from "@/lib/compras/leer-respuesta";
 
 /*
   Lee lo que contestan los proveedores.
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
     buzonPropio: buzonDeCompras(),
   });
 
-  const resumen = { mirados: correosDelBuzon.length, reconocidos: reconocidas.length, leidos: 0, automaticos: 0, conFecha: 0, sinIa: 0 };
+  const resumen = { mirados: correosDelBuzon.length, reconocidos: reconocidas.length, leidos: 0, respuestas: 0, expediciones: 0, automaticos: 0, conFecha: 0, sinIa: 0 };
   const hoy = todayKey();
 
   for (const respuesta of reconocidas.slice(0, MAXIMO_A_LEER)) {
@@ -85,15 +85,20 @@ export async function GET(request: Request) {
       cuerpo: contenido.texto,
       hoy,
     });
-    if (!automatico && !lectura) resumen.sinIa++;
+    // Si la IA estaba disponible y aun así no contestó —se satura y devuelve
+    // 503—, este correo no se da por leído: el pedido se marca igual como
+    // contestado, pero la próxima pasada vuelve a intentar el resumen. Si se
+    // apuntara ahora, se quedaría sin resumen para siempre.
+    const iaFallo = !automatico && !lectura && iaConfigurada();
+    if (iaFallo) resumen.sinIa++;
 
-    // Lo que diga la IA sobre si es automático se suma a lo que dicen las
-    // cabeceras: ella ve el texto, que a veces es lo único que lo delata.
-    const esAutomatico = automatico || lectura?.esAutomatico === true;
+    // Las cabeceras mandan sobre la IA para los contestadores: un "fuera de la
+    // oficina" lo delata la cabecera aunque el texto parezca una respuesta.
+    const tipo = automatico ? "automatico" : (lectura?.tipo ?? "respuesta");
     // Una fecha solo se propone si está dicha sin condiciones.
     const propuesta = lectura?.fechaSegura ? lectura.fechaPrevista : null;
 
-    await admin.from("purchase_order_replies").upsert({
+    if (!iaFallo) await admin.from("purchase_order_replies").upsert({
       message_id: respuesta.correo.id,
       conversation_id: respuesta.correo.conversationId,
       company_code: respuesta.companyCode,
@@ -101,15 +106,33 @@ export async function GET(request: Request) {
       from_email: respuesta.correo.from,
       subject: respuesta.correo.subject.slice(0, 300),
       received_at: respuesta.correo.receivedAt,
-      from_person: !esAutomatico,
+      kind: tipo,
+      from_person: tipo === "respuesta",
       summary: lectura?.resumen?.slice(0, 500) ?? null,
       proposed_on: propuesta,
       proposed_sure: Boolean(lectura?.fechaSegura),
       orders: respuesta.orders,
     }, { onConflict: "message_id" });
 
-    resumen.leidos++;
-    if (esAutomatico) { resumen.automaticos++; continue; }
+    if (!iaFallo) resumen.leidos++;
+
+    // Un aviso de expedición se guarda y se enseña, pero no es una respuesta:
+    // el proveedor sigue sin decir cuándo llega, así que se le sigue reclamando.
+    if (tipo === "expedicion") {
+      resumen.expediciones++;
+      await admin.from("purchase_order_tracking").upsert(
+        respuesta.orders.map((pedido) => ({
+          company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
+          shipping_notice: lectura?.resumen?.slice(0, 500) ?? "Aviso de expedición",
+          shipping_notice_at: respuesta.correo.receivedAt,
+          updated_at: new Date().toISOString(),
+        })),
+        { onConflict: "company_code,year,series,number" },
+      );
+      continue;
+    }
+    if (tipo !== "respuesta") { resumen.automaticos++; continue; }
+    resumen.respuestas++;
     if (propuesta) resumen.conFecha++;
 
     // El pedido pasa a contestado. La fecha se queda en propuesta: confirmed_on
