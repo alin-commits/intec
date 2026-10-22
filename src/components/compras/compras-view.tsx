@@ -87,6 +87,8 @@ type Seguimiento = {
   company_code: number; year: number; series: string; number: number;
   state: string; level: number; last_chased_at: string | null;
   replied_at: string | null; confirmed_on: string | null; notes: string | null;
+  /** Lo que el bot entendió de la respuesta del proveedor. */
+  proposed_on: string | null; proposed_sure: boolean | null; reply_summary: string | null;
 };
 
 /** El correo preparado, tal como va a salir, antes de darle a enviar. */
@@ -123,9 +125,9 @@ function diasDesde(dia: string, hoy: string): number {
   return Math.max(0, Math.round((hasta - desde) / 86_400_000));
 }
 
-const COLUMNAS_SEGUIMIENTO = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, notes";
+const COLUMNAS_SEGUIMIENTO = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, notes, proposed_on, proposed_sure, reply_summary";
 /** Lo mismo sin lo que trae la migración de reclamaciones. */
-const COLUMNAS_SEGUIMIENTO_VIEJAS = "company_code, year, series, number, state, level, last_chased_at, confirmed_on, notes";
+const COLUMNAS_SEGUIMIENTO_VIEJAS = "company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, notes";
 
 /**
  * El seguimiento, aguantando que la migración de reclamaciones no esté puesta.
@@ -139,7 +141,7 @@ async function leerSeguimiento(supabase: ReturnType<typeof createClient>): Promi
   if (!primera.error) return { filas: (primera.data ?? []) as Seguimiento[], faltaMigracion: false };
   if (primera.error.code !== "42703") return { filas: [], faltaMigracion: false };
   const segunda = await supabase.from("purchase_order_tracking").select(COLUMNAS_SEGUIMIENTO_VIEJAS);
-  return { filas: (segunda.data ?? []).map((fila) => ({ ...fila, replied_at: null })) as Seguimiento[], faltaMigracion: true };
+  return { filas: (segunda.data ?? []).map((fila) => ({ ...fila, proposed_on: null, proposed_sure: false, reply_summary: null })) as Seguimiento[], faltaMigracion: true };
 }
 
 export function ComprasView() {
@@ -399,6 +401,28 @@ export function ComprasView() {
     }
   }
 
+  /**
+   * Aceptar la fecha que ha entendido el bot.
+   *
+   * Hasta aquí era una propuesta: la IA lee el correo y dice lo que ha
+   * entendido, pero la fecha del pedido no la pone ella. Este clic es el que
+   * la convierte en fecha, y queda apuntado que vino de ahí.
+   */
+  async function aceptarFecha(fila: (typeof conEstado)[number]) {
+    const propuesta = fila.seguimiento?.proposed_on;
+    if (!propuesta) return;
+    const { pedido } = fila;
+    const supabase = createClient();
+    const ahora = new Date().toISOString();
+    const { error } = await supabase.from("purchase_order_tracking").upsert({
+      company_code: pedido.company_code, year: pedido.year, series: pedido.series, number: pedido.number,
+      confirmed_on: propuesta, confirmed_source: "ia", confirmed_at: ahora, updated_at: ahora,
+    }, { onConflict: "company_code,year,series,number" });
+    if (error) { setAviso("No se pudo guardar."); return; }
+    setAviso(`Apuntado: ${fila.proveedorNombre} da el ${propuesta}. Falta pasarlo a Sage.`);
+    await recargarSeguimiento();
+  }
+
   async function recargarSeguimiento() {
     const supabase = createClient();
     const { data } = await supabase.from("purchase_order_tracking")
@@ -528,9 +552,10 @@ export function ComprasView() {
             <section className="panel panel-padded">
               <h3>Falta aplicar una migración</h3>
               <p className="muted">
-                Los pedidos se ven bien, pero para reclamar la fecha por correo falta
-                aplicar <code>202610220001_compras_reclamaciones.sql</code>. Hasta entonces, los botones de reclamar
-                no guardarían el seguimiento.
+                Los pedidos se ven bien, pero falta alguna de las migraciones de compras
+                —<code>202610220001</code>, <code>202610220002</code> o <code>202610220003</code>—, así que el
+                seguimiento se está leyendo a medias: puede faltar lo que ha contestado el proveedor o la fecha
+                que propone.
               </p>
             </section>
           ) : null}
@@ -609,7 +634,12 @@ export function ComprasView() {
                       {fila.contestado ? (
                         <span className="sales-article">
                           <span className="badge badge-active">ha contestado</span>
-                          <small>{fila.seguimiento?.confirmed_on ? `dice el ${fila.seguimiento.confirmed_on}` : "sin fecha todavía"}</small>
+                          {fila.seguimiento?.confirmed_on
+                            ? <small>da el {fila.seguimiento.confirmed_on} · falta pasarlo a Sage</small>
+                            : fila.seguimiento?.proposed_on
+                              ? <small>propone el {fila.seguimiento.proposed_on}</small>
+                              : <small>sin fecha todavía</small>}
+                          {fila.seguimiento?.reply_summary ? <small className="muted">{fila.seguimiento.reply_summary}</small> : null}
                         </span>
                       ) : fila.seguimiento?.level ? (
                         <span className="sales-article">
@@ -623,6 +653,11 @@ export function ComprasView() {
                         <button type="button" className="button button-compact" disabled={!fila.proveedorEmail}
                           title={fila.proveedorEmail ? `Escribir a ${fila.proveedorEmail}` : "Este proveedor no tiene correo en Sage"}
                           onClick={() => void prepararReclamacion(fila)}>Reclamar</button>
+                      ) : null}
+                      {fila.contestado && fila.seguimiento?.proposed_on && !fila.seguimiento.confirmed_on ? (
+                        <button type="button" className="button button-compact"
+                          title={`Dar por buena la fecha del ${fila.seguimiento.proposed_on}`}
+                          onClick={() => void aceptarFecha(fila)}>Aceptar {fila.seguimiento.proposed_on}</button>
                       ) : null}
                       {fila.seguimiento?.level && !fila.contestado ? (
                         <button type="button" className="button button-compact button-secondary"

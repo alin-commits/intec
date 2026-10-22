@@ -120,15 +120,16 @@ export async function buscarCorreoDelPedido(companyCode: number, numero: number)
   if (!asunto) return null;
   const buzon = encodeURIComponent(buzonDeCompras());
   const busqueda = encodeURIComponent(`"subject:${asunto}"`);
-  const respuesta = await pedir(`/users/${buzon}/messages?$search=${busqueda}&$select=id,subject,toRecipients,sentDateTime&$top=25`);
+  const respuesta = await pedir(`/users/${buzon}/messages?$search=${busqueda}&$select=id,conversationId,subject,toRecipients,sentDateTime&$top=25`);
   if (!respuesta) return null;
   if (!respuesta.ok) {
     console.error("Graph: no se pudo buscar el correo del pedido", (await respuesta.text()).slice(0, 300));
     return null;
   }
-  const datos = (await respuesta.json()) as { value?: { id: string; subject: string; sentDateTime: string; toRecipients?: { emailAddress?: { address?: string } }[] }[] };
+  const datos = (await respuesta.json()) as { value?: { id: string; conversationId?: string; subject: string; sentDateTime: string; toRecipients?: { emailAddress?: { address?: string } }[] }[] };
   const correos: CorreoDelPedido[] = (datos.value ?? []).map((mensaje) => ({
     id: mensaje.id,
+    conversationId: mensaje.conversationId ?? null,
     subject: mensaje.subject ?? "",
     sentDateTime: mensaje.sentDateTime ?? "",
     destinatarios: (mensaje.toRecipients ?? []).map((quien) => quien.emailAddress?.address ?? "").filter(Boolean),
@@ -169,6 +170,16 @@ export async function responderEnHilo(correo: CorreoDelPedido, html: string, des
   return { ok: true, enHilo: true, destinatario };
 }
 
+/** El hilo del último correo enviado con ese asunto, para los que salen sueltos. */
+export async function hiloDelUltimoEnviado(asunto: string): Promise<string | null> {
+  const buzon = encodeURIComponent(buzonDeCompras());
+  const respuesta = await pedir(`/users/${buzon}/mailFolders/sentitems/messages?$search=${encodeURIComponent(`"subject:${asunto}"`)}&$select=conversationId,sentDateTime&$top=5`);
+  if (!respuesta?.ok) return null;
+  const datos = (await respuesta.json()) as { value?: { conversationId?: string; sentDateTime?: string }[] };
+  const ordenados = [...(datos.value ?? [])].sort((a, b) => (b.sentDateTime ?? "").localeCompare(a.sentDateTime ?? ""));
+  return ordenados[0]?.conversationId ?? null;
+}
+
 /** Un correo nuevo desde el buzón, cuando no se encuentra el del pedido. */
 export async function mandarDesdeElBuzon(destinatario: string, asunto: string, html: string): Promise<ResultadoGraph> {
   const buzon = encodeURIComponent(buzonDeCompras());
@@ -186,4 +197,76 @@ export async function mandarDesdeElBuzon(destinatario: string, asunto: string, h
   if (!respuesta) return { ok: false, enHilo: false, destinatario, error: "Sin acceso a Graph." };
   if (!respuesta.ok) return { ok: false, enHilo: false, destinatario, error: (await respuesta.text()).slice(0, 300) };
   return { ok: true, enHilo: false, destinatario };
+}
+
+/*
+  Leer la bandeja de entrada.
+
+  Solo lo imprescindible para emparejar: quién escribe, en qué hilo y cuándo.
+  El cuerpo se pide después y únicamente de los correos que resultan ser
+  respuestas a una reclamación nuestra: en ese buzón hay casi cuarenta mil
+  correos de todo tipo y no hay por qué tocar los demás.
+*/
+export type CorreoEntrante = {
+  id: string;
+  conversationId: string | null;
+  from: string | null;
+  subject: string;
+  receivedAt: string;
+};
+
+export async function leerEntrada(desdeIso: string, tope = 200): Promise<CorreoEntrante[]> {
+  const buzon = encodeURIComponent(buzonDeCompras());
+  const filtro = encodeURIComponent(`receivedDateTime ge ${desdeIso}`);
+  const correos: CorreoEntrante[] = [];
+  let ruta: string | null = `/users/${buzon}/mailFolders/inbox/messages?$filter=${filtro}&$select=id,conversationId,from,subject,receivedDateTime&$orderby=receivedDateTime desc&$top=50`;
+
+  while (ruta && correos.length < tope) {
+    const respuesta: Response | null = await pedir(ruta);
+    if (!respuesta?.ok) {
+      if (respuesta) console.error("Graph: no se pudo leer la entrada", (await respuesta.text()).slice(0, 300));
+      break;
+    }
+    const datos = (await respuesta.json()) as {
+      value?: { id: string; conversationId?: string; subject?: string; receivedDateTime?: string; from?: { emailAddress?: { address?: string } } }[];
+      "@odata.nextLink"?: string;
+    };
+    for (const mensaje of datos.value ?? []) {
+      correos.push({
+        id: mensaje.id,
+        conversationId: mensaje.conversationId ?? null,
+        from: mensaje.from?.emailAddress?.address ?? null,
+        subject: mensaje.subject ?? "",
+        receivedAt: mensaje.receivedDateTime ?? "",
+      });
+    }
+    // El enlace de la página siguiente viene entero; se recorta a la parte que espera `pedir`.
+    const siguiente = datos["@odata.nextLink"];
+    ruta = siguiente ? siguiente.replace("https://graph.microsoft.com/v1.0", "") : null;
+  }
+  return correos.slice(0, tope);
+}
+
+/** El texto de un correo y sus cabeceras, que son las que delatan a los contestadores. */
+export async function cuerpoDelCorreo(id: string): Promise<{ texto: string; cabeceras: Record<string, string> } | null> {
+  const buzon = encodeURIComponent(buzonDeCompras());
+  const respuesta = await pedir(`/users/${buzon}/messages/${id}?$select=body,internetMessageHeaders`);
+  if (!respuesta?.ok) return null;
+  const datos = (await respuesta.json()) as {
+    body?: { content?: string; contentType?: string };
+    internetMessageHeaders?: { name?: string; value?: string }[];
+  };
+  const cabeceras: Record<string, string> = {};
+  for (const cabecera of datos.internetMessageHeaders ?? []) {
+    if (cabecera.name) cabeceras[cabecera.name.toLowerCase()] = cabecera.value ?? "";
+  }
+  const bruto = datos.body?.content ?? "";
+  // De HTML a texto: a la IA le estorban las etiquetas y gastan tokens.
+  const texto = datos.body?.contentType === "html"
+    ? bruto.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/tr>/gi, "\n").replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"')
+        .replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim()
+    : bruto.trim();
+  return { texto, cabeceras };
 }

@@ -134,7 +134,7 @@ export async function enviarReclamacion(
 
   // Reservar el turno. Si otra ejecución ya lo hizo hoy, el índice único lo
   // rechaza (23505) y aquí no sale nada.
-  const { data: registro, error: errorRegistro } = await admin.from("purchase_order_chases").insert({
+  const apunte = {
     company_code: grupo.companyCode,
     supplier_code: grupo.supplierCode,
     level: grupo.nivel,
@@ -144,10 +144,19 @@ export async function enviarReclamacion(
     orders: grupo.pedidos.map((p) => ({ year: p.year, series: p.series, number: p.number })),
     ok: false,
     message: "Enviando…",
-  }).select("id").single();
+  };
+  // El hilo en el que sale es por donde se reconocerá la respuesta. Si su
+  // migración todavía no está, se apunta sin él: se perderá la detección
+  // automática de esa respuesta, pero no el envío ni lo que impide repetirlo.
+  let { data: registro, error: errorRegistro } = await admin.from("purchase_order_chases")
+    .insert({ ...apunte, conversation_id: salida.hilo?.conversationId ?? null }).select("id").single();
+  if (errorRegistro?.code === "42703") {
+    console.warn("Compras: falta la migración de respuestas; se apunta la reclamación sin el hilo.");
+    ({ data: registro, error: errorRegistro } = await admin.from("purchase_order_chases").insert(apunte).select("id").single());
+  }
 
-  if (errorRegistro) {
-    if (errorRegistro.code === "23505") return { ...base, ok: false, motivo: "repetido" };
+  if (errorRegistro || !registro) {
+    if (errorRegistro?.code === "23505") return { ...base, ok: false, motivo: "repetido" };
     console.error("Compras: no se pudo apuntar la reclamación", errorRegistro);
     return { ...base, ok: false, motivo: "fallo_envio" };
   }

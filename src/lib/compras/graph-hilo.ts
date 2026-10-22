@@ -9,6 +9,8 @@
 
 export type CorreoDelPedido = {
   id: string;
+  /** El hilo. Por aquí se reconoce después la respuesta del proveedor. */
+  conversationId?: string | null;
   subject: string;
   /** A quién se lo mandó Sage: es la dirección buena, no la genérica de la ficha. */
   destinatarios: string[];
