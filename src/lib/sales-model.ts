@@ -378,7 +378,8 @@ export type Finding = {
   filter?: Partial<SalesFilters>;
 };
 
-type Dimension = "company" | "channel" | "rep" | "month";
+/** Por qué se puede partir una fila de ventas. */
+export type Dimension = "company" | "channel" | "rep" | "month";
 
 /**
  * Filtra las filas por todo lo elegido menos lo que se pida saltar: el cuadro

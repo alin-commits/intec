@@ -46,6 +46,7 @@ import { SalesMarginPage } from "./page-sales";
 import { CommercialPage } from "./page-commercial";
 import { ProductsPage } from "./page-products";
 import { CustomersPage } from "./page-customers";
+import { ComparadorPage } from "./page-comparador";
 import { TargetsPage } from "./page-targets";
 import { PageLoader } from "@/components/ui/page-loader";
 
@@ -662,6 +663,7 @@ export function SalesDashboard() {
         {page === "comercial" ? <CommercialPage ctx={context} /> : null}
         {page === "productos" ? <ProductsPage ctx={context} /> : null}
         {page === "clientes" ? <CustomersPage ctx={context} /> : null}
+        {page === "comparador" ? <ComparadorPage ctx={context} /> : null}
         {page === "objetivos" ? <TargetsPage ctx={context} /> : null}
       </div>
 

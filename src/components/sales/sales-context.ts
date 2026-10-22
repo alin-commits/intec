@@ -6,7 +6,7 @@ import type { PeriodChoice, SalesPeriod } from "@/lib/sales-period";
   datos ya cargados, los filtros y cómo cambiarlos, y cómo abrir una lista.
 */
 
-export type SalesPageKey = "resumen" | "ventas" | "comercial" | "productos" | "clientes" | "objetivos";
+export type SalesPageKey = "resumen" | "ventas" | "comercial" | "productos" | "clientes" | "comparador" | "objetivos";
 export type SalesDimension = "company" | "channel" | "rep" | "month" | "family";
 
 /**
@@ -20,6 +20,9 @@ export const salesPages: { key: SalesPageKey; label: string; applies: SalesDimen
   { key: "comercial", label: "Comercial", applies: ["company", "channel", "rep", "month"] },
   { key: "productos", label: "Productos", applies: ["company", "month", "family"] },
   { key: "clientes", label: "Clientes", applies: ["company", "channel", "rep", "month", "family"] },
+  // El comparador vive de lo marcado: todos los filtros se aplican, porque son
+  // justo lo que compara.
+  { key: "comparador", label: "Comparador", applies: ["company", "channel", "rep", "month", "family"] },
   { key: "objetivos", label: "Objetivos", applies: ["company", "rep", "month"] },
 ];
 
