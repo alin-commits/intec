@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { SageRefreshButton } from "@/components/sage-refresh-button";
 import { useSearchParams } from "next/navigation";
 import { KpiCard } from "@/components/kpi-card";
 import { CalendarIcon, ClockIcon, EuroIcon, XCircleIcon } from "@/components/icons";
@@ -233,6 +234,8 @@ export function ComprasView() {
   const [contestando, setContestando] = useState<{ llave: string; pedido: Pedido; proveedor: string } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [buscando, setBuscando] = useState(false);
+  /** Sube al acabar una lectura de Sage: lo vuelve a cargar todo. */
+  const [recarga, setRecarga] = useState(0);
 
   useEffect(() => {
     let vivo = true;
@@ -284,7 +287,7 @@ export function ComprasView() {
       setRespuestas((respuestasRes.data ?? []) as RespuestaRecibida[]);
     })();
     return () => { vivo = false; };
-  }, [configured]);
+  }, [configured, recarga]);
 
   const nombreProveedor = useMemo(() => {
     const mapa = new Map<string, Proveedor>();
@@ -632,6 +635,14 @@ export function ComprasView() {
             onClick={() => void buscarRespuestas()} disabled={buscando}>
             {buscando ? "Buscando…" : "Buscar respuestas"}
           </button>
+          {/*
+            Lo de esta pantalla lo trae el agente de Sage. Quien acaba de meter
+            un pedido quiere verlo ya, así que puede pedir la lectura en vez de
+            esperar a la programada. El botón dice lo que tarda antes de
+            pulsarlo, porque manda al servidor de la oficina a recorrer Sage y
+            eso solo se puede hacer una vez por hora.
+          */}
+          <SageRefreshButton onUpdated={() => setRecarga((clave) => clave + 1)} />
           {ordenadas.length > 0 ? (
             <>
               <button type="button" className="button button-compact button-secondary"

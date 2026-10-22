@@ -76,19 +76,46 @@ async function siguienteLecturaPermitida(supabase: NonNullable<Awaited<ReturnTyp
   return new Date(new Date(data.requested_at as string).getTime() + ESPERA_MS).toISOString();
 }
 
+/**
+ * Cuánto suele tardar una lectura, en segundos, desde que se pide hasta que
+ * acaba. Sale de las últimas que salieron bien: así el botón puede decir lo que
+ * va a costar de verdad en este servidor, en vez de un «menos de un minuto»
+ * escrito a mano que puede no ser cierto.
+ *
+ * Se usa la mediana y no la media: una lectura que se quedó atascada veinte
+ * minutos no tiene por qué cambiar lo que se le promete a nadie. Con menos de
+ * tres lecturas buenas no se dice nada, que con una no se sabe.
+ */
+async function loQueSueleTardar(supabase: NonNullable<Awaited<ReturnType<typeof createClient>>>): Promise<number | null> {
+  const { data } = await supabase
+    .from("sage_refresh_requests")
+    .select("requested_at, finished_at")
+    .eq("status", "hecho")
+    .not("finished_at", "is", null)
+    .order("requested_at", { ascending: false })
+    .limit(10);
+  const duraciones = (data ?? [])
+    .map((fila) => (new Date(fila.finished_at as string).getTime() - new Date(fila.requested_at as string).getTime()) / 1000)
+    .filter((segundos) => segundos > 0 && segundos < 30 * 60)
+    .sort((a, b) => a - b);
+  if (duraciones.length < 3) return null;
+  return Math.round(duraciones[Math.floor(duraciones.length / 2)]);
+}
+
 export async function GET() {
   const access = await allowedClient();
   if ("error" in access) return access.error;
   const { supabase } = access;
   await expireForgottenRequests();
-  const [latest, agent, nextAllowedAt] = await Promise.all([
+  const [latest, agent, nextAllowedAt, sueleTardar] = await Promise.all([
     supabase.from("sage_refresh_requests").select(COLUMNS).order("requested_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("sage_agent_status").select("last_poll_at").eq("id", 1).maybeSingle(),
     siguienteLecturaPermitida(supabase),
+    loQueSueleTardar(supabase),
   ]);
   if (latest.error || agent.error) return NextResponse.json({ error: "No se pudo consultar la lectura de Sage." }, { status: 500 });
   return NextResponse.json(
-    { request: latest.data ?? null, agentLastPoll: agent.data?.last_poll_at ?? null, nextAllowedAt },
+    { request: latest.data ?? null, agentLastPoll: agent.data?.last_poll_at ?? null, nextAllowedAt, sueleTardar },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

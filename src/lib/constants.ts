@@ -80,8 +80,15 @@ export const SCHEDULE_EDIT_ROLES: AppRole[] = ["admin", "accounting"];
  * no entra. Tiene que cuadrar con las políticas de 202609290012.
  */
 export const PAYMENTS_ROLES: AppRole[] = ["admin", "owner", "accounting"];
-/** Quién puede pedir una lectura de Sage con el botón: los que ven Ventas o Pagos. */
-export const SAGE_REFRESH_ROLES: AppRole[] = ["admin", "direction", "accounting"];
+/**
+ * Quién puede pedir una lectura de Sage con el botón.
+ *
+ * Los que ven Ventas o Pagos, y compras: su pantalla vive de lo que trae el
+ * agente y son los que notan que falta un pedido recién metido en Sage. El
+ * tope de una lectura por hora lo pone el servidor para toda la casa, así que
+ * añadir gente aquí no añade lecturas.
+ */
+export const SAGE_REFRESH_ROLES: AppRole[] = ["admin", "direction", "accounting", "purchasing"];
 export const EXPENSES_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
 /** Manages the password vault: permissions and audit log (not access to personal entries). */
 export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];

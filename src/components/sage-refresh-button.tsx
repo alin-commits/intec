@@ -39,6 +39,21 @@ const AGENT_SILENT_MS = 3 * 60 * 1000;
 const FALLO_RECIENTE_MS = 30 * 60 * 1000;
 
 const time = (value: string) => new Date(value).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * Lo que se dice que tarda.
+ *
+ * Con lecturas anteriores de las que fiarse, lo que han tardado de verdad. Sin
+ * ellas —un Hub recién puesto, o nadie ha pulsado aún— se dice lo que se sabe
+ * por cómo funciona: la tarea del servidor pregunta cada minuto, así que entre
+ * la espera y la lectura se va a un minuto o dos.
+ */
+function cuantoTarda(segundos: number | null): string {
+  if (segundos === null) return "un minuto o dos";
+  if (segundos < 75) return `unos ${Math.max(10, Math.round(segundos / 5) * 5)} s`;
+  if (segundos < 105) return "un minuto y medio";
+  return `unos ${Math.round(segundos / 60)} min`;
+}
 const isActive = (request: RefreshRequest | null) => request?.status === "pendiente" || request?.status === "leyendo";
 
 export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
@@ -46,6 +61,8 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
   const [agentLastPoll, setAgentLastPoll] = useState<string | null>(null);
   /** Hasta cuándo hay que esperar para volver a pedir, si es que hay que esperar. */
   const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null);
+  /** Lo que han tardado las últimas lecturas, para decirlo antes de pulsar. */
+  const [sueleTardar, setSueleTardar] = useState<number | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   /** La hora de la última consulta: con ella se decide si el servidor tarda demasiado. */
@@ -61,8 +78,9 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
     try {
       const response = await fetch("/api/sage/refresh", { cache: "no-store" });
       if (!response.ok) return;
-      const payload = (await response.json()) as { request: RefreshRequest | null; agentLastPoll: string | null; nextAllowedAt?: string | null };
+      const payload = (await response.json()) as { request: RefreshRequest | null; agentLastPoll: string | null; nextAllowedAt?: string | null; sueleTardar?: number | null };
       setCheckedAt(Date.now());
+      setSueleTardar(payload.sueleTardar ?? null);
       setAgentLastPoll(payload.agentLastPoll);
       setNextAllowedAt(payload.nextAllowedAt ?? null);
       setRequest(payload.request);
@@ -143,18 +161,24 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
 
   const esperando = Boolean(nextAllowedAt && checkedAt > 0 && new Date(nextAllowedAt).getTime() > checkedAt);
 
+  const tarda = cuantoTarda(sueleTardar);
+
   let label = "Actualizar desde Sage";
   let status: { text: string; tone: "info" | "ok" | "bad" } | null = null;
+  // Antes de pulsar se dice lo que cuesta: el botón manda al servidor de la
+  // oficina a recorrer Sage, y eso no es instantáneo ni se puede repetir.
+  if (!request || (!active && request.status === "hecho" && !esperando)) {
+    const hecho = request?.status === "hecho" && request.finished_at ? `Leído a las ${time(request.finished_at)}. ` : "";
+    status = { text: `${hecho}Tarda ${tarda}, y se puede una vez por hora.`, tone: hecho ? "ok" : "info" };
+  }
   if (request?.status === "pendiente") {
     label = "Esperando al servidor…";
     status = waitingLong && agentSilent
       ? { text: "El servidor de Sage no está recogiendo peticiones. Revisa la tarea «Intec - Sage a peticion».", tone: "bad" }
-      : { text: "El servidor de Sage la recogerá en menos de un minuto.", tone: "info" };
+      : { text: `El servidor la recoge en menos de un minuto; en total tarda ${tarda}.`, tone: "info" };
   } else if (request?.status === "leyendo") {
     label = "Leyendo Sage…";
-    status = { text: "Suele tardar menos de un minuto.", tone: "info" };
-  } else if (request?.status === "hecho" && request.finished_at) {
-    status = { text: `Actualizado a las ${time(request.finished_at)}.`, tone: "ok" };
+    status = { text: `Suele tardar ${tarda}.`, tone: "info" };
   } else if (request?.status === "error" && warnAboutFailure) {
     status = { text: `${request.message ?? "La lectura falló"} (${time(failedAt!)}).`, tone: "bad" };
   } else if (request?.status === "caducada" && warnAboutFailure) {
