@@ -55,7 +55,8 @@ Reglas:
 - fechaPrevista es la fecha en la que dicen que llegará o saldrá el material, en formato yyyy-mm-dd. Si dan fechas distintas para líneas distintas, pon la más tardía, que es cuando el pedido estará completo. Si no dan ninguna, null.
 - fechaSegura es verdadero SOLO si la fecha está dicha sin condiciones ("sale el 4 de noviembre", "entrega el 12/11"). Es falso si va condicionada o es aproximada ("sobre el 15", "si nos llega el material", "la semana que viene", "a finales de mes"), aunque hayas podido convertirla en una fecha concreta.
 - resumen es una línea corta en español de España que valga para que alguien de compras entienda el correo sin abrirlo. Ve al grano, nada de "el proveedor dice que". Si avisan de algo que importa —que falta material, que sube el precio, que envían parte del pedido— dilo.
-- Ignora el correo citado debajo de la respuesta: es la reclamación que mandamos nosotros.`;
+- Ignora el correo citado debajo de la respuesta: es la reclamación que mandamos nosotros.
+- Si viene un documento adjunto, léelo: muchos proveedores confirman ahí y no en el texto. Si el adjunto y el correo dicen fechas distintas, manda el adjunto, que es el documento formal.`;
 
 
 /** La pregunta completa, tal como se la mandamos. */

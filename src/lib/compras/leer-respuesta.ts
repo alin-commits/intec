@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { generateJsonWithGemini } from "@/lib/gemini";
 import { ESQUEMA, Lectura, construirPregunta, interpretar, type LecturaDeRespuesta } from "@/lib/compras/leer-respuesta-prompt";
+import type { AdjuntoPdf } from "@/lib/compras/graph";
 
 /*
   Entender qué ha contestado un proveedor.
@@ -50,11 +51,14 @@ export async function leerRespuesta(input: {
   asunto: string;
   cuerpo: string;
   hoy: string;
+  /** Los PDF del correo. Nueve de cada veintiséis respuestas traen ahí la fecha. */
+  adjuntos?: AdjuntoPdf[];
 }): Promise<LecturaDeRespuesta | null> {
   const pregunta = construirPregunta(input);
+  const adjuntos = input.adjuntos ?? [];
 
   if (process.env.ANTHROPIC_API_KEY) {
-    const porClaude = await conClaude(pregunta, input.proveedor);
+    const porClaude = await conClaude(pregunta, input.proveedor, adjuntos);
     if (porClaude) return porClaude;
   }
 
@@ -65,12 +69,15 @@ export async function leerRespuesta(input: {
     label: `la respuesta de ${input.proveedor}`,
     timeBudgetMs: 45_000,
     responseSchema: ESQUEMA,
-    parts: [{ text: pregunta }],
+    parts: [
+      ...adjuntos.map((adjunto) => ({ inline_data: { mime_type: "application/pdf", data: adjunto.base64 } })),
+      { text: pregunta },
+    ],
   });
   return resultado.ok ? interpretar(resultado.raw) : null;
 }
 
-async function conClaude(pregunta: string, proveedor: string): Promise<LecturaDeRespuesta | null> {
+async function conClaude(pregunta: string, proveedor: string, adjuntos: AdjuntoPdf[]): Promise<LecturaDeRespuesta | null> {
   try {
     const anthropic = new Anthropic();
     const respuesta = await anthropic.messages.parse({
@@ -79,7 +86,17 @@ async function conClaude(pregunta: string, proveedor: string): Promise<LecturaDe
       // Esfuerzo bajo: es una extracción corta de un texto que ya viene
       // acotado, no hay nada que razonar largo y rato.
       output_config: { format: zodOutputFormat(Lectura), effort: "low" },
-      messages: [{ role: "user", content: pregunta }],
+      // El documento va delante del texto, que es como lo espera la API.
+      messages: [{
+        role: "user",
+        content: [
+          ...adjuntos.map((adjunto) => ({
+            type: "document" as const,
+            source: { type: "base64" as const, media_type: "application/pdf" as const, data: adjunto.base64 },
+          })),
+          { type: "text" as const, text: pregunta },
+        ],
+      }],
     });
     if (respuesta.stop_reason === "refusal") {
       console.error(`Compras: Claude declinó leer la respuesta de ${proveedor}`, respuesta.stop_details);

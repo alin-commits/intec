@@ -289,3 +289,38 @@ export async function cuerpoDelCorreo(id: string): Promise<{ texto: string; cabe
     : bruto.trim();
   return { texto, cabeceras };
 }
+
+/** Más grande que esto no se manda a la IA: una confirmación de pedido no pesa así. */
+const MAXIMO_PDF = 6 * 1024 * 1024;
+/** Y más de dos adjuntos es un correo que no es una confirmación. */
+const MAXIMO_ADJUNTOS = 2;
+
+export type AdjuntoPdf = { nombre: string; base64: string };
+
+/**
+ * Los PDF de un correo, para que la IA los lea.
+ *
+ * De 26 respuestas de proveedor medidas, 9 traían la fecha en el adjunto y
+ * nada en el texto: sin esto se quedaban como "ha contestado, sin fecha" y
+ * alguien tenía que abrir el correo igual, que es justo lo que esto venía a
+ * evitar.
+ */
+export async function adjuntosPdf(id: string): Promise<AdjuntoPdf[]> {
+  const buzon = encodeURIComponent(buzonDeCompras());
+  const respuesta = await pedir(`/users/${buzon}/messages/${id}/attachments`);
+  if (!respuesta?.ok) return [];
+  const datos = (await respuesta.json()) as { value?: { name?: string; contentType?: string; size?: number; contentBytes?: string }[] };
+  const salida: AdjuntoPdf[] = [];
+  for (const adjunto of datos.value ?? []) {
+    if (salida.length >= MAXIMO_ADJUNTOS) break;
+    const nombre = adjunto.name ?? "";
+    const esPdf = nombre.toLowerCase().endsWith(".pdf") || adjunto.contentType === "application/pdf";
+    if (!esPdf || !adjunto.contentBytes) continue;
+    if ((adjunto.size ?? 0) > MAXIMO_PDF) {
+      console.warn(`Compras: ${nombre} pesa demasiado para leerlo (${Math.round((adjunto.size ?? 0) / 1024)} kB).`);
+      continue;
+    }
+    salida.push({ nombre, base64: adjunto.contentBytes });
+  }
+  return salida;
+}

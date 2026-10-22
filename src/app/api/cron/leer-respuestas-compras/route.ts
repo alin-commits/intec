@@ -3,7 +3,7 @@ import { isAuthorizedCron } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { todayKey } from "@/lib/dates";
-import { buzonDeCompras, cuerpoDelCorreo, graphConfigurado, leerEntrada } from "@/lib/compras/graph";
+import { adjuntosPdf, buzonDeCompras, cuerpoDelCorreo, graphConfigurado, leerEntrada } from "@/lib/compras/graph";
 import { pareceAutomatico, reconocerRespuestas, type CorreoRecibido, type ReclamacionMandada } from "@/lib/compras/respuestas";
 import { iaConfigurada, leerRespuesta } from "@/lib/compras/leer-respuesta";
 
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
     buzonPropio: buzonDeCompras(),
   });
 
-  const resumen = { mirados: correosDelBuzon.length, reconocidos: reconocidas.length, leidos: 0, respuestas: 0, expediciones: 0, automaticos: 0, conFecha: 0, sinIa: 0 };
+  const resumen = { mirados: correosDelBuzon.length, reconocidos: reconocidas.length, leidos: 0, respuestas: 0, expediciones: 0, automaticos: 0, conFecha: 0, conPdf: 0, sinIa: 0 };
   const hoy = todayKey();
 
   for (const respuesta of reconocidas.slice(0, MAXIMO_A_LEER)) {
@@ -78,17 +78,26 @@ export async function GET(request: Request) {
     if (!contenido) continue;
 
     const automatico = pareceAutomatico(respuesta.correo, contenido.cabeceras);
+    /*
+      Los PDF solo se bajan de lo que ya sabemos que es una respuesta nuestra.
+      De 26 respuestas medidas, 9 traían la fecha en el adjunto y nada en el
+      texto; pero en ese buzón hay miles de facturas y publicidad, y bajar
+      adjuntos de todo sería tan caro como inútil.
+    */
+    const adjuntos = automatico ? [] : await adjuntosPdf(respuesta.correo.id);
     const lectura = automatico ? null : await leerRespuesta({
       proveedor: respuesta.supplierCode,
       pedidos: respuesta.orders.map((pedido) => `${pedido.series}${pedido.number}`),
       asunto: respuesta.correo.subject,
       cuerpo: contenido.texto,
+      adjuntos,
       hoy,
     });
     // Si la IA estaba disponible y aun así no contestó —se satura y devuelve
     // 503—, este correo no se da por leído: el pedido se marca igual como
     // contestado, pero la próxima pasada vuelve a intentar el resumen. Si se
     // apuntara ahora, se quedaría sin resumen para siempre.
+    if (adjuntos.length > 0) resumen.conPdf++;
     const iaFallo = !automatico && !lectura && iaConfigurada();
     if (iaFallo) resumen.sinIa++;
 
