@@ -12,6 +12,25 @@
   red, y se prueba sola.
 */
 
+/*
+  El estado que manda Sage en la cabecera del pedido.
+
+  Un pedido servido puede quedarse con unidades pendientes de sobra —se cierra
+  con un resto— y por eso no basta con mirar las unidades: de 533 pedidos con
+  algo pendiente, 197 estaban servidos, y entre todos ellos sumaban 11.204 €
+  frente a los 705.171 € de los que sí están pendientes. Eran restos, y se les
+  estaba reclamando como si faltara el material entero.
+
+  El 1 (parcialmente servido) sí se reclama: falta parte de la mercancía.
+  Si el agente no encontró la columna el estado llega vacío, y entonces se
+  enseña: no saberlo no es razón para esconder un pedido.
+*/
+export const ESTADO_SERVIDO = 2;
+
+export function estaServido(status: number | null | undefined): boolean {
+  return status === ESTADO_SERVIDO;
+}
+
 /** Los dos avisos: a los 2 y a los 5 días de hacer el pedido. */
 export const ESCALONES = [
   { nivel: 1 as const, dias: 2 },
@@ -39,6 +58,8 @@ export type PedidoReclamable = {
   orderDate: string;
   /** Cuántas de sus líneas pendientes siguen sin fecha. Si es 0, no se reclama. */
   lineasSinFecha: number;
+  /** El estado de Sage: un pedido servido no se reclama aunque le sobren unidades. */
+  status?: number | null;
   pendingAmount: number;
 };
 
@@ -90,6 +111,7 @@ export function clavePedido(p: { companyCode: number; year: number; series: stri
  * cron no corrió un día, al siguiente recupera en vez de saltarse un aviso.
  */
 export function escalonQueToca(pedido: PedidoReclamable, seguimiento: Seguimiento | undefined, hoy: string): 1 | 2 | null {
+  if (estaServido(pedido.status)) return null;
   if (pedido.lineasSinFecha <= 0) return null;
   if (!pedido.supplierCode) return null;
   if (seguimiento && NO_SE_TOCA.has(seguimiento.state)) return null;

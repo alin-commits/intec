@@ -3,7 +3,7 @@ import { hasAnyRole, COMPRAS_ROLES } from "@/lib/constants";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { comoVaASalir, enviarReclamacion, prepararReclamacion } from "@/lib/compras/enviar-reclamacion";
-import { clavePedido, escalonAMano, type PedidoAReclamar, type Seguimiento } from "@/lib/compras/reclamaciones";
+import { ESTADO_SERVIDO, clavePedido, escalonAMano, type PedidoAReclamar, type Seguimiento } from "@/lib/compras/reclamaciones";
 import type { AppRole } from "@/lib/types";
 
 /*
@@ -60,8 +60,9 @@ export async function POST(request: Request) {
   // Los pedidos, leídos de la base y acotados a ese proveedor: lo que llega del
   // navegador solo dice cuáles mirar.
   const { data: pedidos, error } = await admin.from("sage_purchase_orders")
-    .select("company_code, year, series, number, supplier_code, order_date, pending_amount")
-    .eq("company_code", companyCode).eq("supplier_code", supplierCode).gt("pending_units", 0).in("number", numeros);
+    .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status")
+    .eq("company_code", companyCode).eq("supplier_code", supplierCode).gt("pending_units", 0)
+    .or(`status.is.null,status.neq.${ESTADO_SERVIDO}`).in("number", numeros);
   if (error) {
     console.error("Compras: no se pudieron leer los pedidos a reclamar", error);
     return NextResponse.json({ error: "No se pudieron leer los pedidos." }, { status: 500 });

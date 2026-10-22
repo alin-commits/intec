@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { todayKey } from "@/lib/dates";
 import { enviarReclamacion } from "@/lib/compras/enviar-reclamacion";
-import { clavePedido, reclamacionesDeHoy, type PedidoReclamable, type Seguimiento } from "@/lib/compras/reclamaciones";
+import { ESTADO_SERVIDO, clavePedido, reclamacionesDeHoy, type PedidoReclamable, type Seguimiento } from "@/lib/compras/reclamaciones";
 
 /*
   Los dos recordatorios: a las 48 y a las 120 horas del pedido.
@@ -31,10 +31,10 @@ export async function GET(request: Request) {
 
   const hoy = todayKey();
   const [{ data: pedidos, error: errorPedidos }, { data: lineas, error: errorLineas }, { data: seguimientos, error: errorSeguimiento }] = await Promise.all([
-    fetchAllPages<{ company_code: number; year: number; series: string; number: number; supplier_code: string | null; order_date: string; pending_amount: number }>(
+    fetchAllPages<{ company_code: number; year: number; series: string; number: number; supplier_code: string | null; order_date: string; pending_amount: number; status: number | null }>(
       (from, to) => admin.from("sage_purchase_orders")
-        .select("company_code, year, series, number, supplier_code, order_date, pending_amount")
-        .gt("pending_units", 0).order("company_code").order("number").range(from, to)),
+        .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status")
+        .gt("pending_units", 0).or(`status.is.null,status.neq.${ESTADO_SERVIDO}`).order("company_code").order("number").range(from, to)),
     fetchAllPages<{ company_code: number; year: number; series: string; number: number; expected_on: string | null }>(
       (from, to) => admin.from("sage_purchase_order_lines")
         .select("company_code, year, series, number, expected_on")
@@ -69,6 +69,7 @@ export async function GET(request: Request) {
     supplierCode: p.supplier_code, orderDate: p.order_date,
     lineasSinFecha: sinFecha.get(clavePedido({ companyCode: p.company_code, year: p.year, series: p.series, number: p.number })) ?? 0,
     pendingAmount: Number(p.pending_amount),
+    status: p.status,
   }));
 
   const grupos = reclamacionesDeHoy({ pedidos: reclamables, seguimiento, hoy });

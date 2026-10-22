@@ -130,3 +130,23 @@ test("reclamar a mano sube el escalón igual, y se queda en el segundo", () => {
   assert.equal(escalonAMano({ state: "reclamado", level: 1, quietUntil: null }), 2);
   assert.equal(escalonAMano({ state: "reclamado", level: 2, quietUntil: null }), 2);
 });
+
+test("un pedido servido no se reclama aunque le sobren unidades", () => {
+  // Sage cierra pedidos dejando un resto: 197 de 533 estaban servidos con
+  // unidades pendientes, y entre todos sumaban 11.204 € frente a los 705.171 €
+  // de los que de verdad faltan. Reclamarlos es dar la lata por un sobrante.
+  const servido = pedido({ status: 2, orderDate: "2026-10-01" });
+  assert.equal(escalonQueToca(servido, undefined, "2026-10-20"), null);
+  assert.equal(reclamacionesDeHoy({ pedidos: [servido], seguimiento: sin, hoy: "2026-10-20", desde: DESDE }).length, 0);
+});
+
+test("pero uno servido a medias sí, que falta mercancía", () => {
+  assert.equal(escalonQueToca(pedido({ status: 1, orderDate: "2026-10-01" }), undefined, "2026-10-20"), 1);
+  assert.equal(escalonQueToca(pedido({ status: 0, orderDate: "2026-10-01" }), undefined, "2026-10-20"), 1);
+});
+
+test("y si Sage no manda el estado, se reclama igual", () => {
+  // No saberlo no es razón para callarse: el pedido tiene material pendiente.
+  assert.equal(escalonQueToca(pedido({ status: null, orderDate: "2026-10-01" }), undefined, "2026-10-20"), 1);
+  assert.equal(escalonQueToca(pedido({ orderDate: "2026-10-01" }), undefined, "2026-10-20"), 1);
+});
