@@ -68,6 +68,20 @@ export function redirigidoA(): string | null {
   return process.env.MS_COMPRAS_REDIRIGIR_A?.trim() || null;
 }
 
+/**
+ * Si desde aquí se puede escribir a un proveedor de verdad.
+ *
+ * Solo producción. Un despliegue de previsualización, un portátil o una prueba
+ * tienen los mismos datos reales —los mismos proveedores y sus correos— y lo
+ * único que los separa de mandar algo a una empresa de fuera es que alguien se
+ * acuerde de poner una variable. Eso tarde o temprano falla, así que no se
+ * confía en ello: fuera de producción hay que decir a dónde se desvía, o no
+ * sale nada.
+ */
+export function entornoQuePuedeEscribirAProveedores(): boolean {
+  return process.env.VERCEL_ENV === "production";
+}
+
 // El token dura una hora larga; se guarda para no pedir uno por correo.
 let tokenGuardado: { valor: string; caduca: number } | null = null;
 

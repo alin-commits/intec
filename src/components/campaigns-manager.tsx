@@ -140,6 +140,8 @@ export function CampaignsManager() {
   const [leads, setLeads] = useState<LeadStub[]>(() => demoLeads.map((lead) => ({ campaignId: lead.campaignId ?? null, status: lead.status, saleValue: lead.saleValue })));
   const [ads, setAds] = useState<AdsStub[]>([]);
   const [presupuestoDeMeta, setPresupuestoDeMeta] = useState<Map<string, PresupuestoPlataforma>>(new Map());
+  /** Las que están paradas en Meta ahora mismo, aunque sigan en fecha. */
+  const [pausadasEnMeta, setPausadasEnMeta] = useState<Set<string>>(new Set());
   const [unitId, setUnitId] = useState("all");
   const [status, setStatus] = useState("all");
   const [query, setQuery] = useState("");
@@ -233,6 +235,17 @@ export function CampaignsManager() {
     const presupuestos = new Map<string, PresupuestoPlataforma>();
     for (const [destino, metas] of porDestino) presupuestos.set(destino, presupuestoDeCampana(metas));
     setPresupuestoDeMeta(presupuestos);
+    /*
+      Pausada en Meta no es lo mismo que terminada: se pausa un fin de semana y
+      se reanuda el lunes, así que no se cambia el estado de la campaña. Pero
+      una tarjeta que dice "Activa" cuando en Meta no está corriendo nada miente
+      igual, así que se avisa aquí.
+    */
+    const pausadas = new Set<string>();
+    for (const [destino, metas] of porDestino) {
+      if (metas.length > 0 && metas.every((meta) => String(meta.status ?? "").toUpperCase() === "PAUSED")) pausadas.add(destino);
+    }
+    setPausadasEnMeta(pausadas);
     const user = authData.user;
     if (user) {
       const [{ data: profile }, { data: teamData }] = await Promise.all([
@@ -604,6 +617,7 @@ export function CampaignsManager() {
                           {total !== null ? currencyFormatter.format(total) : `${currencyFormatter.format(diario as number)}/día`}
                         </strong>
                         <small className="muted"> · según Meta{pasado ? " · pasado" : ""}</small>
+                        {pausadasEnMeta.has(campaign.id) ? <small className="texto-pendiente"> · parada en Meta</small> : null}
                       </span>
                     );
                   }

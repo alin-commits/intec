@@ -138,6 +138,7 @@ export async function POST(request: Request) {
       sin_configurar: "El envío de correos no está configurado.",
       repetido: "Ya se le ha escrito hoy por lo mismo.",
       fallo_envio: "No se pudo enviar el correo.",
+      fuera_de_produccion: "Esto no es producción: para probar, pon MS_COMPRAS_REDIRIGIR_A con un buzón tuyo.",
     }[resultado.motivo ?? "fallo_envio"];
     return NextResponse.json({ error: porQue, motivo: resultado.motivo }, { status: resultado.motivo === "sin_correo" ? 409 : 502 });
   }

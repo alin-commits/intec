@@ -23,6 +23,7 @@ const CUENTAS = [
   { rol: "direction", nombre: "Dirección (prueba)", correo: "pruebas.direccion@suministrointec.com", conMarcas: false },
   { rol: "it", nombre: "Informática (prueba)", correo: "pruebas.informatica@suministrointec.com", conMarcas: false },
   { rol: "accounting", nombre: "Administración (prueba)", correo: "pruebas.administracion@suministrointec.com", conMarcas: false },
+  { rol: "purchasing", nombre: "Compras (prueba)", correo: "pruebas.compras@suministrointec.com", conMarcas: false },
   { rol: "employee", nombre: "Empleado (prueba)", correo: "pruebas.empleado@suministrointec.com", conMarcas: false },
 ] as const;
 

@@ -4,7 +4,7 @@ import { currencyFormatter } from "@/lib/format";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildReclamacionEmail, type PedidoEnCorreo } from "@/lib/compras/correo-reclamacion";
 import { clavePedido, type GrupoAReclamar } from "@/lib/compras/reclamaciones";
-import { buscarCorreoDelPedido, buzonDeCompras, direccionesDe, graphConfigurado, mandarDesdeElBuzon, redirigidoA, responderEnHilo } from "@/lib/compras/graph";
+import { buscarCorreoDelPedido, buzonDeCompras, direccionesDe, entornoQuePuedeEscribirAProveedores, graphConfigurado, mandarDesdeElBuzon, redirigidoA, responderEnHilo } from "@/lib/compras/graph";
 
 /*
   Mandar una reclamación: lo mismo para el botón y para el cron.
@@ -26,7 +26,7 @@ export const REMITENTE_COMPRAS = "Compras Suministros Intec <compras@suministroi
 export type ResultadoEnvio = {
   ok: boolean;
   /** Por qué no se mandó, cuando no se mandó. */
-  motivo?: "sin_correo" | "repetido" | "sin_configurar" | "fallo_envio";
+  motivo?: "sin_correo" | "repetido" | "sin_configurar" | "fallo_envio" | "fuera_de_produccion";
   destinatario: string | null;
   proveedor: string;
   asunto: string;
@@ -136,6 +136,12 @@ export async function enviarReclamacion(
   const base = { proveedor: preparado.proveedor, asunto: preparado.asunto, html: preparado.html, pedidos: grupo.pedidos.length, destinatario, via: salida.via };
 
   if (destinatarios.length === 0) return { ...base, ok: false, motivo: "sin_correo" };
+  // Fuera de producción solo se manda a donde diga el desvío. Sin desvío, nada
+  // sale: los datos son los mismos y el proveedor también.
+  if (!salida.redirigido && !entornoQuePuedeEscribirAProveedores()) {
+    console.warn("Compras: no se manda nada fuera de producción sin MS_COMPRAS_REDIRIGIR_A.");
+    return { ...base, ok: false, motivo: "fuera_de_produccion" };
+  }
   // Resend necesita su configuración; por el buzón se manda sin ella.
   if (salida.via === "resend" && !isEmailConfigured()) return { ...base, ok: false, motivo: "sin_configurar" };
 
