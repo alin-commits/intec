@@ -330,7 +330,7 @@ export function ComprasView() {
       proveedorNombre: proveedor?.name ?? pedido.supplier_code ?? "Sin proveedor",
       proveedorEmail: proveedor?.email ?? null,
       seguimiento: suyo ?? null,
-      contestado: suyo?.state === "contestado",
+      contestado: suyo?.state === "contestado" && estado.sinFecha > 0,
     };
   }), [pedidos, estadoDe, nombreProveedor, hoy, seguimientoDe]);
 
