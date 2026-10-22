@@ -108,6 +108,7 @@ export function SalesDashboard() {
   const [loaded, setLoaded] = useState<{ choice: PeriodChoice; compare: CompareChoice } | null>(null);
   /** Sube cuando termina una lectura pedida con el botón: todo el panel se recarga. */
   const [reloadKey, setReloadKey] = useState(0);
+  const [informe, setInforme] = useState<"quieto" | "haciendo" | "mal">("quieto");
   const [targets, setTargets] = useState<SalesTarget[]>([]);
   const [targetsKey, setTargetsKey] = useState(0);
   const [detail, setDetail] = useState<SageDetail>(noDetail);
@@ -511,6 +512,29 @@ export function SalesDashboard() {
 
   const invoiceStart = new Date(`${INVOICE_DATES_FROM}T12:00:00`).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
 
+  /*
+    El informe en PDF de lo que se está mirando.
+
+    Se arma con el modelo que ya está en pantalla, así que sale al momento y
+    dice lo mismo que el panel: si hubiera que volver a preguntar a la base
+    podría salir otra cifra, y un informe que no cuadra con la pantalla no sirve
+    de nada. El generador se carga solo al pulsar, que son 300 KB que no hacen
+    falta para mirar el panel.
+  */
+  async function generarInforme() {
+    setInforme("haciendo");
+    try {
+      const { generateSalesReport } = await import("@/lib/sales-report-pdf");
+      await generateSalesReport({
+        model, period, filters, companyLabel, repName, familyName,
+        periodName: period.label, basis, today,
+      });
+      setInforme("quieto");
+    } catch {
+      setInforme("mal");
+    }
+  }
+
   return (
     <div className="page-stack sales-dashboard">
       <section className="section-heading">
@@ -521,6 +545,16 @@ export function SalesDashboard() {
           </p>
         </div>
         <div className="panel-heading-trailing">
+          {informe === "mal" ? <span className="sales-down" role="status">No se pudo generar el informe.</span> : null}
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => void generarInforme()}
+            disabled={informe === "haciendo" || rows.length === 0}
+            title="Un PDF con lo que estás mirando: el periodo, los filtros puestos y las tablas"
+          >
+            {informe === "haciendo" ? "Generando…" : informe === "mal" ? "Reintentar" : "Generar informe"}
+          </button>
           <SageRefreshButton onUpdated={() => setReloadKey((key) => key + 1)} />
         </div>
       </section>
