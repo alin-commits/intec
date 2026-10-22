@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { todayKey } from "@/lib/dates";
 import { enviarReclamacion } from "@/lib/compras/enviar-reclamacion";
-import { ESTADO_SERVIDO, clavePedido, reclamacionesDeHoy, type PedidoReclamable, type Seguimiento } from "@/lib/compras/reclamaciones";
+import { ESTADO_PENDIENTE, clavePedido, reclamacionesDeHoy, type PedidoReclamable, type Seguimiento } from "@/lib/compras/reclamaciones";
 
 /*
   Los dos recordatorios: a las 48 y a las 120 horas del pedido.
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     fetchAllPages<{ company_code: number; year: number; series: string; number: number; supplier_code: string | null; order_date: string; pending_amount: number; status: number | null }>(
       (from, to) => admin.from("sage_purchase_orders")
         .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status")
-        .gt("pending_units", 0).or(`status.is.null,status.neq.${ESTADO_SERVIDO}`).order("company_code").order("number").range(from, to)),
+        .gt("pending_units", 0).or(`status.is.null,status.eq.${ESTADO_PENDIENTE}`).order("company_code").order("number").range(from, to)),
     fetchAllPages<{ company_code: number; year: number; series: string; number: number; expected_on: string | null }>(
       (from, to) => admin.from("sage_purchase_order_lines")
         .select("company_code, year, series, number, expected_on")

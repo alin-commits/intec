@@ -15,20 +15,19 @@
 /*
   El estado que manda Sage en la cabecera del pedido.
 
-  Un pedido servido puede quedarse con unidades pendientes de sobra —se cierra
-  con un resto— y por eso no basta con mirar las unidades: de 533 pedidos con
-  algo pendiente, 197 estaban servidos, y entre todos ellos sumaban 11.204 €
-  frente a los 705.171 € de los que sí están pendientes. Eran restos, y se les
-  estaba reclamando como si faltara el material entero.
+  Solo se trabaja con los pendientes. No basta con mirar las unidades que
+  faltan: un pedido servido se cierra dejando restos —una unidad suelta que no
+  va a llegar nunca—, y de 533 pedidos con algo pendiente, 197 estaban
+  servidos. Entre todos ellos sumaban 3.486 € de los 205.128 € por confirmar:
+  el 1,7 % del dinero y casi la mitad del ruido.
 
-  El 1 (parcialmente servido) sí se reclama: falta parte de la mercancía.
-  Si el agente no encontró la columna el estado llega vacío, y entonces se
-  enseña: no saberlo no es razón para esconder un pedido.
+  Si el agente no encontró la columna el estado llega vacío, y entonces el
+  pedido se enseña igual: no saberlo no es razón para esconderlo.
 */
-export const ESTADO_SERVIDO = 2;
+export const ESTADO_PENDIENTE = 0;
 
-export function estaServido(status: number | null | undefined): boolean {
-  return status === ESTADO_SERVIDO;
+export function estaPendiente(status: number | null | undefined): boolean {
+  return status === null || status === undefined || status === ESTADO_PENDIENTE;
 }
 
 /** Los dos avisos: a los 2 y a los 5 días de hacer el pedido. */
@@ -111,7 +110,7 @@ export function clavePedido(p: { companyCode: number; year: number; series: stri
  * cron no corrió un día, al siguiente recupera en vez de saltarse un aviso.
  */
 export function escalonQueToca(pedido: PedidoReclamable, seguimiento: Seguimiento | undefined, hoy: string): 1 | 2 | null {
-  if (estaServido(pedido.status)) return null;
+  if (!estaPendiente(pedido.status)) return null;
   if (pedido.lineasSinFecha <= 0) return null;
   if (!pedido.supplierCode) return null;
   if (seguimiento && NO_SE_TOCA.has(seguimiento.state)) return null;

@@ -285,11 +285,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Los leads sin tocar se le recuerdan a quien los lleva, no a quien mira. */}
         {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <PendingLeadsNotice userId={profile.id} /> : null}
         {/*
-          A quien lleva compras. Dirección entra también porque hoy es quien lo
-          lleva, y el aviso solo aparece cuando hay algo que hacer. Al
-          administrador que solo pasa por aquí no se le molesta.
+          Solo a quien lleva compras. Un administrador o dirección entran en
+          muchas pantallas al día y esto les saldría una y otra vez por un
+          trabajo que no es suyo; el aviso dejaría de leerse en dos días.
+          Tampoco sale estando ya en Compras: está para llevarte allí, no para
+          taparte la pantalla a la que querías llegar.
         */}
-        {configured && profile.id && !pathname.startsWith("/compras") && hasAnyRole(profile.roles, ["purchasing", "direction"]) ? <AvisoCompras userId={profile.id} /> : null}
+        {configured && profile.id && !pathname.startsWith("/compras") && hasAnyRole(profile.roles, ["purchasing"]) ? <AvisoCompras userId={profile.id} /> : null}
         <header className="topbar">
           {isDashboard ? (
             <div className="topbar-title">

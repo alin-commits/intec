@@ -140,8 +140,8 @@ test("un pedido servido no se reclama aunque le sobren unidades", () => {
   assert.equal(reclamacionesDeHoy({ pedidos: [servido], seguimiento: sin, hoy: "2026-10-20", desde: DESDE }).length, 0);
 });
 
-test("pero uno servido a medias sí, que falta mercancía", () => {
-  assert.equal(escalonQueToca(pedido({ status: 1, orderDate: "2026-10-01" }), undefined, "2026-10-20"), 1);
+test("ni uno servido a medias: solo se trabaja con los pendientes", () => {
+  assert.equal(escalonQueToca(pedido({ status: 1, orderDate: "2026-10-01" }), undefined, "2026-10-20"), null);
   assert.equal(escalonQueToca(pedido({ status: 0, orderDate: "2026-10-01" }), undefined, "2026-10-20"), 1);
 });
 

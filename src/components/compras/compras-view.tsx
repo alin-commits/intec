@@ -14,7 +14,7 @@ import { downloadCsv, type CsvColumn } from "@/lib/csv-export";
 import { downloadXlsx } from "@/lib/excel-export";
 import { monthKey, todayKey } from "@/lib/dates";
 import { COMPRAS_ROLES, hasAnyRole } from "@/lib/constants";
-import { ESTADO_SERVIDO } from "@/lib/compras/reclamaciones";
+import { ESTADO_PENDIENTE } from "@/lib/compras/reclamaciones";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole } from "@/lib/types";
@@ -249,7 +249,7 @@ export function ComprasView() {
       setAcceso("permitido");
 
       const [pedidosRes, lineasRes, proveedoresRes, seguimientoRes, enviosRes, respuestasRes] = await Promise.all([
-        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units, status").gt("pending_units", 0).or(`status.is.null,status.neq.${ESTADO_SERVIDO}`).order("company_code").order("number").range(desde, hasta)),
+        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units, status").gt("pending_units", 0).or(`status.is.null,status.eq.${ESTADO_PENDIENTE}`).order("company_code").order("number").range(desde, hasta)),
         fetchAllPages((desde, hasta) => supabase.from("sage_purchase_order_lines").select("company_code, year, series, number, line_number, article_code, description, pending_units, expected_on, net_amount").gt("pending_units", 0).order("company_code").order("number").order("line_number").range(desde, hasta)),
         supabase.from("sage_suppliers").select("company_code, code, name, email"),
         leerSeguimiento(supabase),
