@@ -72,11 +72,15 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
 
   const reload = ctx.reloadKey;
   const compare = period.compare;
-  const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period.from, period.to, compare, reload]), async () => {
+  // Los meses marcados viajan a la base: si dejan huecos, el tramo de fechas
+  // traería de más. Los de la comparación son sus parejas.
+  const months = ctx.rpc.p_months;
+  const compareMonths = ctx.rpcCompare.p_months;
+  const families = useSageQuery<{ now: FamilyRow[]; before: FamilyRow[] }>(JSON.stringify(["familias", period.from, period.to, compare, months, compareMonths, reload]), async () => {
     const supabase = createClient();
     const [now, before] = await Promise.all([
-      supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to }),
-      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to }) : Promise.resolve({ data: [], error: null }),
+      supabase.rpc("sage_family_summary", { p_from: period.from, p_to: period.to, p_months: months }),
+      compare ? supabase.rpc("sage_family_summary", { p_from: compare.from, p_to: compare.to, p_months: compareMonths }) : Promise.resolve({ data: [], error: null }),
     ]);
     const error = now.error ?? before.error;
     return { data: error ? null : { now: (now.data ?? []) as FamilyRow[], before: (before.data ?? []) as FamilyRow[] }, error };
@@ -95,7 +99,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
           .order("id").range(start, end));
     },
   );
-  const articleArgs = { p_from: period.from, p_to: period.to, p_company: filters.company, p_family: filters.family };
+  const articleArgs = { p_from: period.from, p_to: period.to, p_company: filters.company, p_family: filters.family, p_months: months };
   const subfamilies = useSageQuery<GroupRow[]>(ctx.detail.articles && filters.family !== null ? JSON.stringify(["subfamilias", articleArgs, reload]) : null, async () =>
     await createClient().rpc("sage_article_groups", { p_group: "subfamilia", ...articleArgs }));
   const brands = useSageQuery<GroupRow[]>(ctx.detail.articles ? JSON.stringify(["marcas", articleArgs, reload]) : null, async () =>

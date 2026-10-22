@@ -6,7 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { CalendarIcon, ConsultasIcon, ConversionIcon, EuroIcon, TarjetasIcon, TrophyIcon, UsuariosIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { UNASSIGNED_KEY, bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, monthName, soloUnMes, sumRows, targetToDate, targetsFor, tenths, ticketFormatter, variation } from "@/lib/sales-model";
+import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, monthName, soloUnComercial, soloUnMes, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { lostCustomers, type SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals } from "./sales-queries";
@@ -40,7 +40,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const unMes = soloUnMes(filters);
   const monthIndex = unMes ? Number(unMes.slice(5, 7)) - 1 : null;
   const targetSoFar = targetYear !== null
-    ? targetToDate(targetsFor(ctx.targets, targetYear, filters.company, filters.repKey), targetYear, today, monthIndex)
+    ? targetToDate(targetsFor(ctx.targets, targetYear, filters.company, filters.repKeys), targetYear, today, monthIndex)
     : null;
   // Solo los meses que tienen objetivo: si falta el de marzo, su venta no cuenta.
   const targetReal = targetSoFar
@@ -358,8 +358,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
               extra: rep.margin ? formatPercent(rep.margin.percent) : "—",
               muted: !rep.assigned || rep.key === UNASSIGNED_KEY,
             }))}
-            activeKey={filters.repKey}
-            onSelect={(key) => ctx.toggle("repKey", key)}
+            activeKey={soloUnComercial(filters)}
+            onSelect={(key) => ctx.toggleRep(key)}
           />
         </Panel>
 

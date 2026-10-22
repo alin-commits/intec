@@ -56,6 +56,22 @@ export type CustomerRef = { company_code: number; customer_code: string; name?: 
 /** Qué detalle ha mandado ya el agente de Sage (hasta que lo mande, se avisa). */
 export type SageDetail = { customers: boolean; articles: boolean; offers: boolean; orders: boolean; incidents: boolean };
 
+/**
+ * Los filtros del panel tal como los piden las funciones de la base.
+ *
+ * `p_months` son los meses marcados ("2026-09"). Va a nulo cuando no hay
+ * ninguno, que para la base significa "el tramo entero": así las funciones se
+ * comportan como siempre y solo recortan cuando hace falta, que es cuando los
+ * meses marcados dejan huecos.
+ */
+export type SalesRpcArgs = {
+  p_company: number | null;
+  p_reps: string[] | null;
+  p_series: string[] | null;
+  p_family: string | null;
+  p_months: string[] | null;
+};
+
 export type SalesContext = {
   basis: "albaran" | "factura";
   /**
@@ -80,6 +96,8 @@ export type SalesContext = {
    * filtro de varios. Pasar null los quita todos.
    */
   toggleMonth: (key: string | null) => void;
+  /** Marca o desmarca un comercial sin tocar los demás. Null los quita todos. */
+  toggleRep: (key: string | null) => void;
   companies: Company[];
   reps: Rep[];
   families: FamilyName[];
@@ -90,7 +108,14 @@ export type SalesContext = {
   previousRows: SummaryRow[];
   model: SalesModel;
   /** Los filtros tal como los piden las funciones de la base de datos. */
-  rpc: { p_company: number | null; p_reps: string[] | null; p_series: string[] | null; p_family: string | null };
+  rpc: SalesRpcArgs;
+  /**
+   * Lo mismo, pero con los meses del periodo con el que se compara.
+   *
+   * Hace falta porque los meses marcados viajan a la base: la consulta del
+   * periodo lleva septiembre y octubre de 2026 y la de al lado, los de 2025.
+   */
+  rpcCompare: SalesRpcArgs;
   companyLabel: string;
   /** "frente a 2025", "frente al mismo tramo de 2025", o por qué no se compara. */
   comparisonHelper: string;

@@ -12,7 +12,10 @@ import {
   makeRepOf,
   noFilters,
   pairOf,
+  comercialMarcado,
+  hayComercialMarcado,
   repPairsFor,
+  soloUnComercial,
   seriesFor,
   targetsFor,
   targetToDate,
@@ -50,10 +53,33 @@ test("pairOf: la pareja de un mes en la comparación", () => {
 test("repPairsFor junta las fichas de la misma persona en varias sociedades", () => {
   const key = repOf(1, 5).key;
   assert.equal(repOf(2, 9).key, key);
-  assert.deepEqual(repPairsFor(key, reps, identities, [1, 2])?.sort(), ["1:5", "2:9"]);
-  assert.deepEqual(repPairsFor("sin", reps, identities, [1, 2]), ["1:sin", "2:sin"]);
-  assert.deepEqual(repPairsFor("1-99", reps, identities, [1]), ["1:99"]);
-  assert.equal(repPairsFor(null, reps, identities, [1]), null);
+  assert.deepEqual(repPairsFor([key], reps, identities, [1, 2])?.sort(), ["1:5", "2:9"]);
+  assert.deepEqual(repPairsFor(["sin"], reps, identities, [1, 2]), ["1:sin", "2:sin"]);
+  assert.deepEqual(repPairsFor(["1-99"], reps, identities, [1]), ["1:99"]);
+  assert.equal(repPairsFor([], reps, identities, [1]), null);
+});
+
+test("repPairsFor con varios comerciales marcados los junta sin repetir", () => {
+  const key = repOf(1, 5).key;
+  // El mismo comercial dos veces no duplica su ficha, y "sin asignar" suma las
+  // de todas las sociedades.
+  assert.deepEqual(repPairsFor([key, key], reps, identities, [1, 2]).sort(), ["1:5", "2:9"]);
+  assert.deepEqual(repPairsFor([key, "sin"], reps, identities, [1, 2]).sort(), ["1:5", "1:sin", "2:9", "2:sin"]);
+  // Uno que no existe en Sage no arrastra a los que sí.
+  assert.deepEqual(repPairsFor([key, "9-99"], reps, identities, [1, 2]).sort(), ["1:5", "2:9", "9:99"]);
+});
+
+test("los comerciales marcados filtran igual que los meses", () => {
+  const key = repOf(1, 5).key;
+  assert.equal(soloUnComercial({ ...noFilters, repKeys: [key] }), key);
+  assert.equal(soloUnComercial({ ...noFilters, repKeys: [key, "sin"] }), null);
+  assert.equal(soloUnComercial(noFilters), null);
+  assert.equal(hayComercialMarcado(noFilters), false);
+  assert.equal(hayComercialMarcado({ ...noFilters, repKeys: [key] }), true);
+  // Sin ninguno marcado pasan todos; con alguno, solo los marcados.
+  assert.equal(comercialMarcado(noFilters, key), true);
+  assert.equal(comercialMarcado({ ...noFilters, repKeys: [key] }, key), true);
+  assert.equal(comercialMarcado({ ...noFilters, repKeys: ["sin"] }, key), false);
 });
 
 test("seriesFor devuelve las series de un canal", () => {
@@ -68,7 +94,11 @@ test("filterRows aplica todos los filtros menos los que se saltan", () => {
   assert.equal(filterRows(rows, filters, repOf, ["month"]).length, 2);
   assert.equal(filterRows(rows, filters, repOf, ["channel"]).length, 2);
   assert.equal(filterRows(rows, { ...filters, company: 1 }, repOf).length, 1);
-  assert.equal(filterRows(rows, { ...noFilters, repKey: repOf(1, 5).key }, repOf).length, 2);
+  assert.equal(filterRows(rows, { ...noFilters, repKeys: [repOf(1, 5).key] }, repOf).length, 2);
+  // Dos comerciales marcados: entran las filas de los dos.
+  assert.equal(filterRows(rows, { ...noFilters, repKeys: [repOf(1, 5).key, repOf(1, 7).key] }, repOf).length, 3);
+  // 1:5 y 2:9 son la misma persona, así que marcarlos es marcarla una vez.
+  assert.equal(filterRows(rows, { ...noFilters, repKeys: [repOf(1, 5).key, repOf(2, 9).key] }, repOf).length, 2);
 });
 
 test("computeSalesModel: el mes filtra los totales pero no el gráfico ni se filtra a sí mismo", () => {
@@ -190,7 +220,7 @@ test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los dí
     { id: "b", year: 2026, month: 9, company_code: null, rep_key: null, amount: 3000 },
     { id: "c", year: 2026, month: 9, company_code: 1, rep_key: null, amount: 999 },
   ];
-  const months = targetsFor(targets, 2026, null, null);
+  const months = targetsFor(targets, 2026, null, []);
   assert.equal(months[7], 1000);
   assert.equal(months[8], 3000);
   assert.equal(months[0], null);
@@ -200,5 +230,21 @@ test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los dí
   assert.equal(soFar?.target, 1000 + 3000 * (15 / 30));
   assert.deepEqual(targetToDate(months, 2026, today, 7)?.months, ["2026-08"]);
   assert.equal(targetToDate(months, 2026, today, 0), null);
-  assert.equal(targetsFor(targets, 2026, 1, null)[8], 999);
+  assert.equal(targetsFor(targets, 2026, 1, [])[8], 999);
+});
+
+test("targetsFor con varios comerciales marcados suma los objetivos de cada uno", () => {
+  const targets: SalesTarget[] = [
+    { id: "a", year: 2026, month: 9, company_code: null, rep_key: "ana", amount: 1000 },
+    { id: "b", year: 2026, month: 9, company_code: null, rep_key: "luis", amount: 500 },
+    { id: "c", year: 2026, month: 9, company_code: null, rep_key: null, amount: 9000 },
+    { id: "d", year: 2026, month: 10, company_code: null, rep_key: "ana", amount: 2000 },
+  ];
+  // Sin ninguno marcado, el objetivo del ámbito entero, no la suma de la gente.
+  assert.equal(targetsFor(targets, 2026, null, [])[8], 9000);
+  assert.equal(targetsFor(targets, 2026, null, ["ana"])[8], 1000);
+  assert.equal(targetsFor(targets, 2026, null, ["ana", "luis"])[8], 1500);
+  // Un mes que solo tiene objetivo de uno de los dos sale con el suyo.
+  assert.equal(targetsFor(targets, 2026, null, ["ana", "luis"])[9], 2000);
+  assert.equal(targetsFor(targets, 2026, null, ["luis"])[9], null);
 });

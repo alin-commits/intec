@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { bucketDiscount, euros, hayMesMarcado, tenths, ticketFormatter, type Bucket, variation, yearlyView } from "@/lib/sales-model";
+import { type Bucket, bucketDiscount, euros, hayMesMarcado, soloUnComercial, tenths, ticketFormatter, variation, yearlyView } from "@/lib/sales-model";
 import type { SalesContext } from "./sales-context";
 import { DataTable, Panel, type Column } from "./sales-ui";
 
@@ -114,9 +114,9 @@ export function DifferencePanel({ ctx, className }: { ctx: SalesContext; classNa
   const max = Math.max(...shown.map((item) => Math.abs(item.change)), 1);
   const now = list.reduce((sum, item) => sum + item.now, 0);
   const before = list.reduce((sum, item) => sum + item.before, 0);
-  const activeKey = dimension === "rep" ? ctx.filters.repKey : dimension === "channel" ? ctx.filters.channel : ctx.filters.company === null ? null : String(ctx.filters.company);
+  const activeKey = dimension === "rep" ? soloUnComercial(ctx.filters) : dimension === "channel" ? ctx.filters.channel : ctx.filters.company === null ? null : String(ctx.filters.company);
   const select = (key: string) => {
-    if (dimension === "rep") ctx.toggle("repKey", key);
+    if (dimension === "rep") ctx.toggleRep(key);
     else if (dimension === "channel") ctx.toggle("channel", key);
     else ctx.toggle("company", Number(key));
   };

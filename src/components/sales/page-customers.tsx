@@ -7,7 +7,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, RefreshIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { delta, discountPercent, euros, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, ticketFormatter, variation } from "@/lib/sales-model";
+import { delta, discountPercent, euros, hayComercialMarcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, ticketFormatter, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
@@ -348,7 +348,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />
           )}
-          {!ctx.detail.customers && (filters.channel || filters.repKey || filters.family) ? (
+          {!ctx.detail.customers && (filters.channel || hayComercialMarcado(filters) || filters.family) ? (
             <p className="sales-section-note">Estos totales no se pueden partir por canal, comercial ni familia: son de la sociedad entera.</p>
           ) : null}
         </Panel>

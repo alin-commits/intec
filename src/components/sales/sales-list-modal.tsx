@@ -70,7 +70,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
   }
 
   const { period, rpc } = ctx;
-  const base = { p_from: period.from, p_to: period.to, p_company: rpc.p_company, p_reps: rpc.p_reps, p_series: rpc.p_series };
+  const base = { p_from: period.from, p_to: period.to, p_company: rpc.p_company, p_reps: rpc.p_reps, p_series: rpc.p_series, p_months: rpc.p_months };
   const args = request?.type === "clientes"
     ? { ...base, p_kind: request.kind, p_family: rpc.p_family, p_days: request.days ?? 30 }
     : request ? { ...base, p_kind: request.kind } : null;

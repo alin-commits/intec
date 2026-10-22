@@ -2,7 +2,7 @@
 
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { UNASSIGNED_KEY, bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, filterRows, groupRows, hayMesMarcado, mergeBucket, monthName, monthWithYear, pairOf, parejasDe, soloUnMes, tenths, ticketFormatter, type Bucket, type SummaryRow, variation } from "@/lib/sales-model";
+import { type Bucket, bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, filterRows, groupRows, hayMesMarcado, mergeBucket, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, type SummaryRow, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -149,8 +149,8 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
             rows={model.byRep}
             columns={repColumns}
             rowKey={(row) => row.key}
-            activeKey={filters.repKey}
-            onRowClick={(row) => ctx.toggle("repKey", row.key)}
+            activeKey={soloUnComercial(filters)}
+            onRowClick={(row) => ctx.toggleRep(row.key)}
             initialSort={{ key: "ventas", desc: true }}
             limit={15}
           />

@@ -194,16 +194,18 @@ export function SalesFilterBar({
             {channelOptions.map((label) => <option key={label} value={label}>{label}</option>)}
           </select>
         </label>
-        <label>
-          <span>Comercial</span>
-          <select value={requested.repKey ?? ""} onChange={(event) => onChange({ repKey: event.target.value || null })}>
-            <option value="">Todos</option>
-            {requested.repKey && !repOptions.some((option) => option.value === requested.repKey)
-              ? <option value={requested.repKey}>{chips.find((chip) => chip.key === "repKey")?.label.replace(/^Comercial: /, "") ?? requested.repKey}</option>
-              : null}
-            {repOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        {/*
+          Varios comerciales a la vez, por lo mismo que los meses: comparar dos
+          zonas o ver el equipo de alguien es media pantalla de trabajo, y de uno
+          en uno no se puede.
+        */}
+        <MultiSelect
+          label="Comercial"
+          opciones={repOptions}
+          seleccionadas={requested.repKeys}
+          onChange={(repKeys: string[]) => onChange({ repKeys })}
+          textoVacio="Todos"
+        />
         <label>
           <span>Familia</span>
           <select value={requested.family ?? ""} onChange={(event) => onChange({ family: event.target.value || null })}>
@@ -227,7 +229,7 @@ export function SalesFilterBar({
               key={chip.key}
               type="button"
               className={chip.note ? "sales-chip sales-chip-off" : "sales-chip"}
-              onClick={() => onChange({ [chip.key]: null })}
+              onClick={() => onChange(sinFiltro(chip.key))}
               title={chip.note ?? "Quitar este filtro"}
             >
               {chip.label}{chip.note ? ` · ${chip.note}` : ""}<span aria-hidden="true">×</span>
@@ -241,6 +243,17 @@ export function SalesFilterBar({
       )}
     </section>
   );
+}
+
+/**
+ * Quitar un filtro desde su etiqueta.
+ *
+ * Los de uno solo se quitan poniéndolos a nulo; los de varios, con la lista
+ * vacía: un nulo ahí dejaría el panel sin nada que recorrer.
+ */
+function sinFiltro(key: string): Partial<SalesFilters> {
+  if (key === "months" || key === "repKeys") return { [key]: [] };
+  return { [key]: null } as Partial<SalesFilters>;
 }
 
 /** Por qué un filtro puesto no se aplica en la página que se está viendo. */

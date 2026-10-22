@@ -37,12 +37,13 @@ export type SyncRun = { started_at: string; ok: boolean; covered_from: string | 
 export type SalesFilters = {
   company: number | null;
   channel: string | null;
-  repKey: string | null;
+  /** Los comerciales marcados. Vacío: todos. */
+  repKeys: string[];
   /** Los meses marcados ("YYYY-MM") dentro del periodo. Vacío: todos. */
   months: string[];
   family: string | null;
 };
-export const noFilters: SalesFilters = { company: null, channel: null, repKey: null, months: [], family: null };
+export const noFilters: SalesFilters = { company: null, channel: null, repKeys: [], months: [], family: null };
 
 /**
  * Las series de Sage son el canal de venta. Se nombran para que el panel no
@@ -207,6 +208,21 @@ export const mesMarcado = (filters: SalesFilters, month: string) =>
 /** Las parejas de los meses marcados en la comparación. */
 export const parejasDe = (filters: SalesFilters, offset: number | null) =>
   (offset === null ? [] : filters.months.map((month) => shiftMonth(month, offset)));
+
+/**
+ * El comercial marcado, cuando hay uno solo.
+ *
+ * Igual que con los meses: los sitios que hablan de "este comercial" en
+ * singular —resaltar su fila, sus objetivos— preguntan por este.
+ */
+export const soloUnComercial = (filters: SalesFilters) => (filters.repKeys.length === 1 ? filters.repKeys[0] : null);
+
+/** Si hay algún comercial marcado. */
+export const hayComercialMarcado = (filters: SalesFilters) => filters.repKeys.length > 0;
+
+/** Si una fila entra con los comerciales marcados. Sin ninguno, entran todas. */
+export const comercialMarcado = (filters: SalesFilters, key: string) =>
+  filters.repKeys.length === 0 || filters.repKeys.includes(key);
 /** "de 2025", pero "del mismo tramo de 2025". */
 const ofPhrase = (versus: string) => (versus.startsWith("el ") ? `del ${versus.slice(3)}` : `de ${versus}`);
 
@@ -297,19 +313,32 @@ export function makeRepOf(reps: Rep[], identities: Map<string, { key: string; la
 }
 
 /**
- * Las fichas de Sage ('sociedad:código') que corresponden a una persona del
- * panel, para filtrar en la base de datos. Nulo = sin filtro.
+ * Las fichas de Sage ('sociedad:código') que corresponden a los comerciales
+ * marcados, para filtrar en la base de datos. Nulo = sin filtro.
+ *
+ * Una misma persona puede tener ficha en varias sociedades, así que de cada
+ * comercial salen todas las suyas y se juntan sin repetir.
  */
-export function repPairsFor(repKey: string | null, reps: Rep[], identities: Map<string, { key: string; label: string }>, companies: number[]): string[] | null {
-  if (repKey === null) return null;
-  if (repKey === UNASSIGNED_KEY) return companies.map((code) => `${code}:sin`);
-  const pairs = reps
-    .filter((rep) => (identities.get(rep.name)?.key ?? `${rep.company_code}-${rep.code}`) === repKey)
-    .map((rep) => `${rep.company_code}:${rep.code}`);
-  if (pairs.length > 0) return pairs;
-  // Un código sin ficha en Sage llega como "sociedad-código".
-  const match = /^(\d+)-(\d+)$/.exec(repKey);
-  return match ? [`${match[1]}:${match[2]}`] : [];
+export function repPairsFor(repKeys: string[], reps: Rep[], identities: Map<string, { key: string; label: string }>, companies: number[]): string[] | null {
+  if (repKeys.length === 0) return null;
+  const pairs = new Set<string>();
+  for (const repKey of repKeys) {
+    if (repKey === UNASSIGNED_KEY) {
+      for (const code of companies) pairs.add(`${code}:sin`);
+      continue;
+    }
+    const suyas = reps
+      .filter((rep) => (identities.get(rep.name)?.key ?? `${rep.company_code}-${rep.code}`) === repKey)
+      .map((rep) => `${rep.company_code}:${rep.code}`);
+    if (suyas.length > 0) {
+      for (const par of suyas) pairs.add(par);
+      continue;
+    }
+    // Un código sin ficha en Sage llega como "sociedad-código".
+    const match = /^(\d+)-(\d+)$/.exec(repKey);
+    if (match) pairs.add(`${match[1]}:${match[2]}`);
+  }
+  return [...pairs];
 }
 
 /** Las series de Sage que forman un canal del panel (varias pueden dar el mismo nombre). */
@@ -344,7 +373,7 @@ export function filterRows(
   return rows.filter((row) => {
     if (!skip.includes("company") && filters.company !== null && row.company_code !== filters.company) return false;
     if (!skip.includes("channel") && filters.channel !== null && channelLabel(row.series) !== filters.channel) return false;
-    if (!skip.includes("rep") && filters.repKey !== null && repOf(row.company_code, row.rep_code).key !== filters.repKey) return false;
+    if (!skip.includes("rep") && !comercialMarcado(filters, repOf(row.company_code, row.rep_code).key)) return false;
     if (!skip.includes("month") && months.length > 0 && !months.includes(row.month)) return false;
     return true;
   });
@@ -370,11 +399,17 @@ export type SalesTarget = { id: string; year: number; month: number; company_cod
  * objetivo). El ámbito es la sociedad y el comercial elegidos: el objetivo del
  * grupo no se reparte solo entre sociedades, porque eso lo decide Dirección.
  */
-export function targetsFor(targets: SalesTarget[], year: number, company: number | null, repKey: string | null): (number | null)[] {
+export function targetsFor(targets: SalesTarget[], year: number, company: number | null, repKeys: string[]): (number | null)[] {
   const months: (number | null)[] = Array.from({ length: 12 }, () => null);
   for (const target of targets) {
-    if (target.year !== year || target.company_code !== company || target.rep_key !== repKey) continue;
-    months[target.month - 1] = Number(target.amount);
+    if (target.year !== year || target.company_code !== company) continue;
+    // Sin comerciales marcados, el objetivo del ámbito entero; con varios, la
+    // suma de los suyos, para que el cumplimiento siga queriendo decir lo mismo.
+    const suyo = repKeys.length === 0
+      ? target.rep_key === null
+      : target.rep_key !== null && repKeys.includes(target.rep_key);
+    if (!suyo) continue;
+    months[target.month - 1] = (months[target.month - 1] ?? 0) + Number(target.amount);
   }
   return months;
 }
@@ -588,10 +623,10 @@ export function computeSalesModel(input: {
       .filter((rep) => rep.isPerson && rep.beforeNet > (hayMesMarcado(filters) ? 5000 : 50000))
       .map((rep) => ({ rep, change: ((rep.bucket.net - rep.beforeNet) / rep.beforeNet) * 100 }));
     for (const { rep, change } of comparables.filter((item) => item.change <= -15).sort((a, b) => a.change - b.change).slice(0, 2)) {
-      findings.push({ tone: "bad", filter: { repKey: rep.key }, text: `${rep.name} vende un ${formatPercent(Math.abs(change))} menos que en ${desde}: ${euros(rep.bucket.net)} frente a ${euros(rep.beforeNet)}.` });
+      findings.push({ tone: "bad", filter: { repKeys: [rep.key] }, text: `${rep.name} vende un ${formatPercent(Math.abs(change))} menos que en ${desde}: ${euros(rep.bucket.net)} frente a ${euros(rep.beforeNet)}.` });
     }
     for (const { rep, change } of comparables.filter((item) => item.change >= 25).sort((a, b) => b.change - a.change).slice(0, 1)) {
-      findings.push({ tone: "good", filter: { repKey: rep.key }, text: `${rep.name} es quien más sube: un ${formatPercent(change)} más que en ${desde}, hasta ${euros(rep.bucket.net)}.` });
+      findings.push({ tone: "good", filter: { repKeys: [rep.key] }, text: `${rep.name} es quien más sube: un ${formatPercent(change)} más que en ${desde}, hasta ${euros(rep.bucket.net)}.` });
     }
     // Vender mucho con poco margen es justo lo que el PDF pide vigilar.
     const media = repsMargin?.percent ?? null;
@@ -603,7 +638,7 @@ export function computeSalesModel(input: {
         .slice(0, 2)
         .forEach(({ rep, percent }) => findings.push({
           tone: "warn",
-          filter: { repKey: rep.key },
+          filter: { repKeys: [rep.key] },
           text: `${rep.name} vende ${euros(rep.bucket.net)} al ${formatPercent(percent)} de margen, ${formatPercent(media - percent)} por debajo de la media.`,
         }));
       channelMargins
@@ -625,7 +660,7 @@ export function computeSalesModel(input: {
     }
     const unassigned = byRep.find((rep) => rep.key === UNASSIGNED_KEY);
     if (unassigned && unassigned.bucket.net > repsTotal.net * 0.08) {
-      findings.push({ tone: "warn", filter: { repKey: UNASSIGNED_KEY }, text: `${euros(unassigned.bucket.net)} de venta no tienen comercial asignado en Sage, el ${formatPercent((unassigned.bucket.net / repsTotal.net) * 100)} del total.` });
+      findings.push({ tone: "warn", filter: { repKeys: [UNASSIGNED_KEY] }, text: `${euros(unassigned.bucket.net)} de venta no tienen comercial asignado en Sage, el ${formatPercent((unassigned.bucket.net / repsTotal.net) * 100)} del total.` });
     }
     // El descuento es lo que el director comercial controla: quién rebaja más que
     // el resto y si la rebaja media sube respecto al año pasado.
@@ -641,7 +676,7 @@ export function computeSalesModel(input: {
         .slice(0, 2)
         .forEach(({ rep, discount }) => findings.push({
           tone: "warn",
-          filter: { repKey: rep.key },
+          filter: { repKeys: [rep.key] },
           text: `${rep.name} rebaja un ${formatPercent(discount.percent)} sobre tarifa, ${(discount.percent - repsDiscount.percent).toFixed(1).replace(".", ",")} puntos más que la media, en ${euros(rep.bucket.net)} de venta.`,
         }));
     }

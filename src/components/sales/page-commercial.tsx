@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ClockIcon, ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon, XCircleIcon } from "@/components/icons";
 import { leadStatusLabels } from "@/lib/constants";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { UNASSIGNED_KEY, channelLabel, euros, mesMarcado, monthLabel, monthWithYear, soloUnMes } from "@/lib/sales-model";
+import { channelLabel, comercialMarcado, euros, mesMarcado, monthLabel, monthWithYear, soloUnComercial, soloUnMes, UNASSIGNED_KEY } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
@@ -85,7 +85,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
   const keep = (row: Dimensions, skip: ("month" | "rep" | "channel")[] = []) => {
     if (filters.company !== null && row.company_code !== filters.company) return false;
     if (!skip.includes("channel") && filters.channel !== null && channelLabel(row.series) !== filters.channel) return false;
-    if (!skip.includes("rep") && filters.repKey !== null && ctx.repOf(row.company_code, row.rep_code).key !== filters.repKey) return false;
+    if (!skip.includes("rep") && !comercialMarcado(filters, ctx.repOf(row.company_code, row.rep_code).key)) return false;
     if (!skip.includes("month") && !mesMarcado(filters, row.month)) return false;
     return true;
   };
@@ -310,8 +310,8 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
                 muted: !rep.assigned || key === UNASSIGNED_KEY,
                 title: `${rep.label}: ${numberFormatter.format(rep.offers)} ofertas, ${numberFormatter.format(rep.converted)} convertidas`,
               }))}
-              activeKey={filters.repKey}
-              onSelect={(key) => ctx.toggle("repKey", key)}
+              activeKey={soloUnComercial(filters)}
+              onSelect={(key) => ctx.toggleRep(key)}
               empty="Sin ofertas en este periodo."
             />
           ) : <PendingDetail what="La conversión de cada comercial" />}
@@ -336,8 +336,8 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
               items={[...repBacklog].sort((a, b) => b[1].amount - a[1].amount).map(([key, rep]) => ({
                 key, label: rep.label, value: rep.amount, valueLabel: euros(rep.amount), extra: numberFormatter.format(rep.count), muted: !rep.assigned,
               }))}
-              activeKey={filters.repKey}
-              onSelect={(key) => ctx.toggle("repKey", key)}
+              activeKey={soloUnComercial(filters)}
+              onSelect={(key) => ctx.toggleRep(key)}
               empty="No hay pedidos pendientes de servir."
             />
           ) : backlogSnapshot ? (
@@ -355,8 +355,8 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
                   key, label: rep.label, value: rep.amount, valueLabel: euros(rep.amount), extra: numberFormatter.format(rep.count), muted: !rep.assigned,
                 }));
               })()}
-              activeKey={filters.repKey}
-              onSelect={(key) => ctx.toggle("repKey", key)}
+              activeKey={soloUnComercial(filters)}
+              onSelect={(key) => ctx.toggleRep(key)}
               empty="No hay pedidos pendientes de servir."
             />
           ) : <p className="muted">Todavía no hay foto de la cartera.</p>}

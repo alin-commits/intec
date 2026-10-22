@@ -46,7 +46,7 @@ export type CustomerCounts = {
  */
 export function useCustomerCounts(ctx: SalesContext, previous = false) {
   const range = previous ? ctx.period.compare : ctx.period;
-  const args = { p_from: range?.from ?? "", p_to: range?.to ?? "", ...ctx.rpc };
+  const args = { p_from: range?.from ?? "", p_to: range?.to ?? "", ...(previous ? ctx.rpcCompare : ctx.rpc) };
   const key = ctx.detail.customers && range ? JSON.stringify([args, ctx.reloadKey]) : null;
   return useSageQuery<CustomerCounts>(key, async () => {
     const { data, error } = await createClient().rpc("sage_customer_counts", args);

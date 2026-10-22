@@ -78,7 +78,7 @@ function readUrl(): { page: SalesPageKey | null; choice: PeriodChoice | null; co
     filters: {
       company: company && /^\d+$/.test(company) ? Number(company) : null,
       channel: params.get("c") || null,
-      repKey: params.get("r") || null,
+      repKeys: (params.get("r") ?? "").split(",").filter(Boolean),
       months: (month ?? "").split(",").filter((item) => /^\d{4}-\d{2}$/.test(item)),
       family: params.get("f") || null,
     },
@@ -250,7 +250,7 @@ export function SalesDashboard() {
     if (requested.months.length > 0) params.set("m", requested.months.join(","));
     if (requested.company !== null) params.set("s", String(requested.company));
     if (requested.channel) params.set("c", requested.channel);
-    if (requested.repKey) params.set("r", requested.repKey);
+    if (requested.repKeys.length > 0) params.set("r", requested.repKeys.join(","));
     if (requested.family) params.set("f", requested.family);
     const query = params.toString();
     const next = `${window.location.pathname}${query ? `?${query}` : ""}`;
@@ -286,16 +286,16 @@ export function SalesDashboard() {
   }), [rows, repOf]);
   const missing = {
     channel: requested.channel !== null && !available.channels.has(requested.channel),
-    repKey: requested.repKey !== null && !available.reps.has(requested.repKey),
+    repKey: requested.repKeys.length > 0 && !requested.repKeys.some((item) => available.reps.has(item)),
     month: requested.months.length > 0 && !requested.months.some((item) => shownBase.months.includes(item)),
   };
   const filters = useMemo<SalesFilters>(() => ({
     company: requested.company,
     channel: missing.channel ? null : requested.channel,
-    repKey: missing.repKey ? null : requested.repKey,
+    repKeys: requested.repKeys.filter((item) => available.reps.has(item)),
     months: requested.months.filter((item) => shownBase.months.includes(item)),
     family: requested.family,
-  }), [requested, missing.channel, missing.repKey, missing.month]);
+  }), [requested, missing.channel, available.reps, shownBase.months]);
 
   const period = useMemo(
     () => resolvePeriod({ choice: shownChoice, compare: shownCompare, months: filters.months, today, dataFrom }),
@@ -326,16 +326,29 @@ export function SalesDashboard() {
   );
   const rpc = useMemo(() => ({
     p_company: filters.company,
-    p_reps: repPairsFor(filters.repKey, reps, identities, companies.map((company) => company.code)),
+    p_reps: repPairsFor(filters.repKeys, reps, identities, companies.map((company) => company.code)),
     p_series: seriesFor(filters.channel, allSeries),
     p_family: filters.family,
-  }), [filters, reps, identities, companies, allSeries]);
+    // La lista de meses solo se manda cuando hace falta: si los marcados van
+    // seguidos, el tramo de fechas ya los describe exactamente y preguntar por
+    // meses no cambiaría nada. Con huecos —enero y julio— el tramo traería de
+    // más y la lista es la única manera de que cuadre.
+    p_months: period.scattered ? period.selectedMonths : null,
+  }), [filters, reps, identities, companies, allSeries, period.scattered, period.selectedMonths]);
+  // Lo mismo para el periodo de al lado, con sus parejas.
+  const rpcCompare = useMemo(
+    () => ({ ...rpc, p_months: period.scattered && period.compareMonths.length > 0 ? period.compareMonths : null }),
+    [rpc, period.scattered, period.compareMonths],
+  );
 
   const repLabels = useMemo(() => {
     const map = new Map<string, string>([[UNASSIGNED_KEY, "Sin comercial asignado"]]);
     for (const identity of identities.values()) map.set(identity.key, identity.label);
+    // Un código que no tiene ficha de comercial en Sage no tiene nombre: se dice
+    // como en los gráficos ("Código 105"), no con su clave interna ("4-105").
+    for (const rep of model.byRep) if (!map.has(rep.key)) map.set(rep.key, rep.name);
     return map;
-  }, [identities]);
+  }, [identities, model.byRep]);
   const repName = useCallback((key: string) => repLabels.get(key) ?? key, [repLabels]);
 
   const familyNames = useMemo(() => {
@@ -366,6 +379,14 @@ export function SalesDashboard() {
     });
   }, []);
 
+  /* Lo mismo con los comerciales: pulsar su fila o su barra los va sumando. */
+  const toggleRep = useCallback((key: string | null) => {
+    setRequested((current) => {
+      if (key === null) return { ...current, repKeys: [] };
+      const puesto = current.repKeys.includes(key);
+      return { ...current, repKeys: puesto ? current.repKeys.filter((item) => item !== key) : [...current.repKeys, key] };
+    });
+  }, []);
   const choosePeriod = useCallback((next: PeriodChoice) => {
     setChoice(next);
     if (next.kind !== "year") return;
@@ -400,6 +421,7 @@ export function SalesDashboard() {
     setFilters,
     toggle,
     toggleMonth,
+    toggleRep,
     companies,
     reps,
     families,
@@ -410,6 +432,7 @@ export function SalesDashboard() {
     previousRows,
     model,
     rpc,
+    rpcCompare,
     companyLabel,
     comparisonHelper,
     comparisonAvailable: period.compare !== null,
@@ -474,7 +497,16 @@ export function SalesDashboard() {
   }
   if (requested.company !== null) chips.push({ key: "company", label: companyLabel, note: chipNote("company", pageInfo.applies, false) });
   if (requested.channel) chips.push({ key: "channel", label: `Canal: ${requested.channel}`, note: chipNote("channel", pageInfo.applies, missing.channel) });
-  if (requested.repKey) chips.push({ key: "repKey", label: `Comercial: ${repName(requested.repKey)}`, note: chipNote("rep", pageInfo.applies, missing.repKey) });
+  if (requested.repKeys.length > 0) {
+    const nombres = requested.repKeys.map(repName);
+    chips.push({
+      key: "repKeys",
+      label: nombres.length === 1
+        ? `Comercial: ${nombres[0]}`
+        : `Comerciales: ${nombres.length <= 2 ? nombres.join(" y ") : `${nombres.length} marcados`}`,
+      note: chipNote("rep", pageInfo.applies, missing.repKey),
+    });
+  }
   if (requested.family) chips.push({ key: "family", label: `Familia: ${familyName(requested.family)}`, note: chipNote("family", pageInfo.applies, false) });
 
   const invoiceStart = new Date(`${INVOICE_DATES_FROM}T12:00:00`).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });

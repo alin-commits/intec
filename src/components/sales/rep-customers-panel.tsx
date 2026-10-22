@@ -8,7 +8,7 @@ import { downloadCsv, type CsvColumn } from "@/lib/csv-export";
 import { downloadXlsx } from "@/lib/excel-export";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows } from "./sales-queries";
-import { euros } from "@/lib/sales-model";
+import { euros, type SalesFilters } from "@/lib/sales-model";
 import { Column, DataTable, LoadFailed, Panel, shortDate, useSageQuery } from "./sales-ui";
 
 /*
@@ -49,6 +49,12 @@ export type RepCustomerRow = {
 };
 
 const nombreDe = (fila: RepCustomerRow) => fila.name || fila.trade_name || fila.customer_code;
+
+/** De quién es la cartera que se está viendo. */
+const carteraDe = (filters: SalesFilters) =>
+  (filters.repKeys.length === 0 ? "todos los comerciales"
+    : filters.repKeys.length === 1 ? "este comercial"
+      : `estos ${filters.repKeys.length} comerciales`);
 
 export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
   const [verCarteraEntera, setVerCarteraEntera] = useState(false);
@@ -170,7 +176,7 @@ export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
       <section className="section-heading">
         <div>
           <span className="eyebrow">Cartera</span>
-          <h2>Clientes de {ctx.filters.repKey ? "este comercial" : "todos los comerciales"} en {ctx.periodName}</h2>
+          <h2>Clientes de {carteraDe(ctx.filters)} en {ctx.periodName}</h2>
           <p>
             Quién compra y quién no, y de qué familias. El comercial es el que tiene asignado el cliente en Sage,
             no quien firmó el albarán.
