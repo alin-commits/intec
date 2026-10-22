@@ -1785,6 +1785,7 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .sales-row-button { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; font-weight: 700; }
 .sales-row-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
 .sales-clickable-table tbody tr { cursor: pointer; }
+.sales-clickable-table tbody tr.fila-vencida:hover td { background: #fde8e8; }
 .sales-more-button { margin-top: 10px; border: 0; background: none; padding: 6px 0; color: var(--primary); font-size: 13px; font-weight: 750; cursor: pointer; }
 .sales-up { color: var(--success); font-weight: 700; }
 .sales-down { color: var(--danger); font-weight: 700; }
@@ -1798,6 +1799,30 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .lineas-pedido { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .lineas-pedido li { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
 .lineas-pedido li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/*
+  El historial de un pedido. No vale .lineas-pedido: aquello es para una línea
+  corta con su etiqueta al lado, y aquí el texto es prosa —lo que entendió la
+  IA de un correo— que se cortaba con puntos suspensivos mientras la fecha se
+  partía en dos renglones. La fecha va en su columna, el texto ocupa lo que
+  necesite y cada hito se separa con una raya.
+*/
+.historial { list-style: none; margin: 0; padding: 0; }
+.historial li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 16px; padding: 13px 0; border-top: 1px solid var(--border); }
+.historial li:first-child { border-top: 0; padding-top: 4px; }
+.historial-cuando { color: var(--muted); font-size: 12px; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; padding-top: 2px; }
+.historial-titulo { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 13.5px; }
+.historial-punto { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; background: var(--primary); }
+.historial-punto.entrada { background: #16a34a; }
+.historial-punto.aviso { background: #dc2626; }
+.historial-detalle { margin: 4px 0 0 18px; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+@media (max-width: 560px) {
+  .historial li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .historial-cuando { padding-top: 0; }
+}
+
+/* Una etiqueta dentro de una celda apilada no se estira a lo ancho de ella. */
+.sales-article > .badge { justify-self: start; }
 
 /* La cartera de un comercial: familias de cada cliente y el interruptor de la lista */
 .familia-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }

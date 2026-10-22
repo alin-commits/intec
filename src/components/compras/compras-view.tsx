@@ -191,7 +191,6 @@ export function ComprasView() {
   const [orden, setOrden] = useState<Orden>({ clave: "esperando", sentido: "desc" });
   const [busqueda, setBusqueda] = useState("");
   const [pagina, setPagina] = useState(0);
-  const [abierto, setAbierto] = useState<string | null>(null);
   const [seguimientos, setSeguimientos] = useState<Seguimiento[]>([]);
   const [envios, setEnvios] = useState<EnvioHecho[]>([]);
   const [respuestas, setRespuestas] = useState<RespuestaRecibida[]>([]);
@@ -659,7 +658,7 @@ export function ComprasView() {
                 onChange={(evento) => { setPagina(0); setBusqueda(evento.target.value); }} />
             </label>
 
-            <div className="table-scroll"><table><thead><tr>
+            <div className="table-scroll"><table className="sales-clickable-table"><thead><tr>
               {COLUMNAS_ORDENABLES.map((columna) => {
                 const activa = orden.clave === columna.clave;
                 return (
@@ -674,17 +673,24 @@ export function ComprasView() {
               <th>Reclamado</th>
               <th></th>
             </tr></thead><tbody>
+              {/*
+                Las líneas del pedido ya no se despliegan aquí: están en la
+                ficha, con el historial al lado, y tener dos sitios donde mirar
+                lo mismo solo obligaba a elegir.
+              */}
               {enPantalla.map((fila) => {
                 const llave = clave(fila.pedido);
-                const suyas = lineasPorPedido.get(llave) ?? [];
-                return [
-                  <tr key={llave} className={fila.vencido ? "fila-vencida" : undefined}>
+                return (
+                  <tr key={llave} className={fila.vencido ? "fila-vencida" : undefined}
+                    onClick={() => setFicha(llave)} title="Ver la ficha de este pedido">
                     <td>
-                      <button type="button" className="text-link" onClick={() => setFicha(llave)} title="Ver la ficha del pedido">
+                      <span className="sales-article">
                         <strong>{fila.pedido.series}{fila.pedido.number}</strong>
-                      </button>
-                      <small className="muted"> · {fila.pedido.lines} líneas</small>
-                      {fila.seguimiento?.shipping_notice ? <><br /><small className="badge badge-active">material enviado</small></> : null}
+                        <small>
+                          {fila.pedido.lines} {fila.pedido.lines === 1 ? "línea" : "líneas"}
+                          {fila.seguimiento?.shipping_notice ? " · material enviado" : ""}
+                        </small>
+                      </span>
                     </td>
                     <td>
                       <span className="sales-article">
@@ -702,14 +708,13 @@ export function ComprasView() {
                     <td>{currencyFormatter.format(Number(fila.pedido.pending_amount))}</td>
                     <td>
                       {fila.contestado ? (
-                        <span className="sales-article">
+                        <span className="sales-article" title={fila.seguimiento?.reply_summary ?? undefined}>
                           <span className="badge badge-active">ha contestado</span>
                           {fila.seguimiento?.confirmed_on
                             ? <small>da el {fila.seguimiento.confirmed_on} · falta pasarlo a Sage</small>
                             : fila.seguimiento?.proposed_on
                               ? <small>propone el {fila.seguimiento.proposed_on}</small>
                               : <small>sin fecha todavía</small>}
-                          {fila.seguimiento?.reply_summary ? <small className="muted">{fila.seguimiento.reply_summary}</small> : null}
                         </span>
                       ) : fila.seguimiento?.level ? (
                         <span className="sales-article">
@@ -718,14 +723,15 @@ export function ComprasView() {
                         </span>
                       ) : <span className="muted">—</span>}
                     </td>
-                    <td className="recent-inquiries-actions">
+                    {/* Los botones hacen lo suyo sin abrir además la ficha. */}
+                    <td className="recent-inquiries-actions" onClick={(evento) => evento.stopPropagation()}>
                       {fila.sinFecha > 0 && fila.pedido.supplier_code ? (
-                        <button type="button" className="button button-compact" disabled={!fila.proveedorEmail}
+                        <button type="button" className="button button-compact button-primary" disabled={!fila.proveedorEmail}
                           title={fila.proveedorEmail ? `Escribir a ${fila.proveedorEmail}` : "Este proveedor no tiene correo en Sage"}
                           onClick={() => void prepararReclamacion(fila)}>Reclamar</button>
                       ) : null}
                       {fila.seguimiento?.proposed_on && !fila.seguimiento.confirmed_on ? (
-                        <button type="button" className="button button-compact"
+                        <button type="button" className="button button-compact button-primary"
                           title={`Dar por buena la fecha del ${fila.seguimiento.proposed_on}`}
                           onClick={() => void aceptarFecha(fila)}>Aceptar {fila.seguimiento.proposed_on}</button>
                       ) : null}
@@ -733,30 +739,9 @@ export function ComprasView() {
                         <button type="button" className="button button-compact button-secondary"
                           onClick={() => setContestando({ llave, pedido: fila.pedido, proveedor: fila.proveedorNombre })}>Ha contestado</button>
                       ) : null}
-                      {suyas.length > 0 ? (
-                        <button type="button" className="button button-compact button-secondary"
-                          onClick={() => setAbierto(abierto === llave ? null : llave)}>{abierto === llave ? "Ocultar" : "Ver líneas"}</button>
-                      ) : null}
                     </td>
-                  </tr>,
-                  abierto === llave ? (
-                    <tr key={`${llave}-lineas`} className="fila-detalle">
-                      <td colSpan={8}>
-                        <ul className="lineas-pedido">
-                          {suyas.map((linea) => (
-                            <li key={linea.line_number}>
-                              <span><strong>{linea.description || linea.article_code || `Línea ${linea.line_number}`}</strong>
-                                <small className="muted"> · {numberFormatter.format(Number(linea.pending_units))} pendientes</small></span>
-                              {linea.expected_on
-                                ? <span className="badge badge-active">{linea.expected_on}</span>
-                                : <span className="badge badge-lost">sin fecha</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </td>
-                    </tr>
-                  ) : null,
-                ];
+                  </tr>
+                );
               })}
               {enPantalla.length === 0 ? <tr><td colSpan={8} className="muted">Ningún pedido con estos filtros.</td></tr> : null}
             </tbody></table></div>
@@ -957,10 +942,16 @@ function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
           <p style={{ margin: "4px 0 0" }}>
             {fila.fecha
               ? <strong>{fila.fecha}{fila.vencido ? " · vencida" : ""}</strong>
-              : <strong>Sin fecha</strong>}
+              : fila.seguimiento?.confirmed_on
+                ? <strong>{fila.seguimiento.confirmed_on}</strong>
+                : <strong>Sin fecha</strong>}
           </p>
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            {fila.sinFecha > 0 ? `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin confirmar` : "todas las líneas confirmadas"}
+            {!fila.fecha && fila.seguimiento?.confirmed_on
+              ? "dada por buena aquí · falta pasarla a Sage"
+              : fila.sinFecha > 0
+                ? `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin confirmar`
+                : "todas las líneas confirmadas"}
           </p>
         </div>
       </section>
@@ -981,17 +972,18 @@ function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
         {sinHistorial ? (
           <p className="muted">Todavía no se le ha reclamado nada y no ha llegado ninguna respuesta.</p>
         ) : null}
-        <ul className="lineas-pedido">
-            {hitos.map((hito, indice) => (
-              <li key={`${hito.cuando}-${indice}`}>
-                <span>
-                  <strong>{hito.titulo}</strong>
-                  {hito.detalle ? <small className="muted"> · {hito.detalle}</small> : null}
-                </span>
-                <span className={hito.tono === "entrada" ? "badge badge-active" : hito.tono === "aviso" ? "badge badge-lost" : "badge"}>
-                  {(hito.cuando ?? "").slice(0, 10)}
-                </span>
-              </li>
+        <ul className="historial">
+          {hitos.map((hito, indice) => (
+            <li key={`${hito.cuando}-${indice}`}>
+              <span className="historial-cuando">{(hito.cuando ?? "").slice(0, 10)}</span>
+              <div>
+                <div className="historial-titulo">
+                  <span className={`historial-punto ${hito.tono}`} aria-hidden="true" />
+                  {hito.titulo}
+                </div>
+                {hito.detalle ? <p className="historial-detalle">{hito.detalle}</p> : null}
+              </div>
+            </li>
           ))}
         </ul>
       </section>
