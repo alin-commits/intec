@@ -8,7 +8,7 @@ import { ConversionIcon, EuroIcon, UsuariosIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
 import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { Cifras, type Cifra } from "./cifras";
+import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type SalesContext } from "./sales-context";
 import { snapshotTotal, useCustomerCounts, useCustomerTotals } from "./sales-queries";
 import { Panel, RankList } from "./sales-ui";
@@ -318,9 +318,10 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
           />
         </div>
 
-        <Cifras cifras={acompañan} />
+        <Cifras className="panel panel-padded sales-board-full" cifras={acompañan} />
 
         <Cifras
+          className="panel panel-padded sales-board-full"
           titulo={`Clientes ${hayMesMarcado(filters) ? `de ${periodName}` : `en ${periodName}`}`}
           subtitulo="Pulsa una cifra para ver quiénes son, con su teléfono y lo que compran"
           cifras={deClientes}

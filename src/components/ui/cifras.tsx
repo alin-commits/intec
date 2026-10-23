@@ -31,7 +31,7 @@ export type Cifra = {
   accion?: string;
 };
 
-export function Cifras({ titulo, subtitulo, cifras, className = "panel panel-padded sales-board-full" }: {
+export function Cifras({ titulo, subtitulo, cifras, className = "panel panel-padded" }: {
   titulo?: string;
   subtitulo?: string;
   cifras: Cifra[];

@@ -9,7 +9,7 @@ import { channelLabel, comercialMarcado, euros, hayMesMarcado, marcado, mesMarca
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
-import { Cifras, type Cifra } from "./cifras";
+import { Cifras, type Cifra } from "@/components/ui/cifras";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerTotals } from "./sales-queries";
 import { days, LoadFailed, Panel, PendingDetail, RankList, share, useSageQuery } from "./sales-ui";

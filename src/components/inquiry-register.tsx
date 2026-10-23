@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart, type DonutItem } from "@/components/charts/donut-chart";
-import { CalendarIcon, CheckCircleIcon, ConsultasIcon, DocumentIcon, PhoneIcon, RefreshIcon, SearchIcon, TrophyIcon, XCircleIcon } from "@/components/icons";
-import { KpiCard, type KpiTone } from "@/components/kpi-card";
+import { SearchIcon } from "@/components/icons";
+import { Cifras } from "@/components/ui/cifras";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -28,13 +28,6 @@ import { TablePagination } from "@/components/ui/table-pagination";
 
 type ViewMode = "month" | "year";
 
-const SALE_TYPE_ICONS: Record<SaleType, ReactNode> = {
-  oferta: <DocumentIcon />,
-  seguimiento: <RefreshIcon />,
-  pedido: <CheckCircleIcon />,
-  perdido: <XCircleIcon />,
-};
-const SALE_TYPE_TONES: Record<SaleType, KpiTone> = { oferta: "sky", seguimiento: "amber", pedido: "emerald", perdido: "rose" };
 
 
 type CompareMode = "previous" | "current" | "previous_year" | "none";
@@ -1324,58 +1317,39 @@ export function InquiryRegister() {
         </div>
       </CollapsibleFilters>
 
-      <section className="kpi-grid">
-        <KpiCard
-          label="Consultas totales"
-          value={numberFormatter.format(total)}
-          delta={variation === null ? "Sin comparación" : formatPercent(Math.abs(variation))}
-          positive={variation === null || variation >= 0}
-          helper={variation === null ? "sin datos del periodo anterior" : comparisonHelper}
-          icon={<ConsultasIcon />}
-          tone="indigo"
-        />
-        <KpiCard
-          label={viewMode === "month" ? "Media diaria" : "Media mensual"}
-          value={(viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ",")}
-          delta="Sin comparación"
-          helper={viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`}
-          icon={<CalendarIcon />}
-          tone="sky"
-        />
-        <KpiCard
-          label="Canal principal"
-          value={topChannel ? inquiryChannelLabels[topChannel.channel] : "—"}
-          delta="Sin comparación"
-          helper={topChannel ? `${numberFormatter.format(topChannel.count)} consultas` : "sin datos"}
-          icon={topChannel?.channel === "phone" ? <PhoneIcon /> : <ConsultasIcon />}
-          tone="emerald"
-        />
-        <KpiCard
-          label="Unidad líder"
-          value={topUnit ? topUnit.unit.name : "—"}
-          delta="Sin comparación"
-          helper={topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "sin datos"}
-          icon={<TrophyIcon />}
-          tone="amber"
-        />
-      </section>
-
-      <section className="section-heading">
-        <div><span className="eyebrow">Ventas comerciales</span><h2>Ofertas, seguimientos y pedidos del periodo</h2><p>Cada venta la manda el estado de su ficha —consulta, lead o contacto del CRM—: oferta al marcar «Oferta enviada», pedido al marcar «Ganado», y se quita si se vuelve atrás. A mano solo se apuntan las semanales, de golpe y por tipo.</p></div>
-      </section>
-      <section className="kpi-grid">
-        {saleTypeOrder.map((type) => (
-          <KpiCard
-            key={type}
-            label={saleTypeLabels[type]}
-            value={currencyFormatter.format(salesSummary[type].value)}
-            delta="Sin comparación"
-            helper={`${numberFormatter.format(salesSummary[type].count)} ${salesSummary[type].count === 1 ? "venta" : "ventas"} en el periodo`}
-            icon={SALE_TYPE_ICONS[type]}
-            tone={SALE_TYPE_TONES[type]}
-          />
-        ))}
-      </section>
+      {/*
+        La foto del periodo en una tira, los dos gráficos emparejados debajo y
+        las ventas en otra tira. Antes eran ocho tarjetas iguales y dos
+        cabeceras antes de ver nada dibujado, y el donut colgando al final a
+        todo lo ancho. Evolución y reparto por canal se leen juntos: uno dice
+        cómo va en el tiempo y el otro de dónde viene.
+      */}
+      <Cifras
+        titulo={`Consultas de ${viewMode === "month" ? monthLabel(selectedMonth) : `${selectedYear}`}`}
+        cifras={[
+          {
+            key: "total", etiqueta: "Consultas totales", valor: numberFormatter.format(total),
+            nota: variation === null
+              ? "sin datos del periodo anterior"
+              : `${variation >= 0 ? "+" : "−"}${formatPercent(Math.abs(variation))} ${comparisonHelper}`,
+            tono: variation === null ? undefined : variation >= 0 ? "bueno" : "malo",
+          },
+          {
+            key: "media", etiqueta: viewMode === "month" ? "Media diaria" : "Media mensual",
+            valor: (viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ","),
+            nota: viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`,
+          },
+          {
+            key: "canal", etiqueta: "Canal principal",
+            valor: topChannel ? inquiryChannelLabels[topChannel.channel] : "—",
+            nota: topChannel ? `${numberFormatter.format(topChannel.count)} consultas` : "sin datos",
+          },
+          {
+            key: "unidad", etiqueta: "Unidad líder", valor: topUnit ? topUnit.unit.name : "—",
+            nota: topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "sin datos",
+          },
+        ]}
+      />
 
       <section className="dashboard-grid">
         <article className="panel chart-panel chart-panel-wide">
@@ -1387,10 +1361,22 @@ export function InquiryRegister() {
           />
         </article>
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><h2>Consultas por canal</h2><p className="panel-subtitle">Web {formatPercent(total ? (webTotal / total) * 100 : 0)} · Teléfono {formatPercent(total ? (phoneTotal / total) * 100 : 0)}</p></div></div>
+          <div className="panel-heading"><div><h2>De dónde vienen</h2><p className="panel-subtitle">Web {formatPercent(total ? (webTotal / total) * 100 : 0)} · Teléfono {formatPercent(total ? (phoneTotal / total) * 100 : 0)}</p></div></div>
           <DonutChart items={channelDonutItems} centerLabel="consultas" ariaLabel="Consultas del periodo por canal" emptyMessage="Sin consultas en este periodo." />
         </article>
       </section>
+
+      <Cifras
+        titulo="Ofertas, seguimientos y pedidos del periodo"
+        subtitulo="Cada venta la manda el estado de su ficha —consulta, lead o contacto del CRM—: oferta al marcar «Oferta enviada», pedido al marcar «Ganado», y se quita si se vuelve atrás. A mano solo se apuntan las semanales, de golpe y por tipo"
+        cifras={saleTypeOrder.map((type) => ({
+          key: type,
+          etiqueta: saleTypeLabels[type],
+          valor: currencyFormatter.format(salesSummary[type].value),
+          nota: `${numberFormatter.format(salesSummary[type].count)} ${salesSummary[type].count === 1 ? "venta" : "ventas"} en el periodo`,
+          tono: type === "perdido" && salesSummary[type].value > 0 ? "malo" as const : undefined,
+        }))}
+      />
 
       <section className="panel table-panel">
         <div className="panel-heading">
@@ -1401,15 +1387,18 @@ export function InquiryRegister() {
       </section>
 
       {viewMode === "month" ? (
-        <section className="panel table-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Acumulado</span><h2>Total anual {selectedMonthYear}</h2></div></div>
-          <div className="annual-summary">
-            {inquiryChannelOrder.map((channel) => (
-              <div key={channel}><span>{inquiryChannelLabels[channel]}</span><strong>{numberFormatter.format(annualCountsForMonth[channel] ?? 0)}</strong></div>
-            ))}
-            <div><span>Total</span><strong>{numberFormatter.format(totalCount(unitYearRecordsForMonth))}</strong></div>
-          </div>
-        </section>
+        <Cifras
+          titulo={`Acumulado del año ${selectedMonthYear}`}
+          subtitulo="Todas las consultas del año hasta hoy, sin el filtro de mes"
+          cifras={[
+            ...inquiryChannelOrder.map((channel) => ({
+              key: channel,
+              etiqueta: inquiryChannelLabels[channel],
+              valor: numberFormatter.format(annualCountsForMonth[channel] ?? 0),
+            })),
+            { key: "total", etiqueta: "Total", valor: numberFormatter.format(totalCount(unitYearRecordsForMonth)) },
+          ]}
+        />
       ) : null}
 
       <section className="panel table-panel">

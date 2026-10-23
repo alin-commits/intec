@@ -9,7 +9,7 @@ import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
 import { delta, discountPercent, euros, hayComercialMarcado, hayMesMarcado, marcado, mesMarcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, soloUno, ticketFormatter, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
-import { Cifras, type Cifra } from "./cifras";
+import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
 import { DataTable, LoadFailed, Panel, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
@@ -390,6 +390,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
 
         {ctx.detail.customers ? (
           <Cifras
+            className="panel panel-padded sales-board-full"
             titulo="A quién llamar"
             subtitulo={`Contado hasta el ${shortDate(period.to)}. Habituales (con compras en 2 días o más) que han dejado de comprar o llevan tiempo sin hacerlo`}
             cifras={[

@@ -7,7 +7,7 @@ import { downloadXlsx } from "@/lib/excel-export";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows } from "./sales-queries";
 import { euros, type SalesFilters } from "@/lib/sales-model";
-import { Cifras } from "./cifras";
+import { Cifras } from "@/components/ui/cifras";
 import { Column, DataTable, LoadFailed, Panel, shortDate, useSageQuery } from "./sales-ui";
 
 /*
