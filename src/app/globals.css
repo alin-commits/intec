@@ -906,6 +906,17 @@ td.recent-inquiries-actions > * + * { margin-left: 8px; }
 .sent-recipients li.is-read small { color: #166534; }
 
 /* Gastos de marketing */
+/* Media columna da para cuatro columnas, pero el mínimo general de 850 px
+   está pensado para las tablas grandes: esta no lo necesita. */
+.redes-resumen-table { min-width: 0; }
+@media (min-width: 900px) {
+  .redes-resumen-table { table-layout: fixed; width: 100%; }
+  .redes-resumen-table th:nth-child(1), .redes-resumen-table td:nth-child(1) { width: 38%; }
+  .redes-resumen-table th:nth-child(2), .redes-resumen-table td:nth-child(2) { width: 20%; }
+  .redes-resumen-table th:nth-child(3), .redes-resumen-table td:nth-child(3) { width: 17%; }
+}
+/* Cuando lo de al lado del gráfico es una tabla y no un panel estrecho. */
+.dashboard-grid-iguales { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .expenses-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }
 .renewal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .renewal-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-muted); font-size: 13px; }

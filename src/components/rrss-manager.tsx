@@ -419,9 +419,6 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
     interactions: entry.interactions,
   })), [monthlyTrend]);
 
-  const newFollowersByUnit = useMemo(() => unitSummaries
-    .filter((row) => row.newFollowers > 0)
-    .map((row) => ({ label: row.unit.name, value: row.newFollowers, color: row.unit.accent })), [unitSummaries]);
 
   const newFollowersByNetwork = useMemo(() => {
     if (unitFilter === "all") return [];
@@ -632,7 +629,7 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
         <KpiCard label="Alcance" value={numberFormatter.format(totals.reach)} {...compareProps(totals.reach, previousTotals?.reach ?? null, socialCompareLabel, periodLabel)} icon={<EyeIcon />} tone="sky" />
       </section>
 
-      <section className="dashboard-grid">
+      <section className="dashboard-grid dashboard-grid-iguales">
         <article className="panel chart-panel chart-panel-wide">
           <div className="panel-heading">
             <div><span className="eyebrow">Evolución</span><h2>Año {trendYear} ({selectedUnitName})</h2></div>
@@ -646,33 +643,28 @@ function SocialTab({ units, stats, canEdit, configured, busy, setBusy, setMessag
             ariaLabel="Evolución mensual de nuevos seguidores e interacciones"
           />
         </article>
-        <article className="panel chart-panel">
+        <article className="panel table-panel">
           <div className="panel-heading">
-            <div><span className="eyebrow">{unitFilter === "all" ? "Por marca" : "Por red"}</span><h2>Nuevos seguidores</h2></div>
+            <div><span className="eyebrow">{unitFilter === "all" ? "Por marca" : "Por red"}</span><h2>{unitFilter === "all" ? "Resumen del periodo" : "Nuevos seguidores"}</h2></div>
           </div>
           {unitFilter === "all" ? (
-            <BarChart items={newFollowersByUnit} ariaLabel="Nuevos seguidores por marca en el periodo" valueFormatter={(value) => numberFormatter.format(value)} />
+            <div className="table-scroll">
+              <table className="redes-resumen-table">
+                <thead><tr><th>Marca</th><th>Seguidores</th><th>Nuevos</th><th>Interacciones</th></tr></thead>
+                <tbody>
+                  {unitSummaries.map(({ unit, followers, newFollowers, interactions }) => (
+                    <tr key={unit.id}>
+                      <td><span className="unit-name"><i style={{ background: unit.accent }} />{unit.name}</span></td>
+                      <td>{numberFormatter.format(followers)}</td><td>{numberFormatter.format(newFollowers)}</td><td>{numberFormatter.format(interactions)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <BarChart items={newFollowersByNetwork} ariaLabel={`Nuevos seguidores por red para ${selectedUnitName}`} valueFormatter={(value) => numberFormatter.format(value)} />
           )}
         </article>
-      </section>
-
-      <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Por marca</span><h2>Resumen del periodo</h2></div></div>
-        <div className="table-scroll">
-          <table>
-            <thead><tr><th>Marca</th><th>Seguidores</th><th>Nuevos</th><th>Interacciones</th></tr></thead>
-            <tbody>
-              {unitSummaries.map(({ unit, followers, newFollowers, interactions }) => (
-                <tr key={unit.id}>
-                  <td><span className="unit-name"><i style={{ background: unit.accent }} />{unit.name}</span></td>
-                  <td>{numberFormatter.format(followers)}</td><td>{numberFormatter.format(newFollowers)}</td><td>{numberFormatter.format(interactions)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </section>
 
       <CollapsibleFilters
