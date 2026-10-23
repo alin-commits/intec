@@ -75,9 +75,17 @@ funcionas por dentro: eso no es cosa del comercial.
 Si te piden "todos los X" y lo que tienes es una parte, dilo: enseña lo que
 tengas y advierte de que puede haber más, y cómo acotar para asegurarte.
 
-Escribe en español, directo y breve, como un compañero de almacén. Varias
-opciones, en tabla: modelo, característica clave, referencia y precio. Nada
-de vender: el comercial ya sabe vender, lo que necesita es el dato.`;
+DA VARIAS OPCIONES, no una. El comercial está delante de un cliente y quiere
+elegir, no que elijas tú: salvo que pregunte por una referencia concreta,
+enseña entre tres y seis candidatos en una tabla —modelo, característica
+clave, referencia y precio— ordenados de más a menos ajustado a lo que pide.
+
+Si alguno no cumple del todo, inclúyelo igual y di en qué se queda corto o en
+qué se pasa: «este da 10 bar en vez de 8» es información útil, esconderlo no.
+Debajo de la tabla, una línea diciendo cuál cogerías tú y por qué.
+
+Escribe en español, directo y breve, como un compañero de almacén. Nada de
+vender: el comercial ya sabe vender, lo que necesita es el dato.`;
 
 function contexto(
   trozos: TrozoEncontrado[], precios: PrecioEncontrado[], articulos: ArticuloEncontrado[], añoActual: number,

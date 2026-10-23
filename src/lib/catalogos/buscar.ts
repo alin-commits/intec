@@ -95,7 +95,7 @@ async function buscar<T>(db: SupabaseClient, funcion: string, consulta: string, 
   return [];
 }
 
-export async function buscarEnCatalogos(db: SupabaseClient, consulta: string, tope = 10) {
+export async function buscarEnCatalogos(db: SupabaseClient, consulta: string, tope = 14) {
   const filas = await buscar<Record<string, unknown>>(db, "buscar_en_catalogos", consulta, tope);
   return filas.map((f): TrozoEncontrado => ({
     proveedor: String(f.proveedor ?? ""),
@@ -106,12 +106,12 @@ export async function buscarEnCatalogos(db: SupabaseClient, consulta: string, to
   }));
 }
 
-export async function buscarEnTarifas(db: SupabaseClient, consulta: string, tope = 14) {
+export async function buscarEnTarifas(db: SupabaseClient, consulta: string, tope = 20) {
   const filas = await buscar<Record<string, unknown>>(db, "buscar_en_tarifas", consulta, tope);
   return filas.map(filaAPrecio);
 }
 
-export async function buscarEnSage(db: SupabaseClient, consulta: string, tope = 12) {
+export async function buscarEnSage(db: SupabaseClient, consulta: string, tope = 16) {
   const filas = await buscar<Record<string, unknown>>(db, "buscar_en_sage", consulta, tope);
   return filas.map((f): ArticuloEncontrado => ({
     codigo: String(f.codigo ?? ""),
