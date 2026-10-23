@@ -2073,10 +2073,18 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 .payments-banks { display: grid; gap: 14px; }
 .payments-bank { border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; display: grid; gap: 12px; background: var(--surface); }
 .payments-bank.is-new { border-color: #f2d49b; background: linear-gradient(180deg, #fffbeb, #fff 60%); }
-.payments-bank header, .payments-bank footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.payments-bank header div { display: grid; gap: 2px; }
-.payments-bank header small { color: var(--muted); font-size: 12px; }
-.payments-bank header > span { font-size: 12.5px; font-weight: 750; white-space: nowrap; }
+.payments-bank > summary, .payments-bank footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.payments-bank > summary { cursor: pointer; list-style: none; }
+.payments-bank > summary::-webkit-details-marker { display: none; }
+.payments-bank > summary div { display: grid; gap: 2px; }
+.payments-bank > summary small { color: var(--muted); font-size: 12px; }
+.payments-bank > summary > span { font-size: 12.5px; font-weight: 750; white-space: nowrap; }
+.payments-bank > summary strong::before { content: "▸ "; color: var(--muted); font-weight: 600; }
+.payments-bank[open] > summary strong::before { content: "▾ "; }
+.payments-bank > summary:hover strong { color: var(--primary); }
+/* Cerrada no hay nada debajo del tirador: que el hueco no cuente. */
+.payments-bank:not([open]) { gap: 0; }
+.payments-banks-count { margin-bottom: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-muted); }
 .payments-bank footer { align-items: center; font-size: 12.5px; }
 .payments-bank-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 12px; }
 .payments-bank-fields label { display: grid; gap: 4px; min-width: 0; align-content: start; }

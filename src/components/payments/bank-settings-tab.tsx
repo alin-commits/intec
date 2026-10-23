@@ -7,6 +7,7 @@ import { reportSafeError } from "@/lib/errors";
 import { createClient } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
 import { LoadFailed, Panel, useSageQuery } from "@/components/sales/sales-ui";
+import { Cifras } from "@/components/ui/cifras";
 import type { PaymentsContext } from "./payments-view";
 
 /*
@@ -135,6 +136,8 @@ export function BankSettingsTab({ ctx }: { ctx: PaymentsContext }) {
     ctx.notify("Banco guardado.");
   }
 
+  const configurados = list.filter(([key]) => ctx.settings.some((setting) => settingKey(setting.company_code, setting.sage_bank_code) === key)).length;
+
   return (
     <div className="page-stack">
       <Panel
@@ -143,6 +146,16 @@ export function BankSettingsTab({ ctx }: { ctx: PaymentsContext }) {
         className="panel panel-padded"
       >
         {used.failed ? <LoadFailed what="los bancos de las remesas" /> : null}
+        {list.length > 0 ? (
+          <Cifras
+            className="payments-banks-count"
+            cifras={[
+              { key: "todos", etiqueta: "Bancos", valor: String(list.length), nota: "uno por sociedad y banco de Sage", fuerte: true },
+              { key: "listos", etiqueta: "Configurados", valor: String(configurados), nota: "con contrato guardado", tono: configurados === list.length ? "bueno" : undefined },
+              { key: "faltan", etiqueta: "Sin configurar", valor: String(list.length - configurados), nota: "no se puede generar su fichero", tono: configurados === list.length ? undefined : "malo" },
+            ]}
+          />
+        ) : null}
         {list.length === 0 ? (
           <p className="muted">
             Todavía no ha llegado ninguna remesa de pagos de Sage. Cuando lleguen, cada banco saldrá aquí solo. Si quieres ir
@@ -156,17 +169,18 @@ export function BankSettingsTab({ ctx }: { ctx: PaymentsContext }) {
               const dirty = Boolean(drafts[key]);
               const issues = problems(draft);
               return (
-                <article key={key} className={`payments-bank${saved ? "" : " is-new"}`}>
-                  <header>
+                <details key={key} className={`payments-bank${saved ? "" : " is-new"}`} open={dirty || list.length === 1}>
+                  <summary>
                     <div>
-                      <strong>{ctx.companyName(pair.company)}</strong>
+                      <strong>{ctx.companyName(pair.company)} · {draft.bank_name}</strong>
                       <small>
                         Banco en Sage: «{pair.code || "sin código"}»
+                        {draft.contract.trim() ? ` · contrato ${draft.contract.trim()}` : ""}
                         {pair.remittances ? ` · ${pair.remittances} remesas${pair.last ? `, la última del ${new Date(`${pair.last}T12:00:00`).toLocaleDateString("es-ES")}` : ""}` : " · sin remesas todavía"}
                       </small>
                     </div>
                     <span className={saved ? "sales-up" : "sales-down"}>{saved ? (dirty ? "Cambios sin guardar" : "Configurado") : "Sin configurar"}</span>
-                  </header>
+                  </summary>
                   <div className="payments-bank-fields">
                     <label>
                       <span>Banco</span>
@@ -219,7 +233,7 @@ export function BankSettingsTab({ ctx }: { ctx: PaymentsContext }) {
                       {saving === key ? "Guardando…" : "Guardar"}
                     </button>
                   </footer>
-                </article>
+                </details>
               );
             })}
           </div>
