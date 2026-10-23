@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CampanasIcon, ComprasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
+import { CampanasIcon, ComprasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, SearchIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
 import { AvisoExtension } from "@/components/aviso-extension";
@@ -12,7 +12,7 @@ import { AvisoCompras } from "@/components/compras/aviso-compras";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CATALOGOS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -75,10 +75,10 @@ const departamentos: { id: string; label: string; entradas: Entrada[] }[] = [
     { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
     { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
   ] },
-  // Aquí irá el asistente de manuales. De momento solo el gestor de
-  // contraseñas, que lo alcanza cualquiera con cuenta: lo que ve dentro se
-  // decide credencial a credencial.
+  // El gestor de contraseñas lo alcanza cualquiera con cuenta: lo que ve
+  // dentro se decide credencial a credencial.
   { id: "utilidades", label: "Utilidades", entradas: [
+    { href: "/catalogos", label: "Catálogos", icon: SearchIcon, roles: CATALOGOS_ROLES },
     { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon },
   ] },
 ];
@@ -97,6 +97,7 @@ const pageTitles: Record<string, string> = {
   "/contrasenas/salud": "Salud del gestor",
   "/contrasenas/accesos": "Accesos al gestor",
   "/contrasenas/auditoria": "Auditoría del gestor",
+  "/catalogos": "Pregunta por un producto",
   "/contrasenas": "Gestor de contraseñas",
   "/usuarios": "Usuarios",
 };
