@@ -141,6 +141,7 @@ export function InquiryRegister() {
   const [units, setUnits] = useState<BusinessUnit[]>(() => demoBusinessUnits.filter((unit) => unit.active));
   const [records, setRecords] = useState<InquiryRecord[]>(demoInquiries);
   const [salesEntries, setSalesEntries] = useState<SalesEntry[]>(demoSalesEntries);
+  const [pestana, setPestana] = useState<"registrar" | "estadisticas">("registrar");
   const [viewMode, setViewMode] = useState<ViewMode>("year");
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
   const [selectedYear, setSelectedYear] = useState(yearOfMonth(currentMonthKey));
@@ -1143,319 +1144,336 @@ export function InquiryRegister() {
 
   return (
     <div className="page-stack">
-      <section className="intro-grid">
-        <div><span className="eyebrow">Registro controlado</span><h2>Registrar consulta</h2><p>Selecciona el canal. Antes de guardar aparecerá una confirmación con la unidad y el canal de consulta.</p></div>
-        <div className="notice"><strong>{configured ? "Datos conectados" : "Modo demostración"}</strong><span>{message ?? "La fecha, la hora y el usuario se asignan automáticamente."}</span></div>
-      </section>
-
-      {canRegister ? (
-        <>
-          <section className="brand-picker">
-            {registrableUnits.map((unit) => (
-              <button
-                key={unit.id}
-                type="button"
-                className={unit.id === registrationUnitId ? "brand-tile active" : "brand-tile"}
-                onClick={() => setRegistrationUnitId(unit.id)}
-              >
-                <UnitBrandMark unit={unit} width={150} height={56} />
-              </button>
-            ))}
-          </section>
-          {registrationUnit ? (
-            <article className="panel inquiry-card">
-              <div className="inquiry-card-row">
-                <div className="unit-card-heading">
-                  <UnitBrandMark unit={registrationUnit} size={42} />
-                  <div><h3>{registrationUnit.name}</h3></div>
-                </div>
-                <div className="inquiry-actions-inline">
-                  {inquiryChannelOrder.map((channel) => (
-                    <button key={channel} type="button" onClick={() => { setPending({ unit: registrationUnit, type: channel }); }} className="channel-chip">
-                      <i className={`channel-dot channel-dot-${channel}`} />{inquiryChannelLabels[channel]}
-                    </button>
-                  ))}
-                  <button type="button" className="button button-secondary" onClick={openSaleChooser}>+ Registrar venta</button>
-                  <button type="button" className="button button-secondary" onClick={openWeeklyInquiry}>+ Consultas semanales</button>
-                </div>
-              </div>
-              <p className="muted">&quot;Registrar venta&quot; añade una consulta u oferta concreta con su valor. &quot;Consultas semanales&quot; suma varias consultas de golpe (por ejemplo, las de una semana entera) sin detallarlas una a una.</p>
-            </article>
-          ) : (
-            <div className="notice"><strong>Elige una marca</strong><span>Selecciona una de las marcas de arriba para registrar una consulta.</span></div>
-          )}
-        </>
-      ) : <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes analizar las consultas, pero no registrar nuevas.</span></div>}
-
-      <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading">
-          <div><span className="eyebrow">Control</span><h2>Consultas del periodo</h2><p className="panel-subtitle">Las individuales llevan ficha y estado; las semanales son un recuento y no tienen nombre.</p></div>
-          <div className="panel-heading-trailing">
-            <span className="muted">Pulsa Editar para ver o cambiar la ficha, el estado y sus ventas</span>
-            <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
-          </div>
-        </div>
-        <label className="list-search">
-          <span className="sr-only">Buscar consultas</span>
-          <SearchIcon />
-          <input
-            type="search"
-            value={busquedaConsultas}
-            onChange={(event) => { setPaginaConsultas(0); setBusquedaConsultas(event.target.value); }}
-            placeholder="Buscar por nombre, empresa, teléfono, correo o lo que pide"
-          />
-        </label>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto</th><th>Canal</th><th>Estado</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{consultasDeLaPagina.map((record) => {
-          const unit = units.find((item) => item.id === record.businessUnitId);
-          const recordSales = salesByInquiry.get(record.id) ?? [];
-          const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
-          return (
-            <tr key={record.id}>
-              <td>{formatDate(record.createdAt)}</td>
-              <td>{unit?.name ?? "—"}</td>
-              <td>
-                {record.entryMode === "weekly"
-                  ? <span className="muted">—</span>
-                  : <><strong>{record.contactName || "Sin nombre"}</strong><small>{[record.companyName, record.productInterest].filter(Boolean).join(" · ") || "—"}</small></>}
-              </td>
-              <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
-              <td>
-                {record.entryMode === "weekly" ? <span className="muted">—</span> : canRegister ? (
-                  <select
-                    className={`table-select badge-select badge-${contactStatusBadges[record.status ?? "contactado"]}`}
-                    value={record.status ?? "contactado"}
-                    aria-label={`Estado de la consulta de ${record.contactName || "sin nombre"}`}
-                    onChange={(event) => pedirEstadoConsulta(record, event.target.value as InquiryStatus)}
-                  >
-                    {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
-                  </select>
-                ) : <span className={`badge badge-${contactStatusBadges[record.status ?? "contactado"]}`}>{contactStatusLabels[record.status ?? "contactado"]}</span>}
-              </td>
-              <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
-              <td>{numberFormatter.format(record.count)}</td>
-              <td>
-                {recordSales.length > 0
-                  ? <><strong>{currencyFormatter.format(recordSalesTotal)}</strong><small>{saleTypeLabels[recordSales[0].saleType]}</small></>
-                  : <span className="muted">—</span>}
-              </td>
-              <td className="recent-inquiries-actions">
-                {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
-                {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
-              </td>
-            </tr>
-          );
-        })}</tbody></table></div>
-        <TablePagination page={paginaConsultasActual} pageCount={paginasConsultas} total={recentInquiries.length} label="consultas" onChange={setPaginaConsultas} />
-      </section>
-
-      <section className="section-heading inquiries-dashboard-heading">
-        <div><span className="eyebrow">Estadísticas de consultas</span><h2>Dashboard de consultas</h2><p>Elige vista mensual o anual, filtra por unidad y canal. Las tablas se pueden ordenar pulsando sus encabezados.</p></div>
-        <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
-      </section>
-
-      <CollapsibleFilters
-        hasActiveFilters={selectedUnit !== "all" || viewMode !== "year" || compareMode !== "previous" || selectedType !== "all" || sortColumn !== "total" || sortDirection !== "desc"}
-        onClear={() => {
-          setSelectedUnit("all");
-          setViewMode("year");
-          setSelectedYear(yearOfMonth(currentMonthKey));
-          setCompareMode("previous");
-          setSelectedType("all");
-          setSortColumn("total");
-          setSortDirection("desc");
-        }}
-      >
-        <div className="filter-bar">
-          <label>
-            <span>Unidad de negocio</span>
-            <select value={selectedUnit} onChange={(event) => setSelectedUnit(event.target.value)}>
-              <option value="all">Todas las unidades</option>
-              {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Vista</span>
-            <select value={viewMode} onChange={(event) => setViewMode(event.target.value as ViewMode)}>
-              <option value="month">Mensual</option>
-              <option value="year">Anual</option>
-            </select>
-          </label>
-          {viewMode === "month" ? (
-            <label><span>Mes</span><MonthField value={selectedMonth} max={currentMonthKey} onChange={(value) => setSelectedMonth(value)} /></label>
-          ) : (
-            <label>
-              <span>Año</span>
-              <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
-                {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
-              </select>
-            </label>
-          )}
-          {viewMode === "month" ? (
-            <label>
-              <span>Comparar con</span>
-              <select value={compareMode} onChange={(event) => setCompareMode(event.target.value as CompareMode)}>
-                <option value="previous">Mes anterior</option>
-                <option value="current">Mes actual</option>
-                <option value="previous_year">Mismo mes del año anterior</option>
-                <option value="none">Sin comparación</option>
-              </select>
-            </label>
-          ) : (
-            <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
-          )}
-        </div>
-        <div className="filter-bar inquiry-filters">
-          <label><span>Canal</span><select value={selectedType} onChange={(event) => setSelectedType(event.target.value as "all" | InquiryType)}>
-            <option value="all">Todos los canales</option>
-            {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
-          </select></label>
-          <label><span>Orden inicial</span><select value={`${sortColumn}-${sortDirection}`} onChange={(event) => { const [column, direction] = event.target.value.split("-") as [ChannelTableColumn, "asc" | "desc"]; setSortColumn(column); setSortDirection(direction); }}>
-            <option value="total-desc">Mayor total</option>
-            <option value="trailing-desc">Mayor crecimiento</option>
-            <option value="label-asc">Nombre A–Z</option>
-          </select></label>
-        </div>
-      </CollapsibleFilters>
-
       {/*
-        La foto del periodo en una tira, los dos gráficos emparejados debajo y
-        las ventas en otra tira. Antes eran ocho tarjetas iguales y dos
-        cabeceras antes de ver nada dibujado, y el donut colgando al final a
-        todo lo ancho. Evolución y reparto por canal se leen juntos: uno dice
-        cómo va en el tiempo y el otro de dónde viene.
+        Eran dos páginas en una: arriba el registro —elegir marca, apuntar la
+        consulta, repasar las del periodo— y debajo el dashboard. Había casi
+        setecientos píxeles de registro antes del primer dato. Cada una en su
+        pestaña, como en Tickets.
       */}
-      <Cifras
-        titulo={`Consultas de ${viewMode === "month" ? monthLabel(selectedMonth) : `${selectedYear}`}`}
-        cifras={[
-          {
-            key: "total", etiqueta: "Consultas totales", valor: numberFormatter.format(total),
-            nota: variation === null
-              ? "sin datos del periodo anterior"
-              : `${variation >= 0 ? "+" : "−"}${formatPercent(Math.abs(variation))} ${comparisonHelper}`,
-            tono: variation === null ? undefined : variation >= 0 ? "bueno" : "malo",
-          },
-          {
-            key: "media", etiqueta: viewMode === "month" ? "Media diaria" : "Media mensual",
-            valor: (viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ","),
-            nota: viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`,
-          },
-          {
-            key: "canal", etiqueta: "Canal principal",
-            valor: topChannel ? inquiryChannelLabels[topChannel.channel] : "—",
-            nota: topChannel ? `${numberFormatter.format(topChannel.count)} consultas` : "sin datos",
-          },
-          {
-            key: "unidad", etiqueta: "Unidad líder", valor: topUnit ? topUnit.unit.name : "—",
-            nota: topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "sin datos",
-          },
-        ]}
-      />
+      <div className="view-tabs" role="tablist" aria-label="Consultas">
+        <button type="button" role="tab" aria-selected={pestana === "registrar"} className={pestana === "registrar" ? "view-tab active" : "view-tab"} onClick={() => setPestana("registrar")}>Registrar</button>
+        <button type="button" role="tab" aria-selected={pestana === "estadisticas"} className={pestana === "estadisticas" ? "view-tab active" : "view-tab"} onClick={() => setPestana("estadisticas")}>Estadísticas</button>
+      </div>
 
-      <section className="dashboard-grid">
-        <article className="panel chart-panel chart-panel-wide">
-          <div className="panel-heading"><div><h2>Evolución de consultas</h2><p className="panel-subtitle">Por canal · {viewMode === "month" ? monthLabel(selectedMonth) : `año ${selectedYear}`}</p></div></div>
-          <TrendChart
-            data={trendData}
-            series={inquiryChannelOrder.map((channel) => ({ key: channel, label: inquiryChannelLabels[channel], color: inquiryChannelColors[channel] }))}
-            ariaLabel="Evolución de consultas por canal"
-          />
-        </article>
-        <article className="panel chart-panel">
-          <div className="panel-heading"><div><h2>De dónde vienen</h2><p className="panel-subtitle">Web {formatPercent(total ? (webTotal / total) * 100 : 0)} · Teléfono {formatPercent(total ? (phoneTotal / total) * 100 : 0)}</p></div></div>
-          <DonutChart items={channelDonutItems} centerLabel="consultas" ariaLabel="Consultas del periodo por canal" emptyMessage="Sin consultas en este periodo." />
-        </article>
-      </section>
+      {pestana === "registrar" ? (
+        <>
+        <section className="intro-grid">
+          <div><span className="eyebrow">Registro controlado</span><h2>Registrar consulta</h2><p>Selecciona el canal. Antes de guardar aparecerá una confirmación con la unidad y el canal de consulta.</p></div>
+          <div className="notice"><strong>{configured ? "Datos conectados" : "Modo demostración"}</strong><span>{message ?? "La fecha, la hora y el usuario se asignan automáticamente."}</span></div>
+        </section>
 
-      <Cifras
-        titulo="Ofertas, seguimientos y pedidos del periodo"
-        subtitulo="Cada venta la manda el estado de su ficha —consulta, lead o contacto del CRM—: oferta al marcar «Oferta enviada», pedido al marcar «Ganado», y se quita si se vuelve atrás. A mano solo se apuntan las semanales, de golpe y por tipo"
-        cifras={saleTypeOrder.map((type) => ({
-          key: type,
-          etiqueta: saleTypeLabels[type],
-          valor: currencyFormatter.format(salesSummary[type].value),
-          nota: `${numberFormatter.format(salesSummary[type].count)} ${salesSummary[type].count === 1 ? "venta" : "ventas"} en el periodo`,
-          tono: type === "perdido" && salesSummary[type].value > 0 ? "malo" as const : undefined,
-        }))}
-      />
+        {canRegister ? (
+          <>
+            <section className="brand-picker">
+              {registrableUnits.map((unit) => (
+                <button
+                  key={unit.id}
+                  type="button"
+                  className={unit.id === registrationUnitId ? "brand-tile active" : "brand-tile"}
+                  onClick={() => setRegistrationUnitId(unit.id)}
+                >
+                  <UnitBrandMark unit={unit} width={150} height={56} />
+                </button>
+              ))}
+            </section>
+            {registrationUnit ? (
+              <article className="panel inquiry-card">
+                <div className="inquiry-card-row">
+                  <div className="unit-card-heading">
+                    <UnitBrandMark unit={registrationUnit} size={42} />
+                    <div><h3>{registrationUnit.name}</h3></div>
+                  </div>
+                  <div className="inquiry-actions-inline">
+                    {inquiryChannelOrder.map((channel) => (
+                      <button key={channel} type="button" onClick={() => { setPending({ unit: registrationUnit, type: channel }); }} className="channel-chip">
+                        <i className={`channel-dot channel-dot-${channel}`} />{inquiryChannelLabels[channel]}
+                      </button>
+                    ))}
+                    <button type="button" className="button button-secondary" onClick={openSaleChooser}>+ Registrar venta</button>
+                    <button type="button" className="button button-secondary" onClick={openWeeklyInquiry}>+ Consultas semanales</button>
+                  </div>
+                </div>
+                <p className="muted">&quot;Registrar venta&quot; añade una consulta u oferta concreta con su valor. &quot;Consultas semanales&quot; suma varias consultas de golpe (por ejemplo, las de una semana entera) sin detallarlas una a una.</p>
+              </article>
+            ) : (
+              <div className="notice"><strong>Elige una marca</strong><span>Selecciona una de las marcas de arriba para registrar una consulta.</span></div>
+            )}
+          </>
+        ) : <div className="notice"><strong>Cuenta de solo lectura</strong><span>Puedes analizar las consultas, pero no registrar nuevas.</span></div>}
 
-      <section className="panel table-panel">
-        <div className="panel-heading">
-          <div><span className="eyebrow">{viewMode === "month" ? "Detalle semanal" : "Detalle mensual"}</span><h2>{viewMode === "month" ? `Consultas por semana — ${monthLabel(selectedMonth)}` : `Consultas por mes — ${selectedYear}`}</h2></div>
-          <span className="muted">{viewMode === "month" ? "Semanas dentro del mes, como en el control histórico" : "Cada fila es un mes natural"}</span>
-        </div>
-        <ChannelTable rowHeaderLabel={viewMode === "month" ? "Semana" : "Mes"} rows={periodRows} footerRow={periodFooterRow} />
-      </section>
+        <section className="panel table-panel recent-inquiries">
+          <div className="panel-heading">
+            <div><span className="eyebrow">Control</span><h2>Consultas del periodo</h2><p className="panel-subtitle">Las individuales llevan ficha y estado; las semanales son un recuento y no tienen nombre.</p></div>
+            <div className="panel-heading-trailing">
+              <span className="muted">Pulsa Editar para ver o cambiar la ficha, el estado y sus ventas</span>
+              <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
+            </div>
+          </div>
+          <label className="list-search">
+            <span className="sr-only">Buscar consultas</span>
+            <SearchIcon />
+            <input
+              type="search"
+              value={busquedaConsultas}
+              onChange={(event) => { setPaginaConsultas(0); setBusquedaConsultas(event.target.value); }}
+              placeholder="Buscar por nombre, empresa, teléfono, correo o lo que pide"
+            />
+          </label>
+          <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto</th><th>Canal</th><th>Estado</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{consultasDeLaPagina.map((record) => {
+            const unit = units.find((item) => item.id === record.businessUnitId);
+            const recordSales = salesByInquiry.get(record.id) ?? [];
+            const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
+            return (
+              <tr key={record.id}>
+                <td>{formatDate(record.createdAt)}</td>
+                <td>{unit?.name ?? "—"}</td>
+                <td>
+                  {record.entryMode === "weekly"
+                    ? <span className="muted">—</span>
+                    : <><strong>{record.contactName || "Sin nombre"}</strong><small>{[record.companyName, record.productInterest].filter(Boolean).join(" · ") || "—"}</small></>}
+                </td>
+                <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
+                <td>
+                  {record.entryMode === "weekly" ? <span className="muted">—</span> : canRegister ? (
+                    <select
+                      className={`table-select badge-select badge-${contactStatusBadges[record.status ?? "contactado"]}`}
+                      value={record.status ?? "contactado"}
+                      aria-label={`Estado de la consulta de ${record.contactName || "sin nombre"}`}
+                      onChange={(event) => pedirEstadoConsulta(record, event.target.value as InquiryStatus)}
+                    >
+                      {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
+                    </select>
+                  ) : <span className={`badge badge-${contactStatusBadges[record.status ?? "contactado"]}`}>{contactStatusLabels[record.status ?? "contactado"]}</span>}
+                </td>
+                <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
+                <td>{numberFormatter.format(record.count)}</td>
+                <td>
+                  {recordSales.length > 0
+                    ? <><strong>{currencyFormatter.format(recordSalesTotal)}</strong><small>{saleTypeLabels[recordSales[0].saleType]}</small></>
+                    : <span className="muted">—</span>}
+                </td>
+                <td className="recent-inquiries-actions">
+                  {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditRecord(record)}>Editar</button> : null}
+                  {canDeleteRecord(record) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(record)}>Eliminar</button> : null}
+                </td>
+              </tr>
+            );
+          })}</tbody></table></div>
+          <TablePagination page={paginaConsultasActual} pageCount={paginasConsultas} total={recentInquiries.length} label="consultas" onChange={setPaginaConsultas} />
+        </section>
 
-      {viewMode === "month" ? (
+        <section className="panel table-panel recent-inquiries">
+          <div className="panel-heading">
+            <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
+            <div className="panel-heading-trailing">
+              <span className="muted">Incluye ventas por consulta, bloques semanales y las de los leads. Corrige un error editando la venta, o elimínala si no debía existir; las de un lead se cambian desde el lead</span>
+              <button type="button" className="button button-compact button-secondary" onClick={exportSalesCsv}>Exportar CSV</button>
+            </div>
+          </div>
+          <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.slice(0, salesExpanded ? recentSales.length : 5).map((entry) => {
+            const unit = units.find((item) => item.id === entry.businessUnitId);
+            return (
+              <tr key={entry.id}>
+                <td>{formatDate(entry.occurredOn)}</td>
+                <td>{unit?.name ?? "—"}</td>
+                <td><span className="badge">{saleTypeLabels[entry.saleType]}</span></td>
+                <td>{entry.entryMode === "weekly" ? saleOrigin(entry) : <span className="sale-origin-lead" title="La lleva su ficha: cambia con el estado y el valor que tenga allí">{saleOrigin(entry)}</span>}</td>
+                <td>{numberFormatter.format(entry.count)}</td>
+                <td>{currencyFormatter.format(entry.value)}</td>
+                <td className="recent-inquiries-actions">
+                  {entry.leadId ? (
+                    <a className="button button-compact button-secondary" href={leadLink(entry)}>Ver lead</a>
+                  ) : entry.entryMode === "crm" ? (
+                    <a className="button button-compact button-secondary" href="/crm">Ver en CRM</a>
+                  ) : entry.entryMode === "inquiry" ? (
+                    <span className="muted">La lleva su consulta</span>
+                  ) : (
+                    <>
+                      {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditSale(entry)}>Editar</button> : null}
+                      {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+          {recentSales.length === 0 ? <tr><td colSpan={7} className="muted">Sin ventas registradas en este periodo.</td></tr> : null}
+          </tbody></table></div>
+          {recentSales.length > 5 ? (
+            <div className="table-panel-footer">
+              <button type="button" className="button button-secondary button-compact" onClick={() => setSalesExpanded((current) => !current)}>
+                {salesExpanded ? "Mostrar menos" : `Mostrar más (${recentSales.length - 5} más)`}
+              </button>
+            </div>
+          ) : null}
+        </section>
+        </>
+      ) : (
+        <>
+        <section className="section-heading inquiries-dashboard-heading">
+          <div><span className="eyebrow">Estadísticas de consultas</span><h2>Dashboard de consultas</h2><p>Elige vista mensual o anual, filtra por unidad y canal. Las tablas se pueden ordenar pulsando sus encabezados.</p></div>
+          <ReportExportButtons onExportCsv={exportReportCsv} onExportPdf={() => void exportReportPdf()} pdfBusy={pdfBusy} />
+        </section>
+
+        <CollapsibleFilters
+          hasActiveFilters={selectedUnit !== "all" || viewMode !== "year" || compareMode !== "previous" || selectedType !== "all" || sortColumn !== "total" || sortDirection !== "desc"}
+          onClear={() => {
+            setSelectedUnit("all");
+            setViewMode("year");
+            setSelectedYear(yearOfMonth(currentMonthKey));
+            setCompareMode("previous");
+            setSelectedType("all");
+            setSortColumn("total");
+            setSortDirection("desc");
+          }}
+        >
+          <div className="filter-bar">
+            <label>
+              <span>Unidad de negocio</span>
+              <select value={selectedUnit} onChange={(event) => setSelectedUnit(event.target.value)}>
+                <option value="all">Todas las unidades</option>
+                {selectableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Vista</span>
+              <select value={viewMode} onChange={(event) => setViewMode(event.target.value as ViewMode)}>
+                <option value="month">Mensual</option>
+                <option value="year">Anual</option>
+              </select>
+            </label>
+            {viewMode === "month" ? (
+              <label><span>Mes</span><MonthField value={selectedMonth} max={currentMonthKey} onChange={(value) => setSelectedMonth(value)} /></label>
+            ) : (
+              <label>
+                <span>Año</span>
+                <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+                  {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+            )}
+            {viewMode === "month" ? (
+              <label>
+                <span>Comparar con</span>
+                <select value={compareMode} onChange={(event) => setCompareMode(event.target.value as CompareMode)}>
+                  <option value="previous">Mes anterior</option>
+                  <option value="current">Mes actual</option>
+                  <option value="previous_year">Mismo mes del año anterior</option>
+                  <option value="none">Sin comparación</option>
+                </select>
+              </label>
+            ) : (
+              <div className="filter-summary"><span>Comparando con</span><strong>Año {selectedYear - 1}</strong></div>
+            )}
+          </div>
+          <div className="filter-bar inquiry-filters">
+            <label><span>Canal</span><select value={selectedType} onChange={(event) => setSelectedType(event.target.value as "all" | InquiryType)}>
+              <option value="all">Todos los canales</option>
+              {inquiryChannelOrder.map((channel) => <option key={channel} value={channel}>{inquiryChannelLabels[channel]}</option>)}
+            </select></label>
+            <label><span>Orden inicial</span><select value={`${sortColumn}-${sortDirection}`} onChange={(event) => { const [column, direction] = event.target.value.split("-") as [ChannelTableColumn, "asc" | "desc"]; setSortColumn(column); setSortDirection(direction); }}>
+              <option value="total-desc">Mayor total</option>
+              <option value="trailing-desc">Mayor crecimiento</option>
+              <option value="label-asc">Nombre A–Z</option>
+            </select></label>
+          </div>
+        </CollapsibleFilters>
+
+        {/*
+          La foto del periodo en una tira, los dos gráficos emparejados debajo y
+          las ventas en otra tira. Antes eran ocho tarjetas iguales y dos
+          cabeceras antes de ver nada dibujado, y el donut colgando al final a
+          todo lo ancho. Evolución y reparto por canal se leen juntos: uno dice
+          cómo va en el tiempo y el otro de dónde viene.
+        */}
         <Cifras
-          titulo={`Acumulado del año ${selectedMonthYear}`}
-          subtitulo="Todas las consultas del año hasta hoy, sin el filtro de mes"
+          titulo={`Consultas de ${viewMode === "month" ? monthLabel(selectedMonth) : `${selectedYear}`}`}
           cifras={[
-            ...inquiryChannelOrder.map((channel) => ({
-              key: channel,
-              etiqueta: inquiryChannelLabels[channel],
-              valor: numberFormatter.format(annualCountsForMonth[channel] ?? 0),
-            })),
-            { key: "total", etiqueta: "Total", valor: numberFormatter.format(totalCount(unitYearRecordsForMonth)) },
+            {
+              key: "total", etiqueta: "Consultas totales", valor: numberFormatter.format(total),
+              nota: variation === null
+                ? "sin datos del periodo anterior"
+                : `${variation >= 0 ? "+" : "−"}${formatPercent(Math.abs(variation))} ${comparisonHelper}`,
+              tono: variation === null ? undefined : variation >= 0 ? "bueno" : "malo",
+            },
+            {
+              key: "media", etiqueta: viewMode === "month" ? "Media diaria" : "Media mensual",
+              valor: (viewMode === "month" ? dailyAverage : monthlyAverage).toFixed(1).replace(".", ","),
+              nota: viewMode === "month" ? `${elapsedDays} días analizados` : `${monthsElapsedInYear} meses analizados`,
+            },
+            {
+              key: "canal", etiqueta: "Canal principal",
+              valor: topChannel ? inquiryChannelLabels[topChannel.channel] : "—",
+              nota: topChannel ? `${numberFormatter.format(topChannel.count)} consultas` : "sin datos",
+            },
+            {
+              key: "unidad", etiqueta: "Unidad líder", valor: topUnit ? topUnit.unit.name : "—",
+              nota: topUnit ? `${numberFormatter.format(topUnit.count)} consultas` : "sin datos",
+            },
           ]}
         />
-      ) : null}
 
-      <section className="panel table-panel">
-        <div className="panel-heading"><div><span className="eyebrow">Comparativa</span><h2>Consultas por unidad</h2></div><span className="muted">Pulsa un encabezado para ordenar</span></div>
-        <ChannelTable
-          rowHeaderLabel="Unidad"
-          rows={unitTableRows}
-          trailingHeader="Variación"
-          sort={{ activeColumn: sortColumn, direction: sortDirection, onSort: changeSort }}
+        <section className="dashboard-grid">
+          <article className="panel chart-panel chart-panel-wide">
+            <div className="panel-heading"><div><h2>Evolución de consultas</h2><p className="panel-subtitle">Por canal · {viewMode === "month" ? monthLabel(selectedMonth) : `año ${selectedYear}`}</p></div></div>
+            <TrendChart
+              data={trendData}
+              series={inquiryChannelOrder.map((channel) => ({ key: channel, label: inquiryChannelLabels[channel], color: inquiryChannelColors[channel] }))}
+              ariaLabel="Evolución de consultas por canal"
+            />
+          </article>
+          <article className="panel chart-panel">
+            <div className="panel-heading"><div><h2>De dónde vienen</h2><p className="panel-subtitle">Web {formatPercent(total ? (webTotal / total) * 100 : 0)} · Teléfono {formatPercent(total ? (phoneTotal / total) * 100 : 0)}</p></div></div>
+            <DonutChart items={channelDonutItems} centerLabel="consultas" ariaLabel="Consultas del periodo por canal" emptyMessage="Sin consultas en este periodo." />
+          </article>
+        </section>
+
+        <Cifras
+          titulo="Ofertas, seguimientos y pedidos del periodo"
+          subtitulo="Cada venta la manda el estado de su ficha —consulta, lead o contacto del CRM—: oferta al marcar «Oferta enviada», pedido al marcar «Ganado», y se quita si se vuelve atrás. A mano solo se apuntan las semanales, de golpe y por tipo"
+          cifras={saleTypeOrder.map((type) => ({
+            key: type,
+            etiqueta: saleTypeLabels[type],
+            valor: currencyFormatter.format(salesSummary[type].value),
+            nota: `${numberFormatter.format(salesSummary[type].count)} ${salesSummary[type].count === 1 ? "venta" : "ventas"} en el periodo`,
+            tono: type === "perdido" && salesSummary[type].value > 0 ? "malo" as const : undefined,
+          }))}
         />
-      </section>
 
-      <section className="panel table-panel recent-inquiries">
-        <div className="panel-heading">
-          <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
-          <div className="panel-heading-trailing">
-            <span className="muted">Incluye ventas por consulta, bloques semanales y las de los leads. Corrige un error editando la venta, o elimínala si no debía existir; las de un lead se cambian desde el lead</span>
-            <button type="button" className="button button-compact button-secondary" onClick={exportSalesCsv}>Exportar CSV</button>
+        <section className="panel table-panel">
+          <div className="panel-heading">
+            <div><span className="eyebrow">{viewMode === "month" ? "Detalle semanal" : "Detalle mensual"}</span><h2>{viewMode === "month" ? `Consultas por semana — ${monthLabel(selectedMonth)}` : `Consultas por mes — ${selectedYear}`}</h2></div>
+            <span className="muted">{viewMode === "month" ? "Semanas dentro del mes, como en el control histórico" : "Cada fila es un mes natural"}</span>
           </div>
-        </div>
-        <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.slice(0, salesExpanded ? recentSales.length : 5).map((entry) => {
-          const unit = units.find((item) => item.id === entry.businessUnitId);
-          return (
-            <tr key={entry.id}>
-              <td>{formatDate(entry.occurredOn)}</td>
-              <td>{unit?.name ?? "—"}</td>
-              <td><span className="badge">{saleTypeLabels[entry.saleType]}</span></td>
-              <td>{entry.entryMode === "weekly" ? saleOrigin(entry) : <span className="sale-origin-lead" title="La lleva su ficha: cambia con el estado y el valor que tenga allí">{saleOrigin(entry)}</span>}</td>
-              <td>{numberFormatter.format(entry.count)}</td>
-              <td>{currencyFormatter.format(entry.value)}</td>
-              <td className="recent-inquiries-actions">
-                {entry.leadId ? (
-                  <a className="button button-compact button-secondary" href={leadLink(entry)}>Ver lead</a>
-                ) : entry.entryMode === "crm" ? (
-                  <a className="button button-compact button-secondary" href="/crm">Ver en CRM</a>
-                ) : entry.entryMode === "inquiry" ? (
-                  <span className="muted">La lleva su consulta</span>
-                ) : (
-                  <>
-                    {canRegister ? <button type="button" className="button button-compact button-secondary" onClick={() => openEditSale(entry)}>Editar</button> : null}
-                    {canDeleteSale(entry) ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDeleteSale(entry)}>Eliminar</button> : null}
-                  </>
-                )}
-              </td>
-            </tr>
-          );
-        })}
-        {recentSales.length === 0 ? <tr><td colSpan={7} className="muted">Sin ventas registradas en este periodo.</td></tr> : null}
-        </tbody></table></div>
-        {recentSales.length > 5 ? (
-          <div className="table-panel-footer">
-            <button type="button" className="button button-secondary button-compact" onClick={() => setSalesExpanded((current) => !current)}>
-              {salesExpanded ? "Mostrar menos" : `Mostrar más (${recentSales.length - 5} más)`}
-            </button>
-          </div>
+          <ChannelTable rowHeaderLabel={viewMode === "month" ? "Semana" : "Mes"} rows={periodRows} footerRow={periodFooterRow} />
+        </section>
+
+        {viewMode === "month" ? (
+          <Cifras
+            titulo={`Acumulado del año ${selectedMonthYear}`}
+            subtitulo="Todas las consultas del año hasta hoy, sin el filtro de mes"
+            cifras={[
+              ...inquiryChannelOrder.map((channel) => ({
+                key: channel,
+                etiqueta: inquiryChannelLabels[channel],
+                valor: numberFormatter.format(annualCountsForMonth[channel] ?? 0),
+              })),
+              { key: "total", etiqueta: "Total", valor: numberFormatter.format(totalCount(unitYearRecordsForMonth)) },
+            ]}
+          />
         ) : null}
-      </section>
+
+        <section className="panel table-panel">
+          <div className="panel-heading"><div><span className="eyebrow">Comparativa</span><h2>Consultas por unidad</h2></div><span className="muted">Pulsa un encabezado para ordenar</span></div>
+          <ChannelTable
+            rowHeaderLabel="Unidad"
+            rows={unitTableRows}
+            trailingHeader="Variación"
+            sort={{ activeColumn: sortColumn, direction: sortDirection, onSort: changeSort }}
+          />
+        </section>
+        </>
+      )}
 
       <ConfirmationDialog
         open={Boolean(pendingStatus)}
