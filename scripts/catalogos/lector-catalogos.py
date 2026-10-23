@@ -26,9 +26,12 @@ PUESTA EN MARCHA
 
    Si falta alguna:  pip install openpyxl pymupdf
 
-2. Guardar la clave de envío una sola vez (la misma del agente de Sage):
+2. Decir, una sola vez, la clave de envío (la misma del agente de Sage) y de
+   qué carpeta leer. La carpeta no va escrita en este fichero porque el
+   repositorio es público y la ruta dice qué máquina guarda qué:
 
      setx INTEC_SAGE_TOKEN "la-clave-que-te-pase"
+     setx INTEC_CATALOGOS_RUTA "\\servidor\recurso\08 TARIFAS 2026"
 
    Cierra y vuelve a abrir la consola después de esto.
 
@@ -68,7 +71,10 @@ from datetime import datetime, timezone
 # pantalla de avisos y tapa lo que sí importa.
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
-RUTA_POR_DEFECTO = r"\\192.168.1.253\intec_buzon_general\08 TARIFAS 2026"
+# La carpeta no va escrita aquí: este repositorio es público y la ruta dice
+# qué máquina de la red interna guarda qué. Se pone una vez en el equipo que
+# vaya a leerla, con:  setx INTEC_CATALOGOS_RUTA "\\servidor\recurso\carpeta"
+RUTA_POR_DEFECTO = ""
 HUB_POR_DEFECTO = "https://app.suministrointec.com"
 
 # Vercel corta las peticiones a 4,5 MB. Se envía bastante por debajo: el JSON
@@ -361,6 +367,12 @@ def main():
     if not token and not args.seco:
         print("Falta la clave. Ponla una vez con:  setx INTEC_SAGE_TOKEN \"la-clave\"")
         print("y vuelve a abrir la consola. Para probar sin mandar nada: --seco")
+        return 1
+
+    if not args.ruta:
+        print("No sé de qué carpeta leer. Dilo una vez, en este equipo:")
+        print('  setx INTEC_CATALOGOS_RUTA "\\\\servidor\\recurso\\08 TARIFAS 2026"')
+        print("y vuelve a abrir la consola. O pásala suelta con --ruta.")
         return 1
 
     if not os.path.isdir(args.ruta):
