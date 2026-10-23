@@ -12,3 +12,7 @@ out
 .vercel
 .env*
 supabase/.temp
+
+# Python deja esto al importar un script; no pinta nada en el repo.
+__pycache__/
+*.pyc
