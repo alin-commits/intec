@@ -7,7 +7,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, UsuariosIcon } from "@/components/icons";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { delta, discountPercent, euros, hayComercialMarcado, marcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, soloUno, ticketFormatter, variation } from "@/lib/sales-model";
+import { delta, discountPercent, euros, hayComercialMarcado, hayMesMarcado, marcado, mesMarcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, soloUno, ticketFormatter, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { Cifras, type Cifra } from "./cifras";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
@@ -195,7 +195,12 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   const top = useSageQuery<CustomerRow[]>(ctx.detail.customers ? JSON.stringify(["clientes-top", listArgs, reload]) : null, async () =>
     await rpcAllRows<CustomerRow>("sage_customer_list", listArgs, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]));
 
-  const monthKeys = period.months;
+  /*
+    Los meses que se dibujan: los marcados, si hay alguno. Con el filtro puesto
+    las cifras de arriba hablan de dos meses y el gráfico pintaba el año
+    entero, que es decir dos cosas distintas pegadas la una a la otra.
+  */
+  const monthKeys = hayMesMarcado(filters) ? period.months.filter((key) => mesMarcado(filters, key)) : period.months;
   const selectedMonthIndex = soloUnMes(filters) ? monthKeys.indexOf(soloUnMes(filters)!) : -1;
   const periodName = ctx.periodName;
   const lost = lostCustomers(period);

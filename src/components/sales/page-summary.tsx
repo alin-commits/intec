@@ -6,7 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { ConversionIcon, EuroIcon, UsuariosIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, monthName, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { Cifras, type Cifra } from "./cifras";
 import { lostCustomers, type SalesContext } from "./sales-context";
@@ -32,7 +32,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const discountChange = currentDiscount && previousDiscount ? tenths(currentDiscount.percent - previousDiscount.percent) : null;
   const marginChange = marginDelta ? tenths(currentMargin.percent - previousMargin.percent) : null;
   const points = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1).replace(".", ",")} pts`;
-  const selectedMonthIndex = soloUnMes(filters) ? monthly.months.findIndex((month) => month.key === soloUnMes(filters)) : -1;
+  const mesElegido = soloUnMes(filters);
 
   // El objetivo se compara con la venta de su ámbito (sociedad y comercial), sin
   // el filtro de canal: los objetivos no se ponen por canal. Son por año natural,
@@ -91,12 +91,42 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     en qué orden te las encuentras y cuánto sitio ocupa cada una.
   */
   const ticket = (bucket: { net: number; documents: number }) => (bucket.documents > 0 ? bucket.net / bucket.documents : 0);
-  const porMes = monthly.months;
+
+  /*
+    Los meses que se dibujan.
+
+    El modelo calcula los doce del periodo aunque haya unos marcados, para que
+    se pudiera pulsar otro en el gráfico. Pero quedaba incoherente: la tarjeta
+    decía «Ventas de agosto–septiembre» con su cifra, y a su lado el gráfico y
+    el minigráfico seguían pintando el año entero. Dos cosas distintas pegadas
+    la una a la otra.
+
+    Ahora lo dibujado es lo marcado. Para cambiar de mes está el desplegable de
+    arriba, que es de donde se marcan; pulsar un punto sigue quitando ese mes.
+  */
+  const porMes = hayMesMarcado(filters) ? monthly.months.filter((mes) => mesMarcado(filters, mes.key)) : monthly.months;
+  const vistos = porMes.map((mes) => monthly.months.indexOf(mes));
+  const puntos = vistos.map((indice) => monthly.points[indice]);
+  // El acumulado se rehace sobre lo que se ve: si no, empezaría por donde iba
+  // el año en el primer mes marcado y parecería que agosto ya venía con cinco
+  // millones hechos.
+  let sumaVentas = 0;
+  let sumaAntes = 0;
+  let sumaMargen = 0;
+  const acumulado = porMes.map((mes) => {
+    sumaVentas += mes.bucket.net;
+    sumaAntes += mes.beforeNet;
+    sumaMargen += mes.margin?.amount ?? 0;
+    return { label: mes.label, ventas: Math.round(sumaVentas), anterior: Math.round(sumaAntes), margen: Math.round(sumaMargen) };
+  });
+  // Con menos de tres meses el minigráfico es una raya entre dos puntos: no
+  // dice nada y encima quita sitio a la cifra, así que no se pinta.
+  const hayLinea = porMes.length >= 3;
   const chispa = {
-    ventas: porMes.map((mes) => Math.round(mes.bucket.net)),
-    margen: porMes.map((mes) => Math.round(mes.margin?.amount ?? 0)),
-    margenPorciento: porMes.map((mes) => Math.round(mes.margin?.percent ?? 0)),
-    ticket: porMes.map((mes) => Math.round(ticket(mes.bucket))),
+    ventas: hayLinea ? porMes.map((mes) => Math.round(mes.bucket.net)) : undefined,
+    margen: hayLinea ? porMes.map((mes) => Math.round(mes.margin?.amount ?? 0)) : undefined,
+    margenPorciento: hayLinea ? porMes.map((mes) => Math.round(mes.margin?.percent ?? 0)) : undefined,
+    ticket: hayLinea ? porMes.map((mes) => Math.round(ticket(mes.bucket))) : undefined,
   };
 
   const acompañan: Cifra[] = [
@@ -210,12 +240,15 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
         <article className="panel chart-panel sales-board-wide">
           <div className="panel-heading">
             <div>
-              <h2>Evolución de {period.baseLabel}</h2>
+              <h2>Evolución de {hayMesMarcado(filters) ? periodName : period.baseLabel}</h2>
               <p className="panel-subtitle">
                 {chartMode === "acumulado"
                   ? `Lo que se lleva vendido a cada mes${monthly.marginComplete ? ", con el margen" : ""}`
                   : monthly.marginComplete ? "Ventas y margen por mes" : "Ventas por mes"}
-                {monthly.hasBefore ? `, con ${period.baseCompareShort} detrás en gris` : ""}. Pulsa un mes para filtrar.
+                {/* Lo de detrás es lo que se compara de verdad: con meses
+                    marcados son sus parejas, no el año entero. */}
+                {monthly.hasBefore ? `, con ${(hayMesMarcado(filters) ? period.compareShort : period.baseCompareShort) ?? ""} detrás en gris` : ""}
+                {hayMesMarcado(filters) ? ". Pulsa un mes para quitarlo." : ". Pulsa un mes para filtrar."}
               </p>
             </div>
             <div className="sales-switch" role="group" aria-label="Cómo se mira la evolución">
@@ -227,7 +260,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             </div>
           </div>
           <TrendChart
-            data={chartMode === "acumulado" ? monthly.running : monthly.points}
+            data={chartMode === "acumulado" ? acumulado : puntos}
             series={[
               ...(monthly.hasBefore ? [{ key: "anterior", label: period.baseCompareShort ?? "Comparado", color: "#cbd5e1" }] : []),
               { key: "ventas", label: "Ventas", color: "#4f46e5" },
@@ -236,8 +269,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             ariaLabel={`Evolución mensual de ventas de ${period.baseLabel}`}
             valueFormatter={euros}
             total={chartMode !== "acumulado"}
-            onSelect={(index) => ctx.toggleMonth(monthly.months[index]?.key ?? null)}
-            selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
+            onSelect={(index) => ctx.toggleMonth(porMes[index]?.key ?? null)}
+            selectedIndex={mesElegido ? porMes.findIndex((mes) => mes.key === mesElegido) : null}
           />
         </article>
 

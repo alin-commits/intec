@@ -5,7 +5,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon } from "@/components/icons";
 import { leadStatusLabels } from "@/lib/constants";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { channelLabel, comercialMarcado, euros, marcado, mesMarcado, monthLabel, monthWithYear, soloUnComercial, soloUnMes, UNASSIGNED_KEY } from "@/lib/sales-model";
+import { channelLabel, comercialMarcado, euros, hayMesMarcado, marcado, mesMarcado, monthLabel, monthWithYear, soloUnComercial, soloUnMes, UNASSIGNED_KEY } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
@@ -91,7 +91,12 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
     return true;
   };
 
-  const monthKeys = period.months;
+  /*
+    Los meses que se dibujan: los marcados, si hay alguno. Con el filtro puesto
+    las cifras de arriba hablan de dos meses y el gráfico pintaba el año
+    entero, que es decir dos cosas distintas pegadas la una a la otra.
+  */
+  const monthKeys = hayMesMarcado(filters) ? period.months.filter((key) => mesMarcado(filters, key)) : period.months;
   const selectedMonthIndex = soloUnMes(filters) ? monthKeys.indexOf(soloUnMes(filters)!) : -1;
   const periodName = ctx.periodName;
 
