@@ -1,14 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { KpiCard } from "@/components/kpi-card";
-import { EuroIcon, UsuariosIcon, XCircleIcon } from "@/components/icons";
 import { currencyFormatter, numberFormatter } from "@/lib/format";
 import { downloadCsv, type CsvColumn } from "@/lib/csv-export";
 import { downloadXlsx } from "@/lib/excel-export";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows } from "./sales-queries";
 import { euros, type SalesFilters } from "@/lib/sales-model";
+import { Cifras } from "./cifras";
 import { Column, DataTable, LoadFailed, Panel, shortDate, useSageQuery } from "./sales-ui";
 
 /*
@@ -189,32 +188,34 @@ export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
         </div>
       </section>
 
-      <section className="kpi-grid">
-        <KpiCard label="Con compra" value={numberFormatter.format(conVentas.length)} delta="Sin comparación" helper={`${euros(neto)} en el periodo`} icon={<UsuariosIcon />} tone="emerald" />
-        <KpiCard label="Sin compra" value={numberFormatter.format(sinVentas.length)} delta="Sin comparación"
-          helper={verCarteraEntera ? "de toda la cartera" : `compraban ${euros(perdido)} el año anterior`} icon={<XCircleIcon />} tone="rose" />
-        <KpiCard label="Cartera" value={numberFormatter.format(filas.length)} delta="Sin comparación" helper="clientes asignados, compren o no" icon={<UsuariosIcon />} tone="indigo" />
-        <KpiCard label="Venta por cliente" value={conVentas.length ? currencyFormatter.format(neto / conVentas.length) : "—"} delta="Sin comparación" helper="de media entre los que compran" icon={<EuroIcon />} tone="amber" />
-      </section>
+      <Cifras
+        className="panel panel-padded"
+        cifras={[
+          { key: "compran", etiqueta: "Con compra", valor: numberFormatter.format(conVentas.length), nota: `${euros(neto)} en el periodo`, tono: "bueno" },
+          { key: "sin", etiqueta: "Sin compra", valor: numberFormatter.format(sinVentas.length), nota: verCarteraEntera ? "de toda la cartera" : `compraban ${euros(perdido)} el año anterior`, tono: sinVentas.length > 0 ? "malo" : undefined },
+          { key: "cartera", etiqueta: "Cartera", valor: numberFormatter.format(filas.length), nota: "clientes asignados, compren o no" },
+          { key: "porCliente", etiqueta: "Venta por cliente", valor: conVentas.length ? currencyFormatter.format(neto / conVentas.length) : "—", nota: "de media entre los que compran" },
+        ]}
+      />
 
       {porFamilia.length > 0 ? (
-        <>
-          <section className="section-heading">
-            <div><span className="eyebrow">Familias</span><h2>Qué les vende</h2><p>Lo comprado por estos clientes en cada familia. En Sage el reparto por familia es mensual: un periodo que corte un mes cuenta ese mes entero, así que estas cifras orientan, no cuadran al céntimo con el neto de arriba.</p></div>
-          </section>
-          <section className="kpi-grid">
-            {porFamilia.slice(0, 8).map((familia) => (
-              <KpiCard key={familia.code} label={familia.name} value={euros(familia.net)} delta="Sin comparación"
-                helper={`${numberFormatter.format(familia.clientes)} ${familia.clientes === 1 ? "cliente" : "clientes"}`} icon={<EuroIcon />} tone="sky" />
-            ))}
-          </section>
-        </>
+        <Cifras
+          className="panel panel-padded"
+          titulo="Qué les vende"
+          subtitulo="En Sage el reparto por familia es mensual: un periodo que corte un mes cuenta ese mes entero, así que estas cifras orientan y no cuadran al céntimo con el neto de arriba"
+          cifras={porFamilia.slice(0, 8).map((familia) => ({
+            key: familia.code,
+            etiqueta: familia.name,
+            valor: euros(familia.net),
+            nota: `${numberFormatter.format(familia.clientes)} ${familia.clientes === 1 ? "cliente" : "clientes"}`,
+          }))}
+        />
       ) : null}
 
       <Panel title={`Compran (${numberFormatter.format(conVentas.length)})`} subtitle="ordenados por lo que llevan comprado">
         <DataTable rows={conVentas} columns={columnasComunes(true)} rowKey={(fila) => `${fila.company_code}-${fila.customer_code}`}
           onRowClick={(fila) => ctx.openCustomer({ company_code: fila.company_code, customer_code: fila.customer_code, name: nombreDe(fila) })}
-          initialSort={{ key: "neto", desc: true }} limit={100}
+          initialSort={{ key: "neto", desc: true }} limit={12}
           empty={resultado.loading ? "Cargando…" : "Ningún cliente con compras en este periodo."} />
       </Panel>
 
@@ -230,7 +231,7 @@ export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
       >
         <DataTable rows={sinVentas} columns={columnasComunes(false)} rowKey={(fila) => `${fila.company_code}-${fila.customer_code}`}
           onRowClick={(fila) => ctx.openCustomer({ company_code: fila.company_code, customer_code: fila.customer_code, name: nombreDe(fila) })}
-          initialSort={{ key: "antes", desc: true }} limit={100}
+          initialSort={{ key: "antes", desc: true }} limit={12}
           empty={resultado.loading ? "Cargando…" : "Todos los clientes de la cartera han comprado."} />
       </Panel>
     </>
