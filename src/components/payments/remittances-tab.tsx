@@ -6,6 +6,7 @@ import { settingKey } from "@/lib/payments";
 import { createClient } from "@/lib/supabase/client";
 import { DataTable, LoadFailed, Panel, useSageQuery, type Column } from "@/components/sales/sales-ui";
 import type { PaymentsContext } from "./payments-view";
+import { Cifras } from "@/components/ui/cifras";
 import { RemittanceModal, type Remittance } from "./remittance-modal";
 
 const euros = (value: number) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(value);
@@ -39,6 +40,11 @@ export function RemittancesTab({ ctx, onConfigure }: { ctx: PaymentsContext; onC
     .filter((row) => company === null || row.company_code === company)
     .filter((row) => !onlyPending || !lastFile.has(`${row.company_code}|${row.number}`));
   const unconfigured = new Set((data.data?.remittances ?? []).filter((row) => !settingFor(row)).map((row) => settingKey(row.company_code, row.bank_code)));
+
+  const deLaSociedad = (data.data?.remittances ?? []).filter((row) => company === null || row.company_code === company);
+  const sinFichero = deLaSociedad.filter((row) => !lastFile.has(`${row.company_code}|${row.number}`));
+  const efectos = deLaSociedad.reduce((suma, row) => suma + Number(row.effects || 0), 0);
+  const importe = deLaSociedad.reduce((suma, row) => suma + Number(row.total || 0), 0);
 
   const columns: Column<Remittance>[] = [
     { key: "remesa", header: "Remesa", text: true, render: (row) => (
@@ -77,6 +83,21 @@ export function RemittancesTab({ ctx, onConfigure }: { ctx: PaymentsContext; onC
             </span>
           </div>
         </section>
+      ) : null}
+
+      {deLaSociedad.length > 0 ? (
+        <Cifras
+          cifras={[
+            { key: "remesas", etiqueta: "Remesas", valor: numberFormatter.format(deLaSociedad.length), nota: "de los últimos 180 días" },
+            { key: "efectos", etiqueta: "Efectos", valor: numberFormatter.format(efectos), nota: "pagos dentro de las remesas" },
+            { key: "importe", etiqueta: "Importe", valor: euros(importe), nota: "suma de todas", fuerte: true },
+            {
+              key: "pendientes", etiqueta: "Sin fichero", valor: numberFormatter.format(sinFichero.length),
+              nota: sinFichero.length > 0 ? `${euros(sinFichero.reduce((suma, row) => suma + Number(row.total || 0), 0))} por generar` : "todas generadas",
+              tono: sinFichero.length > 0 ? "malo" : "bueno",
+            },
+          ]}
+        />
       ) : null}
 
       <Panel
