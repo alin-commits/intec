@@ -36,6 +36,14 @@ export const roleLabels: Record<AppRole, string> = {
 };
 
 export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
+/**
+ * Catálogos: los mismos que ya ven los artículos y los precios en Sage.
+ *
+ * Las tarifas de proveedor son precios de compra, pero dirección confirmó que
+ * los comerciales ya los ven en Sage, así que el chat no abre ninguna puerta
+ * que no estuviera abierta.
+ */
+export const CATALOGOS_ROLES: AppRole[] = ["admin", "direction", "commercial", "purchasing"];
 export const LEADS_ROLES: AppRole[] = ["admin", "commercial", "marketing", "viewer", "direction"];
 /** Compras: de momento quien ya ve lo de Sage. Si acaba siendo su propio rol, se añade aquí. */
 export const COMPRAS_ROLES: AppRole[] = ["admin", "direction", "purchasing"];
