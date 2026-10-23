@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
 import { USER_MANAGER_ROLES, hasAnyRole, roleLabels } from "@/lib/constants";
 import { demoProfiles } from "@/lib/demo-data";
 import { reportSafeError } from "@/lib/errors";
@@ -53,6 +53,16 @@ function RoleChips({ value, onChange, disabled }: { value: AppRole[]; onChange: 
   );
 }
 
+/*
+  Para leer la fila hacen falta las que tiene puestas, no las catorce. Las
+  pastillas apagadas eran la mitad de la altura de la tabla y obligaban a
+  distinguir encendido de apagado quince veces seguidas.
+*/
+function ChipsPuestos({ etiquetas, vacio }: { etiquetas: string[]; vacio: string }) {
+  if (etiquetas.length === 0) return <span className="muted">{vacio}</span>;
+  return <div className="role-chip-group">{etiquetas.map((etiqueta) => <span key={etiqueta} className="role-chip active es-lectura">{etiqueta}</span>)}</div>;
+}
+
 type UnitOption = { id: string; name: string };
 
 function toggleUnit(current: string[], unitId: string): string[] {
@@ -88,6 +98,7 @@ export function UsersManager() {
   const [message, setMessage] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
+  const [editando, setEditando] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [businessUnits, setBusinessUnits] = useState<UnitOption[]>([]);
@@ -314,25 +325,49 @@ export function UsersManager() {
       <section className="panel table-panel">
         <div className="panel-heading"><div><span className="eyebrow">Equipo</span><h2>Usuarios registrados</h2></div></div>
         <div className="table-scroll">
-          <table>
+          <table className="users-table">
             <thead><tr><th>Usuario</th><th>Email</th><th>Roles</th><th>Marcas asignadas</th><th>Estado</th><th></th></tr></thead>
             <tbody>{profiles.map((profile) => {
               const esPropietario = profile.roles.includes("owner");
+              const abierto = editando === profile.id;
               return (
-              <tr key={profile.id}>
-                <td><strong>{profile.fullName}</strong>{esPropietario ? <small className="muted">Propietario · no se puede modificar</small> : null}{profile.isPreview ? <small className="muted">Cuenta de prueba · solo para ver la app como este rol</small> : null}</td>
+              <Fragment key={profile.id}>
+              <tr>
+                <td><strong>{profile.fullName}</strong>{esPropietario ? <small className="muted">Propietario · no se puede modificar</small> : null}{profile.isPreview ? <small className="muted">Cuenta de prueba</small> : null}</td>
                 <td>{profile.email || "—"}</td>
-                <td><RoleChips value={profile.roles} disabled={esPropietario} onChange={(next) => void updateProfile(profile.id, { roles: next })} /></td>
-                <td>
-                  <UnitChips
-                    options={businessUnits}
-                    value={unitAssignments[profile.id] ?? []}
-                    onChange={(next) => void updateUnitAssignment(profile.id, next)}
-                  />
-                </td>
+                <td><ChipsPuestos etiquetas={profile.roles.map((role) => roleLabels[role] ?? role)} vacio="Sin rol" /></td>
+                <td><ChipsPuestos etiquetas={(unitAssignments[profile.id] ?? []).map((id) => businessUnits.find((unit) => unit.id === id)?.name ?? id)} vacio={businessUnits.length === 0 ? "Sin marcas" : "Ninguna"} /></td>
                 <td><button type="button" className={profile.isActive ? "status-toggle active" : "status-toggle"} disabled={esPropietario} onClick={() => void updateProfile(profile.id, { isActive: !profile.isActive })}>{profile.isActive ? "Activo" : "Desactivado"}</button></td>
-                <td>{profile.id !== currentUserId && !esPropietario ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}</td>
+                <td className="user-row-actions">
+                  {esPropietario ? null : (
+                    <button type="button" className="button button-compact button-secondary" onClick={() => setEditando(abierto ? null : profile.id)}>
+                      {abierto ? "Cerrar" : "Cambiar"}
+                    </button>
+                  )}
+                  {profile.id !== currentUserId && !esPropietario ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingDelete(profile)}>Eliminar</button> : null}
+                </td>
               </tr>
+              {abierto ? (
+                <tr className="user-edit-row">
+                  <td colSpan={6}>
+                    <div className="user-edit-fields">
+                      <div>
+                        <span className="sales-subheading">Roles</span>
+                        <RoleChips value={profile.roles} onChange={(next) => void updateProfile(profile.id, { roles: next })} />
+                      </div>
+                      <div>
+                        <span className="sales-subheading">Marcas asignadas</span>
+                        <UnitChips
+                          options={businessUnits}
+                          value={unitAssignments[profile.id] ?? []}
+                          onChange={(next) => void updateUnitAssignment(profile.id, next)}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
               );
             })}</tbody>
           </table>
