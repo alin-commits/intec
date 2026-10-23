@@ -978,8 +978,8 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
           </button>
         </div>
         <div className="table-scroll">
-          <table>
-            <thead><tr><th>Marca</th><th>Campaña</th><th>Tipo</th><th>Fecha</th><th>Enviados</th><th>Entregados</th><th>Aperturas</th><th>Clics</th><th>Leads</th><th>Ventas</th><th>Ingresos</th><th>Bajas</th><th>Open rate</th><th>CTR</th><th>CTOR</th>{canEdit ? <th /> : null}</tr></thead>
+          <table className="mailing-table">
+            <thead><tr><th>Marca</th><th>Campaña</th><th>Fecha</th><th>Enviados</th><th>Open rate</th><th>CTR</th><th>Leads</th><th>Ingresos</th>{canEdit ? <th /> : null}</tr></thead>
             <tbody>
               {visibleCampaigns.map((campaign) => {
                 const unit = units.find((item) => item.id === campaign.businessUnitId);
@@ -989,20 +989,13 @@ function MailingTab({ units, campaigns, canEdit, configured, busy, setBusy, setM
                 return (
                   <tr key={campaign.id}>
                     <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
-                    <td><strong>{campaign.campaignName}</strong></td>
-                    <td><span className="badge">{mailingTypeLabels[campaign.campaignType]}</span></td>
+                    <td><strong>{campaign.campaignName}</strong><small className="muted">{mailingTypeLabels[campaign.campaignType]}</small></td>
                     <td>{formatDate(campaign.sentDate)}</td>
-                    <td>{numberFormatter.format(campaign.sentCount)}</td>
-                    <td>{numberFormatter.format(campaign.deliveredCount)}</td>
-                    <td>{numberFormatter.format(campaign.opens)}</td>
-                    <td>{numberFormatter.format(campaign.clicks)}</td>
-                    <td>{numberFormatter.format(campaign.leads)}</td>
-                    <td>{numberFormatter.format(campaign.salesCount)}</td>
-                    <td>{currencyFormatter.format(campaign.revenue)}</td>
-                    <td>{numberFormatter.format(campaign.unsubscribes)}</td>
-                    <td>{formatPercent(openRate)}</td>
-                    <td>{formatPercent(ctr)}</td>
-                    <td>{formatPercent(ctor)}</td>
+                    <td>{numberFormatter.format(campaign.sentCount)}<small className="muted">{numberFormatter.format(campaign.deliveredCount)} entregados</small></td>
+                    <td>{formatPercent(openRate)}<small className="muted">{numberFormatter.format(campaign.opens)} aperturas</small></td>
+                    <td>{formatPercent(ctr)}<small className="muted">{numberFormatter.format(campaign.clicks)} clics · CTOR {formatPercent(ctor)}</small></td>
+                    <td>{numberFormatter.format(campaign.leads)}<small className="muted">{numberFormatter.format(campaign.salesCount)} ventas</small></td>
+                    <td>{currencyFormatter.format(campaign.revenue)}<small className="muted">{numberFormatter.format(campaign.unsubscribes)} bajas</small></td>
                     {canEdit ? (
                       <td>
                         <div className="modal-actions campaign-card-actions">
