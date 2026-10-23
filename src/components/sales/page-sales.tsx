@@ -148,10 +148,15 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
           />
         </Panel>
 
+        {/*
+          Una encima de otra y no en dos columnas: la de comerciales lleva el
+          nombre entero y ocho columnas más, y en media pantalla se cortaba por
+          la derecha. A lo ancho caben todas, que es de lo que se trata.
+        */}
         <Panel
           title="Comerciales"
           subtitle={`Venta, margen, descuento (Dto., rebaja sobre tarifa) y ticket de cada uno${hayMesMarcado(filters) ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
-          className="panel table-panel sales-board-half"
+          className="panel table-panel sales-board-full"
         >
           <DataTable
             rows={model.byRep}
@@ -167,7 +172,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
         <Panel
           title="Canales"
           subtitle={`Venta y margen por canal${hayMesMarcado(filters) ? ` en ${ctx.periodName}` : ""}. Pulsa uno para filtrar`}
-          className="panel table-panel sales-board-half"
+          className="panel table-panel sales-board-full"
         >
           <DataTable
             rows={channels}

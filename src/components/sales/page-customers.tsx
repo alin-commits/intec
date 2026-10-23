@@ -399,7 +399,9 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
             title={`Mejores clientes de ${periodName}`}
             subtitle="Por venta en el periodo, con los filtros puestos. Dto.: rebaja sobre tarifa"
             trailing={<button type="button" className="sales-chip sales-chip-pick" onClick={() => open("activos", `Clientes con compra en ${periodName}`, "Todos los que han comprado en el periodo, de más a menos venta.")}>Ver todos con teléfono</button>}
-            className="panel table-panel sales-board-half"
+            /* A lo ancho: lleva nombre, dirección, contacto y seis columnas
+               más, y en media pantalla se cortaba por los dos lados. */
+            className="panel table-panel sales-board-full"
           >
             {top.failed ? <LoadFailed what="los mejores clientes" /> : (
               <DataTable
@@ -418,7 +420,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         <Panel
           title="Mes a mes"
           subtitle={showNew ? "Clientes con compra y, a la derecha, cuántos son nuevos. Pulsa uno para filtrar" : "Clientes con compra. Pulsa uno para filtrar"}
-          className="panel panel-padded sales-board-half"
+          className="panel panel-padded sales-board-full"
         >
           <RankList
             items={monthKeys.map((key, index) => ({

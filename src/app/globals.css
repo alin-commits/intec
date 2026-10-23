@@ -1743,7 +1743,13 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .sales-diff-summary strong.sales-up { color: var(--success); }
 .sales-diff-summary strong.sales-down { color: var(--danger); }
 .sales-diff { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.sales-diff-row { width: 100%; display: grid; grid-template-columns: minmax(130px, 1.3fr) minmax(70px, 1fr) 96px; align-items: center; gap: 12px; padding: 7px 8px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; font-size: 13.5px; transition: background-color .12s ease; }
+/*
+  El nombre no crece sin fin: con la fila a lo ancho de la pantalla, una
+  columna en fracciones dejaba medio metro en blanco entre el nombre y su
+  barra, y costaba saber cuál era de quién. Topado, la barra empieza donde
+  acaba el nombre y se lleva todo el sitio que sobra, que es donde se lee.
+*/
+.sales-diff-row { width: 100%; display: grid; grid-template-columns: minmax(130px, 320px) minmax(70px, 1fr) 110px; align-items: center; gap: 12px; padding: 7px 8px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; font-size: 13.5px; transition: background-color .12s ease; }
 .sales-diff-who { display: grid; gap: 1px; min-width: 0; }
 .sales-diff-row:hover { background: var(--surface-muted); }
 .sales-diff-row.is-active { background: var(--primary-soft); }

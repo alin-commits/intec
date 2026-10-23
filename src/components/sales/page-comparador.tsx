@@ -155,7 +155,7 @@ function Bloque({
       <Panel
         title={titulo}
         subtitle={`${filas.length} ${filas.length === 1 ? "marcado" : "marcados"}, ${euros(total)} entre todos`}
-        className={conComparacion ? "panel chart-panel sales-board-half" : "panel chart-panel sales-board-full"}
+        className="panel chart-panel sales-board-half"
       >
         {filas.length > 1 ? (
           <p className="sales-diff-summary">
@@ -172,7 +172,7 @@ function Bloque({
       </Panel>
 
       {evolucion && meses.length >= MESES_PARA_EVOLUCION ? (
-        <Panel title={`${titulo}, mes a mes`} subtitle={lineas.length === 1 ? "En orden de mes, no de quién vende más" : "Cada uno por su lado, en orden"} className="panel chart-panel sales-board-full">
+        <Panel title={`${titulo}, mes a mes`} subtitle={lineas.length === 1 ? "En orden de mes, no de quién vende más" : "Cada uno por su lado, en orden"} className="panel chart-panel sales-board-half">
           <TrendChart
             data={evolucion}
             series={lineas}
@@ -185,7 +185,7 @@ function Bloque({
 
       {/* La tabla, a lo ancho: con ocho columnas en media pantalla no se lee. */}
       {conComparacion ? (
-        <Panel title="Quién sube y quién baja" subtitle="Lo que gana o pierde cada uno contra el periodo anterior" className="panel sales-board-half">
+        <Panel title="Quién sube y quién baja" subtitle="Lo que gana o pierde cada uno contra el periodo anterior" className="panel panel-padded sales-board-full">
           <SubeYBaja filas={filas} />
         </Panel>
       ) : null}
