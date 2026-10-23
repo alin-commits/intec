@@ -17,6 +17,7 @@ import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { OPEN_TICKET_STATUSES } from "@/lib/tickets/map";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { KpiCard } from "@/components/kpi-card";
+import { Cifras } from "@/components/ui/cifras";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { Toast } from "@/components/ui/toast";
 import { TrendChart } from "@/components/charts/trend-chart";
@@ -838,43 +839,33 @@ export function DashboardClient() {
         </article>
       </section>
 
-      <section className="dashboard-grid">
-        <article className="panel chart-panel sales-source-panel">
-          <div className="panel-heading">
-            <div><h2>Ventas por origen</h2><p className="panel-subtitle">{periodLabel}</p></div>
-          </div>
-          <div className="sales-source-body">
-            <ul className="stat-list sales-source-list">
-              <li className="sales-source-total">
-                <span>Total de ventas<small>cada venta una sola vez, aunque salga en varias líneas</small></span>
-                <strong>{currencyFormatter.format(salesTotal)}</strong>
-              </li>
-              {salesBySource.map((source) => (
-                <li key={source.key}>
-                  <span>{source.label}<small>{source.helper}</small></span>
-                  <strong>{currencyFormatter.format(source.value)}</strong>
-                </li>
-              ))}
-            </ul>
-            <aside className="sales-source-note">
-              <strong>Cómo se cuenta el total</strong>
-              <p>
-                Una misma venta sale en más de una línea: un lead ganado cuenta en Leads, en su campaña y en los
-                pedidos de Consultas. El <b>total la cuenta una sola vez</b>: leads ganados, pedidos de Consultas
-                que no salen de un lead y venta directa de campañas.
-              </p>
-              <p>
-                Publicidad y Mailing son el valor que se atribuye a esas mismas ventas para medir cada canal:
-                se ven aquí, pero no entran en el total.
-              </p>
-              <p>
-                Son importes que escribe el equipo a mano para medir qué canal funciona, <b>no facturación</b>.
-                La cifra de lo que se ha vendido de verdad está en Sage.
-              </p>
-            </aside>
-          </div>
-        </article>
-      </section>
+      <Cifras
+        titulo="Ventas por origen"
+        subtitulo={`${periodLabel} · importes que escribe el equipo a mano para medir qué canal funciona, no facturación`}
+        cifras={[
+          {
+            key: "total", etiqueta: "Total de ventas", valor: currencyFormatter.format(salesTotal),
+            nota: "cada venta una sola vez, aunque salga en varias líneas", fuerte: true,
+          },
+          ...salesBySource.map((source) => ({
+            key: source.key, etiqueta: source.label, valor: currencyFormatter.format(source.value), nota: source.helper,
+          })),
+        ]}
+      >
+        <details className="nota-plegable">
+          <summary>Cómo se cuenta el total</summary>
+          <p>
+            Una misma venta sale en más de una línea: un lead ganado cuenta en Leads, en su campaña y en los
+            pedidos de Consultas. El <b>total la cuenta una sola vez</b>: leads ganados, pedidos de Consultas
+            que no salen de un lead y venta directa de campañas.
+          </p>
+          <p>
+            Publicidad y Mailing son el valor que se atribuye a esas mismas ventas para medir cada canal:
+            se ven aquí, pero no entran en el total.
+          </p>
+          <p>La cifra de lo que se ha vendido de verdad está en Sage.</p>
+        </details>
+      </Cifras>
 
       <section className="panel table-panel">
         <div className="panel-heading">

@@ -26,16 +26,20 @@ export type Cifra = {
   nota?: ReactNode;
   /** Para pintar la cifra en verde o en rojo cuando dice algo por sí sola. */
   tono?: "bueno" | "malo";
+  /** La que manda de la tira: va en el color de marca y un punto más grande. */
+  fuerte?: boolean;
   onClick?: () => void;
   /** Lo que pasa al pulsar ("Ver lista"), para que se note que se puede. */
   accion?: string;
 };
 
-export function Cifras({ titulo, subtitulo, cifras, className = "panel panel-padded" }: {
+export function Cifras({ titulo, subtitulo, cifras, className = "panel panel-padded", children }: {
   titulo?: string;
   subtitulo?: string;
   cifras: Cifra[];
   className?: string;
+  /** Lo que vaya debajo de la tira: una nota, una advertencia, un desplegable. */
+  children?: ReactNode;
 }) {
   if (cifras.length === 0) return null;
   return (
@@ -58,11 +62,13 @@ export function Cifras({ titulo, subtitulo, cifras, className = "panel panel-pad
               {cifra.onClick && cifra.accion ? <span className="cifra-accion" aria-hidden="true">{cifra.accion} →</span> : null}
             </>
           );
+          const clase = cifra.fuerte ? "cifra es-fuerte" : "cifra";
           return cifra.onClick
-            ? <button key={cifra.key} type="button" className="cifra es-pulsable" onClick={cifra.onClick}>{dentro}</button>
-            : <div key={cifra.key} className="cifra">{dentro}</div>;
+            ? <button key={cifra.key} type="button" className={`${clase} es-pulsable`} onClick={cifra.onClick}>{dentro}</button>
+            : <div key={cifra.key} className={clase}>{dentro}</div>;
         })}
       </div>
+      {children}
     </section>
   );
 }

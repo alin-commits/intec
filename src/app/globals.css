@@ -1949,6 +1949,16 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .cifra-valor.es-malo { color: var(--danger); }
 .cifra-nota { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
 .cifra-accion { color: var(--primary); font-size: 11.5px; font-weight: 700; }
+.cifra.es-fuerte .cifra-etiqueta { color: var(--primary); }
+.cifra.es-fuerte .cifra-valor { color: var(--primary); font-size: 25px; }
+/* Una explicación larga que casi nadie necesita leer dos veces: ahí está, plegada. */
+.nota-plegable { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.nota-plegable > summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 750; list-style: none; }
+.nota-plegable > summary::-webkit-details-marker { display: none; }
+.nota-plegable > summary::before { content: "▸ "; }
+.nota-plegable[open] > summary::before { content: "▾ "; }
+.nota-plegable > summary:hover { color: var(--text); }
+.nota-plegable p { margin: 10px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; max-width: 76ch; }
 .cifra.es-pulsable { cursor: pointer; border-radius: 10px; transition: background-color .12s ease; }
 .cifra.es-pulsable:hover { background: var(--surface-muted); }
 .cifra.es-pulsable:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
