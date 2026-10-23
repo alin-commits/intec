@@ -2,13 +2,14 @@
 
 import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
-import { CalendarIcon, ClockIcon, ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon, XCircleIcon } from "@/components/icons";
+import { ConsultasIcon, ConversionIcon, DocumentIcon, LeadsIcon, WalletIcon } from "@/components/icons";
 import { leadStatusLabels } from "@/lib/constants";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { channelLabel, comercialMarcado, euros, marcado, mesMarcado, monthLabel, monthWithYear, soloUnComercial, soloUnMes, UNASSIGNED_KEY } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
+import { Cifras, type Cifra } from "./cifras";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerTotals } from "./sales-queries";
 import { days, LoadFailed, Panel, PendingDetail, RankList, share, useSageQuery } from "./sales-ui";
@@ -219,56 +220,58 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
   const list = (type: "ofertas" | "pedidos", kind: string, title: string, description: string) =>
     ctx.openList({ type, kind, title, description } as Parameters<SalesContext["openList"]>[0]);
 
+  /*
+    Mismo orden que en el resto del panel: el gráfico delante, las cuatro
+    cifras que lo resumen al lado y lo que acompaña en tiras. Aquí eran once
+    tarjetas iguales —seis de ofertas y cinco de pedidos— antes de ver nada
+    dibujado, y había que leerlas todas para encontrar la que se buscaba.
+  */
+  const chispa = {
+    ofertas: points.map((punto) => Math.round(Number(punto.ofertas) || 0)),
+    pedidos: points.map((punto) => Math.round(Number(punto.pedidos) || 0)),
+  };
+
+  const deOfertas: Cifra[] = ctx.detail.offers ? [
+    {
+      key: "vivas", etiqueta: "Ofertas vivas", valor: euros(total(offerRows, "open_amount")),
+      nota: `${numberFormatter.format(total(offerRows, "open_offers"))} por cerrar`,
+      onClick: () => list("ofertas", "vivas", `Ofertas vivas de ${periodName}`, "Sin pedido ni rechazo y todavía en plazo. Son las que hay que perseguir."),
+      accion: "Ver a quién llamar",
+    },
+    {
+      key: "rechazadas", etiqueta: "Rechazadas", valor: numberFormatter.format(total(offerRows, "rejected")),
+      nota: `${euros(total(offerRows, "rejected_amount"))} perdidos`, tono: "malo",
+      onClick: () => list("ofertas", "rechazadas", `Ofertas rechazadas en ${periodName}`, "Con motivo de rechazo o pérdida anotado en Sage."),
+      accion: "Ver motivos",
+    },
+    {
+      key: "caducadas", etiqueta: "Caducadas sin respuesta", valor: numberFormatter.format(total(offerRows, "expired")),
+      nota: `${euros(total(offerRows, "expired_amount"))} sin pedido ni rechazo`,
+      onClick: () => list("ofertas", "caducadas", `Ofertas caducadas de ${periodName}`, "Pasó su validez sin pedido y sin motivo de rechazo: nadie sabe qué pasó."),
+      accion: "Ver lista",
+    },
+    { key: "plazoOferta", etiqueta: "De oferta a pedido", valor: timed ? days(total(offerRows, "days_to_order") / timed) : "—", nota: "de media, en las convertidas" },
+  ] : [];
+
+  const dePedidos: Cifra[] = ctx.detail.orders ? [
+    {
+      key: "tarde", etiqueta: "Servidos tarde", valor: share(late, withNeed),
+      nota: `${numberFormatter.format(late)} de ${numberFormatter.format(withNeed)} con fecha pedida`,
+      tono: withNeed && late / withNeed > 0.15 ? "malo" : "bueno",
+      onClick: () => list("pedidos", "tarde", `Pedidos servidos tarde en ${periodName}`, "Servidos después de la fecha que pidió el cliente, o ya pasada y aún pendientes."),
+      accion: "Ver cuáles",
+    },
+    { key: "plazoPedido", etiqueta: "Plazo de servicio", valor: served ? days(total(orderRows, "days_to_serve") / served) : "—", nota: "del pedido al primer albarán" },
+  ] : [];
+  if (!ctx.detail.orders && backlogSnapshot) {
+    dePedidos.push({
+      key: "cartera", etiqueta: "Cartera por servir", valor: euros(backlogSnapshot.amount),
+      nota: `${numberFormatter.format(backlogSnapshot.count)} pedidos de los últimos 12 meses`,
+    });
+  }
+
   return (
     <div className="page-stack">
-      <section className="sales-section">
-        <div className="sales-section-heading">
-          <h2>Ofertas y pedidos de {periodName}</h2>
-          <p>Pulsa una cifra para ver los documentos de Sage que hay detrás.</p>
-        </div>
-        <div className="kpi-grid kpi-grid-sales">
-          {ctx.detail.offers ? (
-            <>
-              <KpiCard label="Ofertas" value={euros(offerNet)} helper={`${numberFormatter.format(offerCount)} ofertas`} delta="Sin comparación" icon={<DocumentIcon />} tone="indigo"
-                onClick={() => list("ofertas", "todas", `Ofertas de ${periodName}`, "Todas las ofertas del periodo, de mayor a menor importe.")} actionLabel="Ver ofertas" />
-              <KpiCard label="Conversión" value={share(converted, offerCount)} helper={`${numberFormatter.format(converted)} pasan a pedido · ${share(convertedNet, offerNet)} del importe`} delta="Sin comparación" icon={<ConversionIcon />} tone="emerald"
-                onClick={() => list("ofertas", "convertidas", `Ofertas convertidas en ${periodName}`, "Ofertas que Sage enlaza con algún pedido.")} actionLabel="Ver convertidas" />
-              <KpiCard label="Ofertas vivas" value={euros(total(offerRows, "open_amount"))} helper={`${numberFormatter.format(total(offerRows, "open_offers"))} por cerrar`} delta="Sin comparación" icon={<CalendarIcon />} tone="sky"
-                onClick={() => list("ofertas", "vivas", `Ofertas vivas de ${periodName}`, "Sin pedido ni rechazo y todavía en plazo. Son las que hay que perseguir.")} actionLabel="Ver a quién llamar" />
-              <KpiCard label="Rechazadas" value={numberFormatter.format(total(offerRows, "rejected"))} helper={`${euros(total(offerRows, "rejected_amount"))} perdidos`} delta="Sin comparación" icon={<XCircleIcon />} tone="rose"
-                onClick={() => list("ofertas", "rechazadas", `Ofertas rechazadas en ${periodName}`, "Con motivo de rechazo o pérdida anotado en Sage.")} actionLabel="Ver motivos" />
-              <KpiCard label="Caducadas sin respuesta" value={numberFormatter.format(total(offerRows, "expired"))} helper={`${euros(total(offerRows, "expired_amount"))} sin pedido ni rechazo`} delta="Sin comparación" icon={<ClockIcon />} tone="amber"
-                onClick={() => list("ofertas", "caducadas", `Ofertas caducadas de ${periodName}`, "Pasó su validez sin pedido y sin motivo de rechazo: nadie sabe qué pasó.")} actionLabel="Ver lista" />
-              <KpiCard label="De oferta a pedido" value={timed ? days(total(offerRows, "days_to_order") / timed) : "—"} helper="de media, en las convertidas" delta="Sin comparación" icon={<ClockIcon />} tone="sky" />
-            </>
-          ) : (
-            <KpiCard label="Ofertas" value={euros(oldTotals.oferta.net)} helper={`${numberFormatter.format(oldTotals.oferta.count)} ofertas${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<DocumentIcon />} tone="indigo" />
-          )}
-          {ctx.detail.orders ? (
-            <>
-              <KpiCard label="Pedidos" value={euros(orderNet)} helper={`${numberFormatter.format(orderCount)} pedidos · ${share(fromOffer, orderCount)} desde oferta`} delta="Sin comparación" icon={<ConsultasIcon />} tone="indigo"
-                onClick={() => list("pedidos", "todos", `Pedidos de ${periodName}`, "Todos los pedidos del periodo, de mayor a menor importe.")} actionLabel="Ver pedidos" />
-              <KpiCard label="Pendiente de servir" value={euros(pendingNet)} helper={`${numberFormatter.format(pendingCount)} pedidos del periodo`} delta="Sin comparación" icon={<WalletIcon />} tone="amber"
-                onClick={() => list("pedidos", "pendientes", `Pedidos de ${periodName} pendientes de servir`, "Lo que falta por servir de cada pedido.")} actionLabel="Ver pendientes" />
-              <KpiCard label="Servidos tarde" value={share(late, withNeed)} helper={`${numberFormatter.format(late)} de ${numberFormatter.format(withNeed)} con fecha pedida`} delta="Sin comparación" icon={<ClockIcon />} tone={withNeed && late / withNeed > 0.15 ? "rose" : "emerald"}
-                onClick={() => list("pedidos", "tarde", `Pedidos servidos tarde en ${periodName}`, "Servidos después de la fecha que pidió el cliente, o ya pasada y aún pendientes.")} actionLabel="Ver cuáles" />
-              <KpiCard label="Plazo de servicio" value={served ? days(total(orderRows, "days_to_serve") / served) : "—"} helper="del pedido al primer albarán" delta="Sin comparación" icon={<CalendarIcon />} tone="sky" />
-            </>
-          ) : (
-            <KpiCard label="Pedidos" value={euros(oldTotals.pedido.net)} helper={`${numberFormatter.format(oldTotals.pedido.count)} pedidos${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<ConsultasIcon />} tone="sky" />
-          )}
-          {!ctx.detail.orders && backlogSnapshot ? (
-            <KpiCard label="Cartera por servir" value={euros(backlogSnapshot.amount)} helper={`${numberFormatter.format(backlogSnapshot.count)} pedidos de los últimos 12 meses`} delta="Sin comparación" icon={<WalletIcon />} tone="amber" />
-          ) : null}
-        </div>
-        {!ctx.detail.offers || !ctx.detail.orders ? (
-          <p className="sales-section-note">
-            Conversión, ofertas vivas, motivos de rechazo, plazos de servicio y las listas de documentos se activan solos cuando el
-            servidor de Sage mande las ofertas y los pedidos uno a uno. Mientras, se ven los totales.
-          </p>
-        ) : null}
-      </section>
-
       {offers.failed || orders.failed || oldOrders.failed ? <LoadFailed what="parte de las ofertas y pedidos" /> : null}
 
       <section className="sales-board">
@@ -298,7 +301,48 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
           ) : null}
         </Panel>
 
-        <Panel title="Conversión por comercial" subtitle="Importe ofertado y qué parte pasa a pedido. Pulsa uno para filtrar" className="panel panel-padded sales-board-narrow">
+        <div className="kpi-grid-duo sales-board-narrow">
+          {ctx.detail.offers ? (
+            <>
+              <KpiCard label="Ofertas" value={euros(offerNet)} helper={`${numberFormatter.format(offerCount)} ofertas`} delta="Sin comparación" icon={<DocumentIcon />} tone="indigo" sparkline={chispa.ofertas}
+                onClick={() => list("ofertas", "todas", `Ofertas de ${periodName}`, "Todas las ofertas del periodo, de mayor a menor importe.")} actionLabel="Ver ofertas" />
+              <KpiCard label="Conversión" value={share(converted, offerCount)} helper={`${numberFormatter.format(converted)} pasan a pedido · ${share(convertedNet, offerNet)} del importe`} delta="Sin comparación" icon={<ConversionIcon />} tone="emerald"
+                onClick={() => list("ofertas", "convertidas", `Ofertas convertidas en ${periodName}`, "Ofertas que Sage enlaza con algún pedido.")} actionLabel="Ver convertidas" />
+            </>
+          ) : (
+            <KpiCard label="Ofertas" value={euros(oldTotals.oferta.net)} helper={`${numberFormatter.format(oldTotals.oferta.count)} ofertas${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<DocumentIcon />} tone="indigo" />
+          )}
+          {ctx.detail.orders ? (
+            <>
+              <KpiCard label="Pedidos" value={euros(orderNet)} helper={`${numberFormatter.format(orderCount)} pedidos · ${share(fromOffer, orderCount)} desde oferta`} delta="Sin comparación" icon={<ConsultasIcon />} tone="indigo" sparkline={chispa.pedidos}
+                onClick={() => list("pedidos", "todos", `Pedidos de ${periodName}`, "Todos los pedidos del periodo, de mayor a menor importe.")} actionLabel="Ver pedidos" />
+              <KpiCard label="Pendiente de servir" value={euros(pendingNet)} helper={`${numberFormatter.format(pendingCount)} pedidos del periodo`} delta="Sin comparación" icon={<WalletIcon />} tone="amber"
+                onClick={() => list("pedidos", "pendientes", `Pedidos de ${periodName} pendientes de servir`, "Lo que falta por servir de cada pedido.")} actionLabel="Ver pendientes" />
+            </>
+          ) : (
+            <KpiCard label="Pedidos" value={euros(oldTotals.pedido.net)} helper={`${numberFormatter.format(oldTotals.pedido.count)} pedidos${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`} delta="Sin comparación" icon={<ConsultasIcon />} tone="sky" />
+          )}
+        </div>
+
+        {/* Las dos tiras en la misma fila: separadas en dos filas con título
+            ocupaban más que las once tarjetas que vinieron a sustituir. */}
+        {deOfertas.length > 0 ? (
+          <Cifras className="panel panel-padded sales-board-half" titulo="Las ofertas, por dentro"
+            subtitulo="Pulsa una cifra para ver los documentos de Sage que hay detrás" cifras={deOfertas} />
+        ) : null}
+        {dePedidos.length > 0 ? (
+          <Cifras className="panel panel-padded sales-board-half" titulo="Los pedidos, por dentro"
+            subtitulo="Lo que falta por servir y cuánto se tarda" cifras={dePedidos} />
+        ) : null}
+
+        {!ctx.detail.offers || !ctx.detail.orders ? (
+          <p className="sales-section-note sales-board-full">
+            Conversión, ofertas vivas, motivos de rechazo, plazos de servicio y las listas de documentos se activan solos cuando el
+            servidor de Sage mande las ofertas y los pedidos uno a uno. Mientras, se ven los totales.
+          </p>
+        ) : null}
+
+        <Panel title="Conversión por comercial" subtitle="Importe ofertado y qué parte pasa a pedido. Pulsa uno para filtrar" className="panel panel-padded sales-board-half">
           {ctx.detail.offers ? (
             <RankList
               items={[...repOffers].sort((a, b) => b[1].net - a[1].net).map(([key, rep]) => ({
@@ -362,7 +406,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
           ) : <p className="muted">Todavía no hay foto de la cartera.</p>}
         </Panel>
 
-        <Panel title="Abonos e incidencias" subtitle={`Devoluciones y notas de incidencia de los albaranes de ${periodName}`} className="panel panel-padded sales-board-full">
+        <Panel title="Abonos e incidencias" subtitle={`Devoluciones y notas de incidencia de los albaranes de ${periodName}`} className="panel panel-padded sales-board-half">
           {ctx.detail.incidents ? (
             <div className="sales-two-columns">
               <div>
