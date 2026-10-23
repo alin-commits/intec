@@ -192,7 +192,7 @@ export function ComprasView() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [falloCarga, setFalloCarga] = useState<string | null>(null);
   const [hoy, setHoy] = useState("");
-  const [filtro, setFiltro] = useState<"sin_fecha" | "con_fecha" | "vencidos" | "contestados" | "todos">("sin_fecha");
+  const [filtro, setFiltro] = useState<"sin_fecha" | "con_fecha" | "vencidos" | "reclamados" | "contestados" | "todos">("sin_fecha");
   // De entrada, el que más lleva esperando arriba: es el que hay que reclamar antes.
   const [orden, setOrden] = useState<Orden>({ clave: "esperando", sentido: "desc" });
   const [busqueda, setBusqueda] = useState("");
@@ -397,6 +397,7 @@ export function ComprasView() {
         || (filtro === "sin_fecha" && fila.sinFecha > 0)
         || (filtro === "con_fecha" && fila.sinFecha === 0)
         || (filtro === "vencidos" && fila.vencido)
+        || (filtro === "reclamados" && (fila.seguimiento?.level ?? 0) > 0)
         || (filtro === "contestados" && fila.contestado);
       if (!encaja) return false;
       if (!texto) return true;
@@ -438,6 +439,7 @@ export function ComprasView() {
     sinFecha: delPeriodo.filter((fila) => fila.sinFecha > 0).length,
     conFecha: delPeriodo.filter((fila) => fila.sinFecha === 0).length,
     vencidos: delPeriodo.filter((fila) => fila.vencido).length,
+    reclamados: delPeriodo.filter((fila) => (fila.seguimiento?.level ?? 0) > 0).length,
     contestados: delPeriodo.filter((fila) => fila.contestado).length,
     importe: delPeriodo.reduce((suma, fila) => suma + Number(fila.pedido.pending_amount), 0),
     proveedores: new Set(delPeriodo.filter((fila) => fila.sinFecha > 0).map((fila) => fila.proveedorNombre)).size,
@@ -725,12 +727,13 @@ export function ComprasView() {
           <section className="panel table-panel">
             <div className="panel-heading">
               <div className="view-tabs" role="tablist" aria-label="Qué pedidos ver">
-                {([["sin_fecha", "Sin fecha"], ["vencidos", "Vencidos"], ["contestados", "Contestados"], ["con_fecha", "Confirmados"], ["todos", "Todos"]] as const).map(([clave_, etiqueta]) => (
+                {([["sin_fecha", "Sin fecha"], ["vencidos", "Vencidos"], ["reclamados", "Reclamados"], ["contestados", "Contestados"], ["con_fecha", "Confirmados"], ["todos", "Todos"]] as const).map(([clave_, etiqueta]) => (
                   <button key={clave_} type="button" role="tab" aria-selected={filtro === clave_}
                     className={filtro === clave_ ? "view-tab active" : "view-tab"}
                     onClick={() => { setFiltro(clave_); setPagina(0); }}>
                     {etiqueta}
                     {clave_ === "contestados" && resumen.contestados > 0 ? ` (${numberFormatter.format(resumen.contestados)})` : ""}
+                    {clave_ === "reclamados" && resumen.reclamados > 0 ? ` (${numberFormatter.format(resumen.reclamados)})` : ""}
                   </button>
                 ))}
               </div>
