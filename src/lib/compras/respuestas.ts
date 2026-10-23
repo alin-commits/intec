@@ -77,7 +77,10 @@ export function reconocerRespuestas(input: {
   reclamaciones: ReclamacionMandada[];
   /** Los que ya se leyeron en pasadas anteriores. */
   yaLeidos: Set<string>;
-  /** Nuestro propio buzón: lo que sale de él no es una respuesta. */
+  /**
+   * Nuestro propio buzón. Ni lo que sale de él ni lo que escribe cualquier otra
+   * persona de la casa cuenta como respuesta del proveedor.
+   */
   buzonPropio: string;
 }): RespuestaReconocida[] {
   const porHilo = new Map<string, ReclamacionMandada[]>();
@@ -89,12 +92,23 @@ export function reconocerRespuestas(input: {
   }
 
   const nuestro = input.buzonPropio.toLowerCase();
+  /*
+    Nadie de casa es un proveedor.
+
+    Mirar solo el buzón de compras no bastaba: probando el circuito se contestó
+    a una reclamación desde el correo de una persona de la empresa, llegó al
+    hilo igual que una respuesta de verdad y el pedido se dio por contestado
+    con fecha y todo. Un proveedor nunca escribe desde nuestro dominio, así que
+    se descarta entero.
+  */
+  const nuestroDominio = nuestro.includes("@") ? nuestro.slice(nuestro.indexOf("@")) : "";
+  const deCasa = (quien: string) => quien === nuestro || (nuestroDominio !== "" && quien.endsWith(nuestroDominio));
   const reconocidas: RespuestaReconocida[] = [];
 
   for (const correo of input.correos) {
     if (input.yaLeidos.has(correo.id)) continue;
     if (!correo.conversationId) continue;
-    if ((correo.from ?? "").toLowerCase() === nuestro) continue;
+    if (deCasa((correo.from ?? "").toLowerCase())) continue;
 
     const enEseHilo = porHilo.get(correo.conversationId);
     if (!enEseHilo?.length) continue;

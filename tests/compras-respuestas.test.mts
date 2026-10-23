@@ -40,6 +40,22 @@ test("lo que sale de nuestro propio buzón no es una respuesta", () => {
   assert.equal(salen.length, 0, "y da igual cómo venga escrito en mayúsculas");
 });
 
+test("lo que escribe cualquiera de la casa tampoco es una respuesta", () => {
+  // Probando el circuito se contestó a una reclamación desde el correo de una
+  // persona de la empresa: llegó al hilo como cualquier respuesta y el pedido
+  // se dio por contestado, con fecha y todo. Un proveedor nunca escribe desde
+  // nuestro dominio.
+  const salen = reconocer([
+    correo({ from: "Alin@suministrointec.com" }),
+    correo({ id: "c2", from: "otra.persona@SUMINISTROINTEC.COM" }),
+  ], [reclamacion()]);
+  assert.equal(salen.length, 0);
+  // Y un proveedor que se llame parecido sigue contando: se mira el dominio
+  // entero, no que el texto acabe pareciéndose.
+  const proveedor = reconocer([correo({ from: "ventas@nosuministrointec.com" })], [reclamacion()]);
+  assert.equal(proveedor.length, 1);
+});
+
 test("un correo anterior a la reclamación no está contestándola", () => {
   // El hilo existe desde que Sage mandó el pedido: hay correos suyos de antes.
   const salen = reconocer([correo({ receivedAt: "2026-10-19T10:00:00Z" })], [reclamacion({ sentAt: "2026-10-20T08:10:00Z" })]);
