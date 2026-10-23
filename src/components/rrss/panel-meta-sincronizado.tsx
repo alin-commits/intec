@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
+import { Cifras } from "@/components/ui/cifras";
 import { BarChart } from "@/components/charts/bar-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { DateField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
-import { EuroIcon, LeadsIcon, ConversionIcon, HeartIcon, UsuariosIcon } from "@/components/icons";
+import { EuroIcon, LeadsIcon, UsuariosIcon } from "@/components/icons";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { currencyFormatter, numberFormatter, formatPercent } from "@/lib/format";
 import { dateKeyInMadrid } from "@/lib/dates";
@@ -567,20 +568,23 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
         <KpiCard label="Gasto total" value={currencyFormatter.format(totales.gasto)} helper="según Meta" icon={<EuroIcon />} tone="indigo" delta="" />
         <KpiCard label="Ingresos" value={currencyFormatter.format(totales.ingresos)} helper="escritos a mano" icon={<EuroIcon />} tone="emerald" delta="" />
         <KpiCard label="Leads" value={numberFormatter.format(totales.leads)} helper={totales.cualificados > 0 ? `${numberFormatter.format(totales.cualificados)} cualificados` : "sin cualificar todavía"} icon={<LeadsIcon />} tone="sky" delta="" />
-        <KpiCard label="Seguidores ganados" value={numberFormatter.format(totales.seguidores)} helper="escritos a mano" icon={<HeartIcon />} tone="rose" delta="" />
-        <KpiCard label="CPL según Meta" value={totales.leads > 0 ? currencyFormatter.format(cpl) : "—"} helper={`${numberFormatter.format(totales.leads)} leads que cuenta Meta`} icon={<ConversionIcon />} tone="amber" delta="" />
-        <KpiCard
-          label="Coste por lead"
-          value={costeNuestro.euros === null ? "—" : currencyFormatter.format(costeNuestro.euros)}
-          helper={`${numberFormatter.format(costeNuestro.leads)} que llegaron aquí`}
-          icon={<LeadsIcon />}
-          tone="indigo"
-          delta=""
-          sub={costeNuestro.gasto > 0 ? `sobre ${currencyFormatter.format(costeNuestro.gasto)}` : undefined}
-          subTitle={EXPLICACION_COSTE_POR_LEAD}
-        />
-        <KpiCard label="ROAS medio" value={totales.gasto > 0 ? `${roas.toFixed(2).replace(".", ",")}x` : "—"} helper="ingreso por euro gastado" icon={<UsuariosIcon />} tone="emerald" delta="" />
+        <KpiCard label="ROAS medio" value={totales.gasto > 0 ? `${roas.toFixed(2).replace(".", ",")}x` : "—"} helper="ingreso por euro gastado" icon={<UsuariosIcon />} tone="amber" delta="" />
       </div>
+
+      <Cifras
+        cifras={[
+          {
+            key: "costeNuestro", etiqueta: "Coste por lead",
+            valor: costeNuestro.euros === null ? "—" : currencyFormatter.format(costeNuestro.euros),
+            nota: <span title={EXPLICACION_COSTE_POR_LEAD}>{numberFormatter.format(costeNuestro.leads)} que llegaron aquí{costeNuestro.gasto > 0 ? ` · sobre ${currencyFormatter.format(costeNuestro.gasto)}` : ""}</span>,
+          },
+          {
+            key: "cpl", etiqueta: "CPL según Meta", valor: totales.leads > 0 ? currencyFormatter.format(cpl) : "—",
+            nota: `${numberFormatter.format(totales.leads)} leads que cuenta Meta`,
+          },
+          { key: "seguidores", etiqueta: "Seguidores ganados", valor: numberFormatter.format(totales.seguidores), nota: "escritos a mano" },
+        ]}
+      />
 
       <div className="dashboard-grid">
         <article className="panel chart-panel">
@@ -609,11 +613,11 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
           <div><h3>Campañas</h3><p className="panel-subtitle">{filas.length} con datos en el periodo · {formatPercent(ctr)} de clics</p></div>
         </div>
         <div className="table-scroll">
-          <table>
+          <table className="ads-table">
             <thead>
               <tr>
-                <th>Campaña</th><th>Marca</th><th>Estado</th><th>Gasto</th><th>Impresiones</th><th>Clics</th>
-                <th>Leads</th><th>Cualif.</th><th>Seguidores</th><th>Ingresos</th><th>CPL</th><th>Atada a</th>
+                <th>Campaña</th><th>Marca</th><th>Gasto</th><th>Clics</th>
+                <th>Leads</th><th>CPL</th><th>Ingresos</th><th>Atada a</th>
                 {canEdit ? <th aria-label="Acciones" /> : null}
               </tr>
             </thead>
@@ -621,16 +625,12 @@ export function PanelMetaSincronizado({ units, canEdit }: { units: BusinessUnit[
               {filasVisibles.map((f) => (
                 <tr key={f.id}>
                   <td><strong>{f.nombre}</strong></td>
-                  <td>{f.marca}</td>
-                  <td>{f.estado}</td>
+                  <td>{f.marca}<small className="muted">{f.estado}</small></td>
                   <td>{currencyFormatter.format(f.gasto)}</td>
-                  <td>{numberFormatter.format(f.impresiones)}</td>
-                  <td>{numberFormatter.format(f.clics)}</td>
-                  <td>{numberFormatter.format(f.leads)}</td>
-                  <td>{f.cualificados > 0 ? numberFormatter.format(f.cualificados) : <span className="muted">—</span>}</td>
-                  <td>{f.seguidores > 0 ? numberFormatter.format(f.seguidores) : <span className="muted">—</span>}</td>
-                  <td>{f.ingresos > 0 ? currencyFormatter.format(f.ingresos) : <span className="muted">—</span>}</td>
+                  <td>{numberFormatter.format(f.clics)}<small className="muted">{numberFormatter.format(f.impresiones)} impresiones</small></td>
+                  <td>{numberFormatter.format(f.leads)}{f.cualificados > 0 ? <small className="muted">{numberFormatter.format(f.cualificados)} cualificados</small> : null}</td>
                   <td>{f.leads > 0 ? currencyFormatter.format(f.gasto / f.leads) : <span className="muted">—</span>}</td>
+                  <td>{f.ingresos > 0 ? currencyFormatter.format(f.ingresos) : <span className="muted">—</span>}{f.seguidores > 0 ? <small className="muted">{numberFormatter.format(f.seguidores)} seguidores</small> : null}</td>
                   <td>{f.campanaApp ?? <span className="muted">sin atar</span>}</td>
                   {canEdit ? (
                     <td>

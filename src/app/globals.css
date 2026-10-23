@@ -495,8 +495,9 @@ td.recent-inquiries-actions > * + * { margin-left: 8px; }
    envuelve, la fila engorda al doble: anchos fijos y una sola línea. */
 .mailing-table td small { white-space: nowrap; }
 .campaigns-table, .mailing-table { table-layout: fixed; width: 100%; }
-.campaigns-table td, .mailing-table td { padding-top: 10px; padding-bottom: 10px; }
-.campaigns-table td strong, .mailing-table td strong { overflow-wrap: anywhere; }
+.campaigns-table td, .mailing-table td, .ads-table td { padding-top: 10px; padding-bottom: 10px; }
+.ads-table td small { white-space: nowrap; }
+.campaigns-table td strong, .mailing-table td strong, .ads-table td strong { overflow-wrap: anywhere; }
 .campaigns-table th:nth-child(1), .campaigns-table td:nth-child(1) { width: 13%; }
 .campaigns-table th:nth-child(2), .campaigns-table td:nth-child(2) { width: 28%; }
 .campaigns-table th:nth-child(3), .campaigns-table td:nth-child(3) { width: 7%; }
