@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { CampanasIcon, ComprasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, SearchIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
@@ -22,16 +22,47 @@ type Entrada = { href: string; label: string; icon: () => ReactNode; roles?: App
 
 const CLAVE_DESPLEGADOS = "intec.menu-desplegados";
 
-/** Lo que dejaste abierto la última vez. En el servidor no hay navegador. */
+/*
+  Lo que dejaste abierto la última vez.
+
+  Vive fuera del componente y se lee con useSyncExternalStore porque el
+  servidor no tiene navegador: pintaba todos los grupos cerrados, el navegador
+  los pintaba como los dejaste, y React se quejaba de que el HTML no coincidía
+  y volvía a dibujar el menú entero.
+
+  Con getServerSnapshot (el VACIO de abajo) React sabe que el primer dibujo va
+  cerrado y que lo guardado llega justo después, sin tomárselo como un error.
+*/
+const VACIO: Record<string, boolean> = {};
+let recordado: Record<string, boolean> | null = null;
+const avisados = new Set<() => void>();
+
 function leerDesplegados(): Record<string, boolean> {
-  if (typeof window === "undefined") return {};
+  if (recordado !== null) return recordado;
+  if (typeof window === "undefined") return VACIO;
   try {
     const crudo = window.localStorage.getItem(CLAVE_DESPLEGADOS);
     const valor = crudo ? (JSON.parse(crudo) as unknown) : null;
-    return valor && typeof valor === "object" ? (valor as Record<string, boolean>) : {};
+    recordado = valor && typeof valor === "object" ? (valor as Record<string, boolean>) : VACIO;
   } catch {
-    return {};
+    recordado = VACIO;
   }
+  return recordado;
+}
+
+function guardarDesplegados(siguiente: Record<string, boolean>) {
+  recordado = siguiente;
+  try {
+    window.localStorage.setItem(CLAVE_DESPLEGADOS, JSON.stringify(siguiente));
+  } catch {
+    // Sin almacén el menú funciona igual; solo se olvida al recargar.
+  }
+  for (const avisar of avisados) avisar();
+}
+
+function escuchar(avisar: () => void) {
+  avisados.add(avisar);
+  return () => { avisados.delete(avisar); };
 }
 
 /*
@@ -118,18 +149,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     abierto si estás dentro, cerrado si no. Se guarda en este navegador, que es
     una comodidad tuya y no un dato de la empresa.
   */
-  const [desplegados, setDesplegados] = useState<Record<string, boolean>>(() => leerDesplegados());
+  const desplegados = useSyncExternalStore(escuchar, leerDesplegados, () => VACIO);
 
   function cambiarDesplegado(id: string, abierto: boolean) {
-    setDesplegados((actual) => {
-      const siguiente = { ...actual, [id]: abierto };
-      try {
-        window.localStorage.setItem(CLAVE_DESPLEGADOS, JSON.stringify(siguiente));
-      } catch {
-        // Sin almacén el menú funciona igual; solo se olvida al recargar.
-      }
-      return siguiente;
-    });
+    guardarDesplegados({ ...leerDesplegados(), [id]: abierto });
   }
   const [lastPathname, setLastPathname] = useState(pathname);
   if (pathname !== lastPathname) {
