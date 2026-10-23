@@ -1999,6 +1999,13 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .cifra.es-pulsable { cursor: pointer; border-radius: 10px; transition: background-color .12s ease; }
 .cifra.es-pulsable:hover { background: var(--surface-muted); }
 .cifra.es-pulsable:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+/* En un móvil la tira cabe a dos columnas de 175 px, y un importe de siete
+   cifras a 21 px se sale de la suya y se pinta encima de la de al lado. */
+@media (max-width: 560px) {
+  .cifras { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  .cifra-valor { font-size: 17px; }
+  .cifra.es-fuerte .cifra-valor { font-size: 19px; }
+}
 @media (max-width: 560px) {
   .cifras { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cifra { padding: 10px 12px; }
