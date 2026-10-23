@@ -27,7 +27,7 @@ import type { AppRole, BusinessUnit, Campaign, CampaignStatus, InquiryType, Lead
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
-const ACTIVITY_LIMIT = 7;
+const ACTIVITY_LIMIT = 5;
 
 type ActivityKind = "inquiry" | "lead" | "ticket" | "crm";
 type ActivityItem = { id: string; kind: ActivityKind; title: string; detail: string; unitId: string | null; at: string; href: string };
