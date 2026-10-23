@@ -1962,6 +1962,16 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
   .sales-data-table td.is-text { min-width: 0; }
 }
 
+/*
+  Y también cuando el panel es estrecho aunque la ventana no lo sea: una tabla
+  de siete columnas dentro de media pantalla recorta igual en un monitor
+  grande, y lo que se pierde por la derecha no se ve ni se sabe que está.
+*/
+.table-panel { container-type: inline-size; }
+@container (max-width: 620px) {
+  .sales-data-table th.is-optional, .sales-data-table td.is-optional { display: none; }
+}
+
 /* Cifras sueltas debajo de un gráfico. */
 .sales-inline-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12.5px; }
 .sales-inline-stats span { display: inline-flex; align-items: center; gap: 6px; }
