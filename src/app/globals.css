@@ -901,7 +901,7 @@ td.recent-inquiries-actions > * + * { margin-left: 8px; }
 .sent-recipients li.is-read small { color: #166534; }
 
 /* Gastos de marketing */
-.expenses-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.expenses-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }
 .renewal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .renewal-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-muted); font-size: 13px; }
 .renewal-list li > span { display: grid; min-width: 0; }
