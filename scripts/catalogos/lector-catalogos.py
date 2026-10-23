@@ -57,10 +57,16 @@ import json
 import os
 import re
 import sys
+import warnings
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+
+# openpyxl avisa de extensiones que no entiende en algunos Excel. No es un
+# error —el fichero se lee igual— pero en una pasada de 280 ficheros llena la
+# pantalla de avisos y tapa lo que sí importa.
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 RUTA_POR_DEFECTO = r"\\192.168.1.253\intec_buzon_general\08 TARIFAS 2026"
 HUB_POR_DEFECTO = "https://app.suministrointec.com"
@@ -398,15 +404,22 @@ def main():
         extension = os.path.splitext(nombre)[1].lower()
         precios, trozos, paginas, aviso = [], [], None, None
 
-        if extension == ".xlsx":
-            precios, trozos, aviso = leer_excel(ruta)
-        elif extension == ".pdf":
-            trozos, paginas, aviso = leer_pdf(ruta)
-        else:
-            # .xls, .doc y .docx son formatos viejos que no se pueden abrir sin
-            # Office. Son nueve ficheros de 283: se apuntan para que se vean en
-            # la lista y se decida qué hacer, en vez de desaparecer sin más.
-            aviso = f"formato no soportado ({extension}); conviértelo a xlsx o pdf"
+        # Un fichero roto no puede llevarse por delante la pasada entera: son
+        # 280, tarda un buen rato, y perderlo todo por el número 200 sería
+        # tener que empezar de cero sin saber siquiera cuál fue.
+        try:
+            if extension == ".xlsx":
+                precios, trozos, aviso = leer_excel(ruta)
+            elif extension == ".pdf":
+                trozos, paginas, aviso = leer_pdf(ruta)
+            else:
+                # .xls, .doc y .docx son formatos viejos que no se pueden abrir
+                # sin Office. Son nueve ficheros de 283: se apuntan para que se
+                # vean en la lista y se decida qué hacer, en vez de desaparecer.
+                aviso = f"formato no soportado ({extension}); conviértelo a xlsx o pdf"
+        except Exception as fallo:  # noqa: BLE001 - aquí da igual por qué falló
+            precios, trozos = [], []
+            aviso = f"no se pudo leer: {type(fallo).__name__} {str(fallo)[:100]}"
 
         fichero = {
             "supplier": proveedor[:120],
