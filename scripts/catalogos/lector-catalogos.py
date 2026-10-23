@@ -81,6 +81,13 @@ HUB_POR_DEFECTO = "https://app.suministrointec.com"
 # abulta más que el texto suelto y conviene margen.
 TOPE_ENVIO = 3_000_000
 
+# El Hub tiene dos topes, no uno: el tamaño del envío y cuántas cosas lleva
+# dentro (5.000 precios, 4.000 trozos). Una tarifa de 15.000 artículos cabe
+# de sobra en 3 MB y aun así se pasa de la segunda, que es lo que rechazaba
+# justo las tarifas más gordas. Aquí se va por debajo de las dos.
+TOPE_PRECIOS_TANDA = 4000
+TOPE_TROZOS_TANDA = 3000
+
 # Un trozo por página, partido si la página es larguísima. Se va por páginas
 # porque una página de catálogo suele ser un producto o una familia, y así la
 # respuesta puede decir «página 34» y el comercial va a comprobarlo.
@@ -333,21 +340,30 @@ def en_tandas(fichero, trozos, precios):
     # empezara por cero, la segunda chocaría con la primera.
     trozos = [{**t, "ordinal": i} for i, t in enumerate(trozos)]
 
-    tandas, actual, tamaño, parte = [], {"chunks": [], "precios": []}, 0, 1
+    tandas, actual, tamaño = [], {"chunks": [], "precios": []}, 0
+
+    def cerrar():
+        nonlocal actual, tamaño
+        if actual["chunks"] or actual["precios"]:
+            tandas.append(actual)
+            actual = {"chunks": [], "precios": []}
+            tamaño = 0
+
     for t in trozos:
-        if tamaño + len(t["content"]) > TOPE_ENVIO and (actual["chunks"] or actual["precios"]):
-            tandas.append(actual); actual = {"chunks": [], "precios": []}; tamaño = 0
-        actual["chunks"].append(t); tamaño += len(t["content"])
+        if tamaño + len(t["content"]) > TOPE_ENVIO or len(actual["chunks"]) >= TOPE_TROZOS_TANDA:
+            cerrar()
+        actual["chunks"].append(t)
+        tamaño += len(t["content"])
     for p in precios:
-        if tamaño > TOPE_ENVIO and (actual["chunks"] or actual["precios"]):
-            tandas.append(actual); actual = {"chunks": [], "precios": []}; tamaño = 0
-        actual["precios"].append(p); tamaño += 200
+        if tamaño > TOPE_ENVIO or len(actual["precios"]) >= TOPE_PRECIOS_TANDA:
+            cerrar()
+        actual["precios"].append(p)
+        tamaño += 200
     tandas.append(actual)
 
     for i, tanda in enumerate(tandas):
         yield {"fichero": fichero, "parte": i + 1, "ultima": i == len(tandas) - 1,
                "chunks": tanda["chunks"], "precios": tanda["precios"]}
-        parte += 1
 
 
 # ------------------------------------------------------------- principal ---
