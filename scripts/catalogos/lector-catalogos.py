@@ -270,6 +270,17 @@ def leer_pdf(ruta):
 
 # ------------------------------------------------------------- el envío ----
 
+class ClaveRechazada(Exception):
+    """
+    El Hub no acepta la clave.
+
+    Va aparte de los demás fallos porque no es cosa de este fichero: va a
+    pasar con los 280. Sin esto, el lector recorría 2,7 GB para repetir el
+    mismo error una vez por catálogo y tardaba media hora en decir algo que
+    se sabe al primer intento.
+    """
+
+
 def enviar(hub, token, cuerpo, intentos=3):
     datos = json.dumps(cuerpo, ensure_ascii=False).encode("utf-8")
     peticion = urllib.request.Request(
@@ -282,6 +293,8 @@ def enviar(hub, token, cuerpo, intentos=3):
         except urllib.error.HTTPError as fallo:
             detalle = fallo.read().decode("utf-8", "replace")[:200]
             if fallo.code < 500 or intento == intentos:
+                if fallo.code in (401, 403):
+                    raise ClaveRechazada(detalle) from None
                 raise RuntimeError(f"el Hub respondió {fallo.code}: {detalle}") from None
         except Exception as fallo:
             if intento == intentos:
@@ -458,6 +471,14 @@ def main():
             leidos += 1
             total_precios += len(precios)
             total_trozos += len(trozos)
+        except ClaveRechazada as fallo:
+            print(f"\nEl Hub no acepta la clave: {fallo}")
+            print("\nQué mirar, por este orden:")
+            print("  1. Que INTEC_SAGE_TOKEN valga lo mismo que SAGE_INGEST_TOKEN en Vercel.")
+            print("  2. Que cerraras y abrieras PowerShell después del setx.")
+            print("  3. Si acabas de subir un cambio, que Vercel haya terminado de desplegarlo.")
+            print("\nNo se ha mandado nada. Cuando lo arregles, vuelve a lanzarlo y sigue donde iba.")
+            return 1
         except RuntimeError as fallo:
             print(f"      no se pudo mandar: {fallo}")
             fallados += 1
