@@ -315,18 +315,18 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
   («Contact…», «Convers…») y una cifra que no se sabe de qué es no vale de
   nada. En tres columnas caben enteros.
 */
-.campaigns-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
-.campaign-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.campaigns-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.campaign-card { padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
 .campaign-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .campaign-card-heading h3 { margin: 4px 0 0; font-size: 15.5px; }
-.campaign-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 0; padding: 9px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.campaign-stats-grid div { padding: 0 8px; border-left: 1px solid var(--border); text-align: center; min-width: 0; }
+.campaign-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 0; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.campaign-stats-grid div { padding: 0 14px; border-left: 1px solid var(--border); text-align: center; min-width: 0; }
 .campaign-stats-grid div:nth-child(3n + 1) { border-left: 0; }
 .campaign-stats-grid span { display: block; color: var(--muted); font-size: 11px; }
 .campaign-stats-grid strong { display: block; margin-top: 2px; font-size: 15.5px; }
 .campaign-card-footer { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
 .campaign-card-footer strong { display: block; color: var(--text); font-size: 14px; margin-top: 2px; }
-.campaign-card-actions { margin-top: auto; padding-top: 4px; justify-content: flex-start; }
+.campaign-card-actions { margin-top: auto; padding-top: 8px; justify-content: flex-start; }
 .campaign-direct-sales-note { margin: -6px 0 0; line-height: 1.4; }
 .unit-accent { width: 48px; height: 6px; border-radius: 999px; }
 .login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top left, #dbeafe, transparent 45%), #f5f7fb; }
