@@ -127,7 +127,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-22 productos-por-comercial"
+$VersionAgente = "2026-10-23 ocupado-no-es-caido"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -243,7 +243,17 @@ $tengoTurno = $false
 try { $tengoTurno = $turno.WaitOne($(if ($Vigilar) { 0 } else { 40 * 60 * 1000 })) }
 catch [System.Threading.AbandonedMutexException] { $tengoTurno = $true }
 if (-not $tengoTurno) {
-  if (-not $Vigilar) { Apuntar "otra lectura lleva 40 minutos en marcha: esta se salta" }
+  if ($Vigilar) {
+    # Ocupado no es lo mismo que caido: si no se dice, el panel da el servidor
+    # por muerto y manda a revisar una tarea que esta trabajando. La peticion
+    # sigue pendiente y se recoge en cuanto acabe la lectura larga.
+    try {
+      [void](Invoke-RestMethod -Uri $urlRecoger -Method Post -Body '{"ocupado":true}' -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $Token" } -TimeoutSec 30)
+    } catch { }
+  } else {
+    Apuntar "otra lectura lleva 40 minutos en marcha: esta se salta"
+  }
   exit 0
 }
 

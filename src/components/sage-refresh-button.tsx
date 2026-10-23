@@ -77,6 +77,8 @@ export function SageRefreshButton({ onUpdated, ventana = "dias" }: {
 }) {
   const [request, setRequest] = useState<RefreshRequest | null>(null);
   const [agentLastPoll, setAgentLastPoll] = useState<string | null>(null);
+  /** Desde cuándo el agente está con otra lectura: ocupado no es lo mismo que caído. */
+  const [agentBusySince, setAgentBusySince] = useState<string | null>(null);
   /** Hasta cuándo hay que esperar para volver a pedir, si es que hay que esperar. */
   const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null);
   /** Lo que han tardado las últimas lecturas, para decirlo antes de pulsar. */
@@ -96,10 +98,11 @@ export function SageRefreshButton({ onUpdated, ventana = "dias" }: {
     try {
       const response = await fetch("/api/sage/refresh", { cache: "no-store" });
       if (!response.ok) return;
-      const payload = (await response.json()) as { request: RefreshRequest | null; agentLastPoll: string | null; nextAllowedAt?: string | null; sueleTardar?: number | null };
+      const payload = (await response.json()) as { request: RefreshRequest | null; agentLastPoll: string | null; nextAllowedAt?: string | null; sueleTardar?: number | null; agentBusySince?: string | null };
       setCheckedAt(Date.now());
       setSueleTardar(payload.sueleTardar ?? null);
       setAgentLastPoll(payload.agentLastPoll);
+      setAgentBusySince(payload.agentBusySince ?? null);
       setNextAllowedAt(payload.nextAllowedAt ?? null);
       setRequest(payload.request);
       if (payload.request && isActive(payload.request)) watchedId.current = payload.request.id;
@@ -166,7 +169,8 @@ export function SageRefreshButton({ onUpdated, ventana = "dias" }: {
     }
   }
 
-  const agentSilent = checkedAt > 0 && (!agentLastPoll || checkedAt - new Date(agentLastPoll).getTime() > AGENT_SILENT_MS);
+  const agentBusy = Boolean(agentBusySince);
+  const agentSilent = !agentBusy && checkedAt > 0 && (!agentLastPoll || checkedAt - new Date(agentLastPoll).getTime() > AGENT_SILENT_MS);
   const waitingLong = checkedAt > 0 && request?.status === "pendiente" && checkedAt - new Date(request.requested_at).getTime() > 90 * 1000;
   /** Cuándo se dio por perdida la última petición. */
   const failedAt = request?.finished_at ?? request?.requested_at ?? null;
@@ -191,9 +195,11 @@ export function SageRefreshButton({ onUpdated, ventana = "dias" }: {
   }
   if (request?.status === "pendiente") {
     label = "Esperando al servidor…";
-    status = waitingLong && agentSilent
-      ? { text: "El servidor de Sage no está recogiendo peticiones. Revisa la tarea «Intec - Sage a peticion».", tone: "bad" }
-      : { text: `El servidor la recoge en menos de un minuto; en total tarda ${tarda}.`, tone: "info" };
+    status = agentBusy
+      ? { text: `El servidor está con otra lectura desde las ${time(agentBusySince!)}. Recogerá esta al terminar.`, tone: "info" }
+      : waitingLong && agentSilent
+        ? { text: "El servidor de Sage no está recogiendo peticiones. Revisa la tarea «Intec - Sage a peticion».", tone: "bad" }
+        : { text: `El servidor la recoge en menos de un minuto; en total tarda ${tarda}.`, tone: "info" };
   } else if (request?.status === "leyendo") {
     label = "Leyendo Sage…";
     status = { text: `Suele tardar ${tarda}.`, tone: "info" };

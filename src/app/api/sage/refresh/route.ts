@@ -47,6 +47,11 @@ async function allowedClient() {
 async function expireForgottenRequests() {
   const admin = createAdminClient();
   if (!admin) return;
+  // Con el agente ocupado en una lectura larga, la petición no está olvidada:
+  // está esperando turno y la recogerá al acabar. Darla por caducada haría
+  // creer que algo falló cuando el servidor está trabajando.
+  const { data: estado } = await admin.from("sage_agent_status").select("busy_since").eq("id", 1).maybeSingle();
+  if (estado?.busy_since) return;
   const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   await admin
     .from("sage_refresh_requests")
@@ -109,13 +114,13 @@ export async function GET() {
   await expireForgottenRequests();
   const [latest, agent, nextAllowedAt, sueleTardar] = await Promise.all([
     supabase.from("sage_refresh_requests").select(COLUMNS).order("requested_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("sage_agent_status").select("last_poll_at").eq("id", 1).maybeSingle(),
+    supabase.from("sage_agent_status").select("last_poll_at, busy_since").eq("id", 1).maybeSingle(),
     siguienteLecturaPermitida(supabase),
     loQueSueleTardar(supabase),
   ]);
   if (latest.error || agent.error) return NextResponse.json({ error: "No se pudo consultar la lectura de Sage." }, { status: 500 });
   return NextResponse.json(
-    { request: latest.data ?? null, agentLastPoll: agent.data?.last_poll_at ?? null, nextAllowedAt, sueleTardar },
+    { request: latest.data ?? null, agentLastPoll: agent.data?.last_poll_at ?? null, agentBusySince: agent.data?.busy_since ?? null, nextAllowedAt, sueleTardar },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
