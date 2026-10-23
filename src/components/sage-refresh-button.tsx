@@ -56,7 +56,25 @@ function cuantoTarda(segundos: number | null): string {
 }
 const isActive = (request: RefreshRequest | null) => request?.status === "pendiente" || request?.status === "leyendo";
 
-export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
+/**
+ * Cuántos días se le piden a Sage y cómo se dice.
+ *
+ * El botón es para ponerse al día de lo de ahora, no para traerse el
+ * histórico: de eso se encargan las lecturas programadas, que recorren el año
+ * entero de madrugada. Dos días bastan para ver lo de hoy y lo de ayer, pero
+ * en Compras no: un pedido metido el día 3 no aparecería el día 20. Ahí se
+ * pide el mes en curso, que sigue siendo una lectura corta.
+ */
+const VENTANAS = {
+  dias: { dias: () => 2, dice: "los últimos días" },
+  mes: { dias: () => Math.max(2, new Date().getDate()), dice: "lo que va de mes" },
+} as const;
+
+export function SageRefreshButton({ onUpdated, ventana = "dias" }: {
+  onUpdated: () => void;
+  /** Qué trae: los últimos días (lo normal) o el mes en curso. */
+  ventana?: keyof typeof VENTANAS;
+}) {
   const [request, setRequest] = useState<RefreshRequest | null>(null);
   const [agentLastPoll, setAgentLastPoll] = useState<string | null>(null);
   /** Hasta cuándo hay que esperar para volver a pedir, si es que hay que esperar. */
@@ -126,7 +144,7 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
       const response = await fetch("/api/sage/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days: 2 }),
+        body: JSON.stringify({ days: VENTANAS[ventana].dias() }),
       });
       const payload = (await response.json().catch(() => ({}))) as { request?: RefreshRequest | null; error?: string; nextAllowedAt?: string | null };
       if (response.status === 429) {
@@ -169,7 +187,7 @@ export function SageRefreshButton({ onUpdated }: { onUpdated: () => void }) {
   // oficina a recorrer Sage, y eso no es instantáneo ni se puede repetir.
   if (!request || (!active && request.status === "hecho" && !esperando)) {
     const hecho = request?.status === "hecho" && request.finished_at ? `Leído a las ${time(request.finished_at)}. ` : "";
-    status = { text: `${hecho}Tarda ${tarda}, y se puede una vez por hora.`, tone: hecho ? "ok" : "info" };
+    status = { text: `${hecho}Trae ${VENTANAS[ventana].dice}; tarda ${tarda} y se puede una vez por hora.`, tone: hecho ? "ok" : "info" };
   }
   if (request?.status === "pendiente") {
     label = "Esperando al servidor…";

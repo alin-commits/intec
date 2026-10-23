@@ -642,7 +642,7 @@ export function ComprasView() {
             pulsarlo, porque manda al servidor de la oficina a recorrer Sage y
             eso solo se puede hacer una vez por hora.
           */}
-          <SageRefreshButton onUpdated={() => setRecarga((clave) => clave + 1)} />
+          <SageRefreshButton ventana="mes" onUpdated={() => setRecarga((clave) => clave + 1)} />
           {ordenadas.length > 0 ? (
             <>
               <button type="button" className="button button-compact button-secondary"
