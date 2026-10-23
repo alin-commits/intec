@@ -529,6 +529,9 @@ export function CampaignsManager() {
     );
   }
 
+  const enMarcha = visibleCampaigns.filter((campaign) => campaign.status === "active" || campaign.status === "draft");
+  const terminadas = visibleCampaigns.filter((campaign) => campaign.status === "finished" || campaign.status === "archived");
+
   return (
     <div className="page-stack">
       <section className="section-heading">
@@ -578,7 +581,7 @@ export function CampaignsManager() {
       </section>
 
       <section className="campaigns-grid">
-        {visibleCampaigns.map((campaign) => {
+        {enMarcha.map((campaign) => {
           const unit = units.find((item) => item.id === campaign.businessUnitId);
           const stats = statsFor(campaign, leads);
           const adsStats = adsStatsFor(campaign, ads);
@@ -651,7 +654,56 @@ export function CampaignsManager() {
           );
         })}
         {visibleCampaigns.length === 0 ? <div className="notice"><strong>Sin campañas</strong><span>No hay campañas que coincidan con los filtros seleccionados.</span></div> : null}
+        {visibleCampaigns.length > 0 && enMarcha.length === 0 ? <div className="notice"><strong>Ninguna en marcha</strong><span>Todas las que cuadran con los filtros están terminadas: las tienes abajo.</span></div> : null}
       </section>
+
+      {terminadas.length > 0 ? (
+        <section className="panel table-panel">
+          <div className="panel-heading">
+            <div><span className="eyebrow">Histórico</span><h2>Campañas terminadas</h2><p className="panel-subtitle">Finalizadas y archivadas. Lo que dieron, para comparar con las que estén en marcha</p></div>
+          </div>
+          <div className="table-scroll">
+            <table className="campaigns-table">
+              <thead><tr><th>Marca</th><th>Campaña</th><th>Leads</th><th>Ganados</th><th>Conversión</th><th>Presupuesto</th><th>Valor</th>{canEdit ? <th /> : null}</tr></thead>
+              <tbody>
+                {terminadas.map((campaign) => {
+                  const unit = units.find((item) => item.id === campaign.businessUnitId);
+                  const stats = statsFor(campaign, leads);
+                  const adsStats = adsStatsFor(campaign, ads);
+                  const dePlataforma = presupuestoDeMeta.get(campaign.id);
+                  const total = dePlataforma?.total ?? null;
+                  const diario = dePlataforma?.diario ?? null;
+                  return (
+                    <tr key={campaign.id}>
+                      <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
+                      <td>
+                        <strong>{campaign.name}</strong>
+                        <small className="muted">{campaign.channel || "Sin canal"} · {dateRangeLabel(campaign.startDate, campaign.endDate)}</small>
+                      </td>
+                      <td>{stats.total}{stats.total > 0 ? <small className="muted">{stats.contacted} contactados</small> : null}</td>
+                      <td>{stats.won}{stats.lost > 0 ? <small className="muted">{stats.lost} perdidos</small> : null}</td>
+                      <td>{formatPercent(stats.conversion)}</td>
+                      <td>
+                        {total !== null ? currencyFormatter.format(total) : diario !== null ? `${currencyFormatter.format(diario)}/día` : campaign.budget ? currencyFormatter.format(campaign.budget) : "—"}
+                        {adsStats.count > 0 ? <small className="muted">{currencyFormatter.format(adsStats.spend)} gastados{adsStats.roas > 0 ? ` · ROAS ${adsStats.roas.toFixed(2).replace(".", ",")}x` : ""}</small> : null}
+                      </td>
+                      <td>{currencyFormatter.format(stats.value)}</td>
+                      {canEdit ? (
+                        <td>
+                          <div className="modal-actions campaign-card-actions">
+                            <button type="button" className="button button-compact button-secondary" onClick={() => openEdit(campaign)}>Editar</button>
+                            {campaign.status !== "archived" ? <button type="button" className="button button-compact button-secondary" onClick={() => setPendingArchive(campaign)}>Archivar</button> : null}
+                          </div>
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <ConfirmationDialog
         open={Boolean(pendingArchive)}
