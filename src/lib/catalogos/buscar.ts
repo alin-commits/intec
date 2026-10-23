@@ -4,25 +4,29 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 /*
   Buscar en los catálogos.
 
-  El orden importa, y no es el que parece. Probando con los datos de verdad
-  quedó claro que las dos mitades sirven para cosas distintas:
+  Tres sitios distintos, y cada uno sirve para una cosa:
 
-    los catálogos (PDF)   describen con palabras: «GENESIS 7,5 500l 8 bar».
-                          Aquí se busca por características.
+    catálogos (PDF)   describen con palabras: «GENESIS 7,5 500l 8 bar».
+                      Aquí se busca por características.
 
-    las tarifas (Excel)   son códigos comerciales: «C45PRO X/196UT-C45PRO+196
-                          HERRAMIENTAS». Nadie escribe eso. Aquí se busca por
-                          referencia o por modelo, no por características.
+    tarifas (Excel)   son códigos comerciales: «C45PRO X/196UT-C45PRO+196».
+                      Nadie escribe eso. Aquí se busca por referencia del
+                      proveedor o por modelo, no por características.
 
-  Así que «necesito un compresor de 8 bar» se resuelve en dos pasos: primero
-  el catálogo dice qué modelos lo cumplen y con qué referencia, y después la
-  tarifa pone el precio a esas referencias. Al revés no encuentra nada: de
-  347.345 precios cargados, solo dos contienen la palabra «compresor».
+    Sage              lo que la casa vende de verdad, con la referencia que
+                      usan los comerciales a diario. Las marcas propias
+                      —Jender, BlizzCool— solo están aquí: el secador JKEP
+                      1495 no aparece en ningún catálogo de proveedor.
+
+  El orden de la respuesta sale de juntar las tres. «Un compresor de 8 bar»
+  lo resuelve el catálogo; «qué es la referencia 0141000030» lo resuelve
+  Sage; el precio lo pone la tarifa.
+
+  Todo ordenado por relevancia, que es la diferencia entre encontrar algo y
+  devolver lo primero que haya. Sin ella, «todos los compresores de tornillo»
+  devolvía dos catálogos de expositores y ni un compresor, con 1.890 páginas
+  cargadas que hablan de tornillo.
 */
-
-/** Siempre en español: el índice está en español y buscar en otra lengua no
- *  encuentra nada, sin dar error. */
-const IDIOMA = "spanish";
 
 export type TrozoEncontrado = {
   proveedor: string;
@@ -42,16 +46,21 @@ export type PrecioEncontrado = {
   año: number | null;
 };
 
-type FilaFichero = { supplier: string; file_name: string; year_hint: number | null };
+export type ArticuloEncontrado = {
+  codigo: string;
+  nombre: string;
+  marca: string | null;
+  fabricante: string | null;
+  familia: string | null;
+};
 
 /**
  * Las referencias que aparecen en un trozo de catálogo.
  *
- * Lo que busca son códigos de artículo: seguidos de 6 a 14 cifras, o mezclas
- * de letras y números como «N7TN801NUA». Se queda corto a propósito —no vale
- * para todos los proveedores— pero con lo que saca ya se puede ir a la tarifa
- * a por el precio, y lo que no reconozca lo sigue viendo el modelo en el
- * texto.
+ * Códigos de artículo: seguidos de 6 a 14 cifras, o mezclas de letras y
+ * números como «N7TN801NUA». Se queda corto a propósito —no vale para todos
+ * los proveedores— pero con lo que saca ya se puede ir a la tarifa a por el
+ * precio, y lo que no reconozca lo sigue viendo el modelo en el texto.
  */
 export function referenciasDe(texto: string): string[] {
   const encontradas = new Set<string>();
@@ -60,76 +69,63 @@ export function referenciasDe(texto: string): string[] {
   return [...encontradas].slice(0, 40);
 }
 
-/** Lo que el buscador de Postgres no puede digerir. */
 function limpiar(consulta: string): string {
   return consulta.replace(/["'\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
 /**
- * Páginas de catálogo que hablan de lo que se pregunta.
+ * Pregunta a una de las funciones de búsqueda, primero exigiendo todas las
+ * palabras y, si no sale nada, conformándose con cualquiera.
  *
- * Va en dos pasadas. La primera exige todas las palabras, que es lo que da
- * las respuestas buenas. Si no sale nada —y con cuatro o cinco palabras pasa
- * a menudo, porque basta que una no esté— se repite pidiendo cualquiera de
- * ellas, ordenando por las que más coincidan. Más vale una lista regular que
- * un «no he encontrado nada» cuando el producto está en el catálogo.
+ * El segundo intento sigue ordenado por relevancia, que es lo que lo hace
+ * útil: de los que coinciden en algo, primero los que coinciden en más.
  */
-export async function buscarEnCatalogos(
-  db: SupabaseClient, consulta: string, limite = 8,
-): Promise<TrozoEncontrado[]> {
+async function buscar<T>(db: SupabaseClient, funcion: string, consulta: string, tope: number): Promise<T[]> {
   const texto = limpiar(consulta);
   if (!texto) return [];
 
-  const pedir = async (termino: string, tipo: "websearch" | "plain") => {
-    const { data, error } = await db
-      .from("catalog_chunks")
-      .select("page, content, catalog_files!inner(supplier, file_name, year_hint)")
-      .textSearch("search", termino, { type: tipo, config: IDIOMA })
-      .limit(limite);
+  for (const laxo of [false, true]) {
+    const { data, error } = await db.rpc(funcion, { consulta: texto, laxo, tope });
     if (error) {
-      console.error("Catálogos: falló la búsqueda en catálogos", error);
+      console.error(`Catálogos: falló ${funcion}`, error);
       return [];
     }
-    return (data ?? []).map((fila) => {
-      const f = fila.catalog_files as unknown as FilaFichero;
-      return {
-        proveedor: f.supplier, fichero: f.file_name, año: f.year_hint,
-        pagina: fila.page as number | null, texto: String(fila.content),
-      };
-    });
-  };
-
-  const exacta = await pedir(texto, "websearch");
-  if (exacta.length > 0) return exacta;
-
-  const palabras = texto.split(" ").filter((p) => p.length > 2);
-  if (palabras.length < 2) return exacta;
-  return pedir(palabras.join(" or "), "websearch");
+    if ((data as T[] | null)?.length) return data as T[];
+  }
+  return [];
 }
 
-/** Productos de tarifa que encajan con lo que se escribe. */
-export async function buscarEnTarifas(
-  db: SupabaseClient, consulta: string, limite = 10,
-): Promise<PrecioEncontrado[]> {
-  const texto = limpiar(consulta);
-  if (!texto) return [];
+export async function buscarEnCatalogos(db: SupabaseClient, consulta: string, tope = 10) {
+  const filas = await buscar<Record<string, unknown>>(db, "buscar_en_catalogos", consulta, tope);
+  return filas.map((f): TrozoEncontrado => ({
+    proveedor: String(f.proveedor ?? ""),
+    fichero: String(f.fichero ?? ""),
+    pagina: (f.pagina as number | null) ?? null,
+    año: (f.anio as number | null) ?? null,
+    texto: String(f.texto ?? ""),
+  }));
+}
 
-  const { data, error } = await db
-    .from("catalog_prices")
-    .select("supplier, reference, ean, description, price, catalog_files!inner(file_name, year_hint)")
-    .textSearch("search", texto, { type: "websearch", config: IDIOMA })
-    .limit(limite);
-  if (error) {
-    console.error("Catálogos: falló la búsqueda en tarifas", error);
-    return [];
-  }
-  return (data ?? []).map(filaAPrecio);
+export async function buscarEnTarifas(db: SupabaseClient, consulta: string, tope = 14) {
+  const filas = await buscar<Record<string, unknown>>(db, "buscar_en_tarifas", consulta, tope);
+  return filas.map(filaAPrecio);
+}
+
+export async function buscarEnSage(db: SupabaseClient, consulta: string, tope = 12) {
+  const filas = await buscar<Record<string, unknown>>(db, "buscar_en_sage", consulta, tope);
+  return filas.map((f): ArticuloEncontrado => ({
+    codigo: String(f.codigo ?? ""),
+    nombre: String(f.nombre ?? ""),
+    marca: (f.marca as string | null) ?? null,
+    fabricante: (f.fabricante as string | null) ?? null,
+    familia: (f.familia as string | null) ?? null,
+  }));
 }
 
 /**
  * El precio de unas referencias concretas.
  *
- * Es el segundo paso: el catálogo ha dicho qué modelos sirven y con qué
+ * El segundo paso: el catálogo ha dicho qué modelos sirven y con qué
  * referencia, y aquí se les pone precio. Con ABAC cruzaron las 97 de 97.
  */
 export async function preciosDeReferencias(
@@ -147,33 +143,38 @@ export async function preciosDeReferencias(
     console.error("Catálogos: falló el cruce por referencia", error);
     return [];
   }
-  return (data ?? []).map(filaAPrecio);
+  return (data ?? []).map((fila) => {
+    const f = fila.catalog_files as unknown as { file_name: string; year_hint: number | null };
+    return {
+      proveedor: String(fila.supplier ?? ""),
+      referencia: fila.reference ?? null,
+      ean: fila.ean ?? null,
+      descripcion: fila.description ?? null,
+      precio: fila.price === null ? null : Number(fila.price),
+      fichero: f?.file_name ?? "",
+      año: f?.year_hint ?? null,
+    };
+  });
 }
 
 function filaAPrecio(fila: Record<string, unknown>): PrecioEncontrado {
-  const f = fila.catalog_files as unknown as { file_name: string; year_hint: number | null };
   return {
-    proveedor: String(fila.supplier ?? ""),
-    referencia: (fila.reference as string | null) ?? null,
+    proveedor: String(fila.proveedor ?? ""),
+    referencia: (fila.referencia as string | null) ?? null,
     ean: (fila.ean as string | null) ?? null,
-    descripcion: (fila.description as string | null) ?? null,
-    precio: fila.price === null || fila.price === undefined ? null : Number(fila.price),
-    fichero: f?.file_name ?? "",
-    año: f?.year_hint ?? null,
+    descripcion: (fila.descripcion as string | null) ?? null,
+    precio: fila.precio === null || fila.precio === undefined ? null : Number(fila.precio),
+    fichero: String(fila.fichero ?? ""),
+    año: (fila.anio as number | null) ?? null,
   };
 }
 
-/**
- * Todo junto, que es como lo usa el chat.
- *
- * Primero el catálogo, después el precio de lo que el catálogo haya nombrado,
- * y también una búsqueda directa en tarifa por si lo que se escribe es una
- * referencia o un modelo.
- */
+/** Todo junto, que es como lo usa el chat. */
 export async function buscarTodo(db: SupabaseClient, consulta: string) {
-  const [trozos, porTexto] = await Promise.all([
+  const [trozos, porTexto, articulos] = await Promise.all([
     buscarEnCatalogos(db, consulta),
     buscarEnTarifas(db, consulta),
+    buscarEnSage(db, consulta),
   ]);
 
   const referencias = trozos.flatMap((t) => referenciasDe(t.texto));
@@ -189,5 +190,5 @@ export async function buscarTodo(db: SupabaseClient, consulta: string) {
     precios.push(p);
   }
 
-  return { trozos, precios };
+  return { trozos, precios, articulos };
 }

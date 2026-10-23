@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buscarTodo, type PrecioEncontrado, type TrozoEncontrado } from "@/lib/catalogos/buscar";
+import { buscarTodo, type ArticuloEncontrado, type PrecioEncontrado, type TrozoEncontrado } from "@/lib/catalogos/buscar";
 import { CATALOGOS_ROLES, hasAnyRole } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/types";
@@ -37,32 +37,65 @@ const cuerpo = z.object({
 });
 
 const INSTRUCCIONES = `Ayudas a los comerciales de Intec, una empresa de suministro industrial, a
-encontrar productos en los catálogos y tarifas de sus proveedores.
+encontrar productos en los catálogos de sus proveedores y en su propio Sage.
 
-Respondes SOLO con lo que venga en los datos que se te pasan. Si no está ahí, lo dices.
+Te paso tres cosas, y cada una sirve para algo distinto:
+
+  CATÁLOGOS  páginas de catálogo de proveedor. Describen los productos: aquí
+             están las características (bar, caudal, potencia, medidas).
+  TARIFAS    listas de precios del proveedor, por referencia.
+  SAGE       lo que Intec vende de verdad, con SU referencia interna. Las
+             marcas de la casa (Jender, BlizzCool) SOLO están aquí.
 
 Reglas que no puedes saltarte:
 
-1. NUNCA te inventes ni calcules un precio. Usa exactamente el que venga en
-   TARIFAS. Si un producto del catálogo no tiene precio en la lista, dilo:
-   "no tengo su precio aquí".
-2. Di SIEMPRE de dónde sacas cada dato: el proveedor, el catálogo y la página.
-3. Si una tarifa no es del año en curso, avisa de que puede estar desfasada.
-4. Si lo que encuentras no cumple del todo lo que piden, dilo claramente en vez
-   de ofrecerlo como si cumpliera.
-5. Si no encuentras nada que sirva, dilo y sugiere cómo acotar la búsqueda
-   (marca, familia, alguna medida). No rellenes con generalidades.
+1. NUNCA te inventes ni calcules un precio. Usa el que venga, tal cual.
+2. Di SIEMPRE de dónde sacas cada dato: proveedor, catálogo y página, o Sage.
+3. Si una tarifa no es del año en curso, avísalo.
+4. NO tienes stock, ni plazos de entrega, ni consumo eléctrico, ni peso o
+   dimensiones salvo que aparezcan escritos. Si te los piden, di que no los
+   tienes y dónde mirarlos (Sage, el proveedor).
+5. No afirmes que dos cosas son compatibles ni equivalentes salvo que el
+   catálogo lo diga. Puedes señalar que lo parecen y que hay que confirmarlo.
 
-Escribe en español, directo y breve, como hablaría un compañero de almacén. Si
-hay varias opciones, ponlas en una tabla con modelo, característica clave,
-referencia y precio. Nada de vender: el comercial ya sabe vender, lo que
-necesita es el dato.`;
+CUANDO NO ENCUENTRES LO QUE PIDEN —y pasará— no te limites a decir que no.
+Haz lo siguiente, en este orden:
 
-function contexto(trozos: TrozoEncontrado[], precios: PrecioEncontrado[], añoActual: number): string {
+  a) Di en una línea qué no has encontrado.
+  b) Enseña lo que SÍ has encontrado que se le parezca, aunque no encaje del
+     todo, diciendo en qué se diferencia.
+  c) Haz UNA O DOS preguntas concretas que de verdad acoten: la marca, una
+     medida (bar, l/min, CV, pulgadas), la familia, o la referencia de Sage
+     si la tiene. Preguntas que el comercial pueda responder mirando su
+     pantalla o preguntando al cliente, no genéricas.
+
+Nunca sugieras que «habría que cargar el catálogo» ni hables de cómo
+funcionas por dentro: eso no es cosa del comercial.
+
+Si te piden "todos los X" y lo que tienes es una parte, dilo: enseña lo que
+tengas y advierte de que puede haber más, y cómo acotar para asegurarte.
+
+Escribe en español, directo y breve, como un compañero de almacén. Varias
+opciones, en tabla: modelo, característica clave, referencia y precio. Nada
+de vender: el comercial ya sabe vender, lo que necesita es el dato.`;
+
+function contexto(
+  trozos: TrozoEncontrado[], precios: PrecioEncontrado[], articulos: ArticuloEncontrado[], añoActual: number,
+): string {
   const partes: string[] = [];
 
+  if (articulos.length > 0) {
+    partes.push("=== SAGE (lo que vende Intec, con su referencia interna) ===");
+    for (const a of articulos) {
+      partes.push(`${a.codigo} | ${a.nombre}`
+        + `${a.marca ? ` | marca ${a.marca}` : ""}`
+        + `${a.fabricante && a.fabricante !== a.marca ? ` | fabricante ${a.fabricante}` : ""}`
+        + `${a.familia ? ` | ${a.familia}` : ""}`);
+    }
+  }
+
   if (trozos.length > 0) {
-    partes.push("=== CATÁLOGOS (describen los productos) ===");
+    partes.push("\n=== CATÁLOGOS (describen los productos) ===");
     for (const t of trozos) {
       const viejo = t.año && t.año < añoActual ? ` [OJO: catálogo de ${t.año}]` : "";
       partes.push(`\n--- ${t.proveedor} · ${t.fichero}${t.pagina ? ` · página ${t.pagina}` : ""}${viejo}\n${t.texto}`);
@@ -78,7 +111,10 @@ function contexto(trozos: TrozoEncontrado[], precios: PrecioEncontrado[], añoAc
     }
   }
 
-  if (partes.length === 0) return "No se ha encontrado nada en los catálogos para esta consulta.";
+  if (partes.length === 0) {
+    return "No se ha encontrado nada para esta consulta, ni en los catálogos de proveedor, "
+      + "ni en las tarifas, ni en los artículos de Sage.";
+  }
   return partes.join("\n");
 }
 
@@ -111,7 +147,7 @@ export async function POST(request: Request) {
   const ultimaSuya = [...datos.anteriores].reverse().find((m) => m.de === "persona")?.texto ?? "";
   const consulta = `${ultimaSuya} ${datos.pregunta}`.trim();
 
-  const { trozos, precios } = await buscarTodo(supabase, consulta);
+  const { trozos, precios, articulos } = await buscarTodo(supabase, consulta);
   const añoActual = new Date().getFullYear();
 
   try {
@@ -128,7 +164,7 @@ export async function POST(request: Request) {
         {
           role: "user" as const,
           content: `Pregunta del comercial: ${datos.pregunta}\n\n`
-            + `Esto es lo que hay en los catálogos sobre eso:\n\n${contexto(trozos, precios, añoActual)}`,
+            + `Esto es lo que hay sobre eso:\n\n${contexto(trozos, precios, articulos, añoActual)}`,
         },
       ],
     });
@@ -144,6 +180,7 @@ export async function POST(request: Request) {
       // Lo que se ha mirado, para que el comercial pueda ir a comprobarlo.
       fuentes: trozos.map((t) => ({ proveedor: t.proveedor, fichero: t.fichero, pagina: t.pagina, año: t.año })),
       productos: precios.length,
+      articulos: articulos.length,
     });
   } catch (fallo) {
     if (fallo instanceof Anthropic.RateLimitError) {
