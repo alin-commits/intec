@@ -16,6 +16,7 @@ import { downloadXlsx } from "@/lib/excel-export";
 import { monthKey, todayKey } from "@/lib/dates";
 import { COMPRAS_ROLES, hasAnyRole } from "@/lib/constants";
 import { estaPendiente, nombreDelEstado } from "@/lib/compras/reclamaciones";
+import { fechaEnDisputa } from "@/lib/compras/respuestas";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { AppRole } from "@/lib/types";
@@ -202,7 +203,7 @@ export function ComprasView() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [falloCarga, setFalloCarga] = useState<string | null>(null);
   const [hoy, setHoy] = useState("");
-  const [filtro, setFiltro] = useState<"sin_fecha" | "con_fecha" | "vencidos" | "reclamados" | "contestados" | "todos">("sin_fecha");
+  const [filtro, setFiltro] = useState<"sin_fecha" | "con_fecha" | "vencidos" | "reclamados" | "contestados" | "disputa" | "todos">("sin_fecha");
   // De entrada, el que más lleva esperando arriba: es el que hay que reclamar antes.
   const [orden, setOrden] = useState<Orden>({ clave: "esperando", sentido: "desc" });
   const [busqueda, setBusqueda] = useState("");
@@ -323,17 +324,23 @@ export function ComprasView() {
    * Si no hay líneas (todavía no han llegado), vale la fecha de la cabecera.
    */
   const estadoDe = useMemo(() => {
-    const mapa = new Map<string, { sinFecha: number; fecha: string | null }>();
+    // `fechas` son todas las de las líneas, no solo la del pedido: hacen falta
+    // para saber si lo que dice el proveedor cuadra con alguna de ellas.
+    const mapa = new Map<string, { sinFecha: number; fecha: string | null; fechas: string[] }>();
     for (const pedido of pedidos) {
       const llave = clave(pedido);
       const suyas = lineasPorPedido.get(llave) ?? [];
       if (suyas.length === 0) {
-        mapa.set(llave, { sinFecha: pedido.expected_on ? 0 : 1, fecha: pedido.expected_on });
+        mapa.set(llave, {
+          sinFecha: pedido.expected_on ? 0 : 1,
+          fecha: pedido.expected_on,
+          fechas: pedido.expected_on ? [pedido.expected_on] : [],
+        });
         continue;
       }
       const sinFecha = suyas.filter((linea) => !linea.expected_on && !pedido.expected_on).length;
       const fechas = suyas.map((linea) => linea.expected_on ?? pedido.expected_on).filter(Boolean) as string[];
-      mapa.set(llave, { sinFecha, fecha: fechas.length ? fechas.sort().at(-1) ?? null : null });
+      mapa.set(llave, { sinFecha, fecha: fechas.length ? [...fechas].sort().at(-1) ?? null : null, fechas });
     }
     return mapa;
   }, [pedidos, lineasPorPedido]);
@@ -363,7 +370,7 @@ export function ComprasView() {
   }, [seguimientos]);
 
   const conEstado = useMemo(() => pedidos.map((pedido) => {
-    const estado = estadoDe.get(clave(pedido)) ?? { sinFecha: 1, fecha: null };
+    const estado = estadoDe.get(clave(pedido)) ?? { sinFecha: 1, fecha: null, fechas: [] };
     const proveedor = pedido.supplier_code ? nombreProveedor.get(`${pedido.company_code}-${pedido.supplier_code}`) : undefined;
     const vencido = Boolean(estado.fecha && hoy && estado.fecha < hoy);
     const suyo = seguimientoDe.get(clave(pedido));
@@ -380,6 +387,17 @@ export function ComprasView() {
         reclamado más, con su botón de «Ha contestado» otra vez.
       */
       contestado: suyo?.state === "contestado",
+      /*
+        La fecha que ha dado el proveedor cuando no es ninguna de las que hay
+        en Sage. El pedido está «confirmado» para todo lo demás —tiene fecha,
+        no se reclama— y sin esto nadie se enteraría de que esa fecha ya la ha
+        desmentido quien tiene que traer el material.
+      */
+      enDisputa: fechaEnDisputa({
+        dicha: suyo?.confirmed_on ?? suyo?.proposed_on,
+        enSage: estado.fechas,
+        sinFecha: estado.sinFecha,
+      }),
     };
   }), [pedidos, estadoDe, nombreProveedor, hoy, seguimientoDe]);
 
@@ -415,7 +433,8 @@ export function ComprasView() {
         || (filtro === "con_fecha" && fila.sinFecha === 0)
         || (filtro === "vencidos" && fila.vencido)
         || (filtro === "reclamados" && (fila.seguimiento?.level ?? 0) > 0)
-        || (filtro === "contestados" && fila.contestado);
+        || (filtro === "contestados" && fila.contestado)
+        || (filtro === "disputa" && Boolean(fila.enDisputa));
       if (!encaja) return false;
       if (!texto) return true;
       return `${fila.proveedorNombre} ${fila.pedido.series}${fila.pedido.number} ${fila.pedido.supplier_code ?? ""}`.toLowerCase().includes(texto);
@@ -458,6 +477,7 @@ export function ComprasView() {
     vencidos: delPeriodo.filter((fila) => fila.vencido).length,
     reclamados: delPeriodo.filter((fila) => (fila.seguimiento?.level ?? 0) > 0).length,
     contestados: delPeriodo.filter((fila) => fila.contestado).length,
+    enDisputa: delPeriodo.filter((fila) => fila.enDisputa).length,
     importe: delPeriodo.reduce((suma, fila) => suma + Number(fila.pedido.pending_amount), 0),
     proveedores: new Set(delPeriodo.filter((fila) => fila.sinFecha > 0).map((fila) => fila.proveedorNombre)).size,
   }), [delPeriodo]);
@@ -618,7 +638,8 @@ export function ComprasView() {
     { header: "Reclamado", value: (fila) => (fila.seguimiento?.level ? `${fila.seguimiento.level} ${fila.seguimiento.level === 1 ? "vez" : "veces"}` : "No") },
     { header: "Última reclamación", value: (fila) => fila.seguimiento?.last_chased_at?.slice(0, 10) ?? "" },
     { header: "Ha contestado", value: (fila) => (fila.contestado ? "Sí" : "No") },
-    { header: "Fecha que dio", value: (fila) => fila.seguimiento?.confirmed_on ?? "" },
+    { header: "Fecha que dio", value: (fila) => fila.seguimiento?.confirmed_on ?? fila.seguimiento?.proposed_on ?? "" },
+    { header: "No cuadra con Sage", value: (fila) => (fila.enDisputa ? "Sí" : "No") },
   ];
 
   if (acceso === "comprobando") return <PageLoader label="Cargando compras…" />;
@@ -745,13 +766,14 @@ export function ComprasView() {
           <section className="panel table-panel">
             <div className="panel-heading">
               <div className="view-tabs" role="tablist" aria-label="Qué pedidos ver">
-                {([["sin_fecha", "Sin fecha"], ["vencidos", "Vencidos"], ["reclamados", "Reclamados"], ["contestados", "Contestados"], ["con_fecha", "Confirmados"], ["todos", "Todos"]] as const).map(([clave_, etiqueta]) => (
+                {([["sin_fecha", "Sin fecha"], ["vencidos", "Vencidos"], ["reclamados", "Reclamados"], ["contestados", "Contestados"], ["disputa", "En duda"], ["con_fecha", "Confirmados"], ["todos", "Todos"]] as const).map(([clave_, etiqueta]) => (
                   <button key={clave_} type="button" role="tab" aria-selected={filtro === clave_}
                     className={filtro === clave_ ? "view-tab active" : "view-tab"}
                     onClick={() => { setFiltro(clave_); setPagina(0); }}>
                     {etiqueta}
                     {clave_ === "contestados" && resumen.contestados > 0 ? ` (${numberFormatter.format(resumen.contestados)})` : ""}
                     {clave_ === "reclamados" && resumen.reclamados > 0 ? ` (${numberFormatter.format(resumen.reclamados)})` : ""}
+                    {clave_ === "disputa" && resumen.enDisputa > 0 ? ` (${numberFormatter.format(resumen.enDisputa)})` : ""}
                   </button>
                 ))}
               </div>
@@ -812,7 +834,13 @@ export function ComprasView() {
                     <td>
                       {fila.sinFecha > 0
                         ? <span className="badge badge-lost">{fila.sinFecha === fila.pedido.lines ? "sin fecha" : `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin fecha`}</span>
-                        : <span className={fila.vencido ? "badge badge-lost" : "badge badge-active"}>{fila.fecha}{fila.vencido ? " · vencido" : ""}</span>}
+                        : fila.enDisputa ? (
+                          // Tiene fecha en Sage, pero el proveedor ha dicho otra.
+                          <span className="sales-article">
+                            <span className="badge badge-aviso">{fila.fecha} en Sage</span>
+                            <small>el proveedor dice el {fila.enDisputa}</small>
+                          </span>
+                        ) : <span className={fila.vencido ? "badge badge-lost" : "badge badge-active"}>{fila.fecha}{fila.vencido ? " · vencido" : ""}</span>}
                     </td>
                     <td>{currencyFormatter.format(Number(fila.pedido.pending_amount))}</td>
                     <td>
@@ -825,7 +853,7 @@ export function ComprasView() {
                             : fila.seguimiento?.confirmed_on
                               ? <small>da el {fila.seguimiento.confirmed_on} · <strong className="texto-pendiente">falta pasarlo a Sage</strong></small>
                               : fila.seguimiento?.proposed_on
-                                ? <small>propone el {fila.seguimiento.proposed_on}</small>
+                                ? <small>propone el {fila.seguimiento.proposed_on}{fila.seguimiento.proposed_sure === false ? " (sin confirmar)" : ""}</small>
                                 : <small>sin fecha todavía</small>}
                         </span>
                       ) : fila.seguimiento?.level ? (
@@ -850,9 +878,13 @@ export function ComprasView() {
                               : `Escribir a ${fila.proveedorEmail}`}
                           onClick={() => void prepararReclamacion(fila)}>Reclamar</button>
                       ) : null}
+                      {/* La fecha dicha con condiciones también se puede dar por
+                          buena, pero el botón avisa de que no la dijo en firme. */}
                       {fila.seguimiento?.proposed_on && !fila.seguimiento.confirmed_on ? (
                         <button type="button" className="button button-compact button-primary"
-                          title={`Dar por buena la fecha del ${fila.seguimiento.proposed_on}`}
+                          title={fila.seguimiento.proposed_sure === false
+                            ? `Dar por buena la fecha del ${fila.seguimiento.proposed_on}, aunque no la dijeron en firme`
+                            : `Dar por buena la fecha del ${fila.seguimiento.proposed_on}`}
                           onClick={() => void aceptarFecha(fila)}>Aceptar {fila.seguimiento.proposed_on}</button>
                       ) : null}
                       {fila.seguimiento?.level && !fila.contestado ? (
@@ -1002,7 +1034,7 @@ type Hito = { cuando: string; titulo: string; detalle: string | null; tono: "sal
  * y qué nos han dicho.
  */
 function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
-  fila: { pedido: Pedido; sinFecha: number; fecha: string | null; vencido: boolean; proveedorNombre: string; proveedorEmail: string | null; seguimiento: Seguimiento | null };
+  fila: { pedido: Pedido; sinFecha: number; fecha: string | null; vencido: boolean; proveedorNombre: string; proveedorEmail: string | null; seguimiento: Seguimiento | null; enDisputa: string | null };
   lineas: Linea[];
   envios: EnvioHecho[];
   respuestas: RespuestaRecibida[];
@@ -1083,7 +1115,9 @@ function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
               ? <>dada por buena aquí · <strong className="texto-pendiente">falta pasarla a Sage</strong></>
               : fila.sinFecha > 0
                 ? `${fila.sinFecha} ${fila.sinFecha === 1 ? "línea" : "líneas"} sin confirmar`
-                : "todas las líneas confirmadas"}
+                : fila.enDisputa
+                  ? <>es la de Sage · <strong className="texto-pendiente">el proveedor dice el {fila.enDisputa}</strong></>
+                  : "todas las líneas confirmadas"}
           </p>
         </div>
       </section>

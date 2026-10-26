@@ -45,6 +45,7 @@ export type ResumenDeLectura = {
   respuestas: number;
   expediciones: number;
   automaticos: number;
+  /** Respuestas de las que sale una fecha dicha en firme. */
   conFecha: number;
   conPdf: number;
   sinIa: number;
@@ -128,8 +129,16 @@ export async function leerRespuestasDeProveedores(
     // Las cabeceras mandan sobre la IA para los contestadores: un "fuera de la
     // oficina" lo delata la cabecera aunque el texto parezca una respuesta.
     const tipo = automatico ? "automatico" : (lectura?.tipo ?? "respuesta");
-    // Una fecha solo se propone si está dicha sin condiciones.
-    const propuesta = lectura?.fechaSegura ? lectura.fechaPrevista : null;
+    /*
+      La fecha que ha dicho el proveedor, y aparte si la dijo en firme.
+
+      Antes, la dicha con condiciones —"sobre el 15", "si nos llega el
+      material"— se tiraba, y con ella se perdía lo único que avisa de que la
+      fecha que hay en Sage ya no vale. Se guarda siempre, con proposed_sure
+      diciendo de qué clase es; quien la mira decide, que para eso está.
+    */
+    const propuesta = lectura?.fechaPrevista ?? null;
+    const enFirme = Boolean(lectura?.fechaSegura && lectura.fechaPrevista);
 
     if (!iaFallo) await admin.from("purchase_order_replies").upsert({
       message_id: respuesta.correo.id,
@@ -143,7 +152,7 @@ export async function leerRespuestasDeProveedores(
       from_person: tipo === "respuesta",
       summary: lectura?.resumen?.slice(0, 500) ?? null,
       proposed_on: propuesta,
-      proposed_sure: Boolean(lectura?.fechaSegura),
+      proposed_sure: enFirme,
       orders: respuesta.orders,
     }, { onConflict: "message_id" });
 
@@ -161,17 +170,17 @@ export async function leerRespuestasDeProveedores(
           company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
           shipping_notice: lectura?.resumen?.slice(0, 500) ?? "Aviso de expedición",
           shipping_notice_at: respuesta.correo.receivedAt,
-          ...(propuesta ? { proposed_on: propuesta, proposed_sure: true } : {}),
+          ...(propuesta ? { proposed_on: propuesta, proposed_sure: enFirme } : {}),
           updated_at: new Date().toISOString(),
         })),
         { onConflict: "company_code,year,series,number" },
       );
-      if (propuesta) resumen.conFecha++;
+      if (enFirme) resumen.conFecha++;
       continue;
     }
     if (tipo !== "respuesta") { resumen.automaticos++; continue; }
     resumen.respuestas++;
-    if (propuesta) resumen.conFecha++;
+    if (enFirme) resumen.conFecha++;
 
     // El pedido pasa a contestado. La fecha se queda en propuesta: confirmed_on
     // no se toca aquí, lo hace una persona desde la pantalla.
@@ -180,7 +189,7 @@ export async function leerRespuestasDeProveedores(
       respuesta.orders.map((pedido) => ({
         company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
         state: "contestado", replied_at: respuesta.correo.receivedAt,
-        proposed_on: propuesta, proposed_sure: Boolean(lectura?.fechaSegura),
+        proposed_on: propuesta, proposed_sure: enFirme,
         reply_summary: lectura?.resumen?.slice(0, 500) ?? null,
         updated_at: ahora,
       })),

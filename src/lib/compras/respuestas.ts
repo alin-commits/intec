@@ -136,3 +136,38 @@ export function reconocerRespuestas(input: {
 
   return reconocidas;
 }
+
+/**
+ * Si lo que ha dicho el proveedor no cuadra con lo que hay en Sage.
+ *
+ * Pasa más de lo que parece: Sage tiene una fecha de recepción puesta al
+ * hacer el pedido, el proveedor escribe después diciendo otra, y como el
+ * pedido «ya tiene fecha» se da por bueno, deja de reclamarse y nadie vuelve
+ * a mirarlo. La fecha de Sage es la que manda —es la que ve el resto de la
+ * casa—, pero cuando el proveedor dice otra cosa hay que enterarse.
+ *
+ * Se compara contra todas las fechas de las líneas y no solo contra la del
+ * pedido, que es la más lejana: si el proveedor confirma la fecha de una de
+ * las líneas, no hay nada que discutir.
+ *
+ * Devuelve la fecha dicha por el proveedor cuando discrepa, y null cuando no
+ * hay nada que avisar. El aviso se apaga solo: en cuanto alguien pone esa
+ * fecha en Sage, las dos coinciden y desaparece.
+ */
+export function fechaEnDisputa(input: {
+  /** Lo que dijo el proveedor: la aceptada, y si no, la que se le leyó. */
+  dicha: string | null | undefined;
+  /** Las fechas que hay en Sage para las líneas pendientes. */
+  enSage: (string | null | undefined)[];
+  /** Cuántas líneas pendientes siguen sin fecha en Sage. */
+  sinFecha: number;
+}): string | null {
+  const dicha = input.dicha?.slice(0, 10);
+  if (!dicha) return null;
+  // Si todavía faltan fechas en Sage no es una discrepancia, es lo de siempre:
+  // el pedido está sin confirmar y ya lo dice la pantalla por otro lado.
+  if (input.sinFecha > 0) return null;
+  const enSage = input.enSage.filter(Boolean).map((fecha) => String(fecha).slice(0, 10));
+  if (enSage.length === 0) return null;
+  return enSage.includes(dicha) ? null : dicha;
+}

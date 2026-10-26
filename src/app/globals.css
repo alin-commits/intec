@@ -235,6 +235,8 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .badge-active, .badge-won { background: #dcfce7; color: #166534; }
 .badge-lost, .badge-invalid { background: #fee2e2; color: #991b1b; }
 .badge-offer_sent, .badge-interested { background: #fef3c7; color: #92400e; }
+/* Ni bien ni mal: algo que hay que mirar. */
+.badge-aviso { background: #fef3c7; color: #92400e; }
 .badge-contacted, .badge-contact_attempt, .badge-new { background: #dbeafe; color: #1e40af; }
 .text-link { color: var(--primary); font-size: 13px; font-weight: 750; }
 .intro-grid, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 25px; }

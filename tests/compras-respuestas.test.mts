@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pareceAutomatico, reconocerRespuestas, type CorreoRecibido, type ReclamacionMandada } from "../src/lib/compras/respuestas.ts";
+import { fechaEnDisputa, pareceAutomatico, reconocerRespuestas, type CorreoRecibido, type ReclamacionMandada } from "../src/lib/compras/respuestas.ts";
 
 const BUZON = "compras@suministrointec.com";
 
@@ -106,4 +106,29 @@ test("y por el asunto cuando no traen cabeceras", () => {
     assert.ok(pareceAutomatico({ subject }), subject);
   }
   assert.ok(!pareceAutomatico({ subject: "RE: Pedidos de compra Intec 7275 - confirmamos para el 4/11" }));
+});
+
+test("la fecha del proveedor que no cuadra con Sage se avisa, y la que cuadra no", () => {
+  // El caso de verdad: Sage dice el 27, el proveedor escribe después diciendo
+  // que lo manda el 2 de noviembre, y el pedido se daba por confirmado.
+  assert.equal(fechaEnDisputa({ dicha: "2026-11-02", enSage: ["2026-10-27"], sinFecha: 0 }), "2026-11-02");
+  assert.equal(fechaEnDisputa({ dicha: "2026-10-27", enSage: ["2026-10-27"], sinFecha: 0 }), null);
+
+  // Un pedido de varias líneas: si confirma la de una, no hay nada que decir
+  // aunque la del pedido —la más lejana— sea otra.
+  assert.equal(fechaEnDisputa({ dicha: "2026-10-27", enSage: ["2026-10-27", "2026-11-10"], sinFecha: 0 }), null);
+  assert.equal(fechaEnDisputa({ dicha: "2026-12-01", enSage: ["2026-10-27", "2026-11-10"], sinFecha: 0 }), "2026-12-01");
+});
+
+test("sin fecha dicha, o con el pedido aún sin confirmar, no se avisa de nada", () => {
+  assert.equal(fechaEnDisputa({ dicha: null, enSage: ["2026-10-27"], sinFecha: 0 }), null);
+  assert.equal(fechaEnDisputa({ dicha: "", enSage: ["2026-10-27"], sinFecha: 0 }), null);
+  // Mientras falten fechas en Sage el pedido ya sale como sin confirmar: un
+  // segundo aviso por lo mismo sobraría.
+  assert.equal(fechaEnDisputa({ dicha: "2026-11-02", enSage: ["2026-10-27"], sinFecha: 1 }), null);
+  assert.equal(fechaEnDisputa({ dicha: "2026-11-02", enSage: [], sinFecha: 0 }), null);
+});
+
+test("una fecha con hora se compara por el día", () => {
+  assert.equal(fechaEnDisputa({ dicha: "2026-10-27T00:00:00Z", enSage: ["2026-10-27"], sinFecha: 0 }), null);
 });
