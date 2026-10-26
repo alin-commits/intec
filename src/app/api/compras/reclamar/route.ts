@@ -60,7 +60,7 @@ export async function POST(request: Request) {
   // Los pedidos, leídos de la base y acotados a ese proveedor: lo que llega del
   // navegador solo dice cuáles mirar.
   const { data: pedidos, error } = await admin.from("sage_purchase_orders")
-    .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status")
+    .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status, sent_to_supplier")
     .eq("company_code", companyCode).eq("supplier_code", supplierCode).gt("pending_units", 0)
     .or(`status.is.null,status.eq.${ESTADO_PENDIENTE}`).in("number", numeros);
   if (error) {
@@ -107,6 +107,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Todas las líneas de esos pedidos ya tienen fecha." }, { status: 409 });
   }
 
+  // Los que en Sage siguen con «Pasado a proveedor» en «no». A mano se mandan
+  // igual —quien le da al botón está mirando el pedido—, pero la pantalla lo
+  // avisa antes de enviar: el proveedor no lo ha recibido todavía.
+  const sinPasar = new Set((pedidos.filter((p) => p.sent_to_supplier === false))
+    .map((p) => clavePedido({ companyCode: p.company_code, year: p.year, series: p.series, number: p.number })));
+  const sinPasarAProveedor = aReclamar.filter((p) => sinPasar.has(clavePedido(p))).length;
+
   const grupo = {
     companyCode,
     supplierCode,
@@ -123,6 +130,7 @@ export async function POST(request: Request) {
     const salida = await comoVaASalir(grupo, previo.destinatario);
     return NextResponse.json({
       previsualizacion: true, ...previo, pedidos: aReclamar.length,
+      sinPasarAProveedor,
       destinatario: salida.destinatario,
       via: salida.via,
       enHilo: Boolean(salida.hilo),

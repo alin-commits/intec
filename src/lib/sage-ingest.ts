@@ -257,6 +257,8 @@ export const sageIngestSchema = z.object({
     orderDate: day,
     supplierCode: optionalText(40),
     expectedOn: optionalDay,
+    /** La casilla «Pasado a proveedor» de Sage. Nulo: esa instalación no la tiene. */
+    sentToSupplier: z.boolean().nullable().default(null),
     status: z.number().int().nullable().default(null),
     netAmount: amount,
     pendingAmount: amount.default(0),
@@ -509,6 +511,7 @@ export function toPurchasesPayload(body: SageIngestBody): Record<string, unknown
       order_date: row.orderDate,
       supplier_code: row.supplierCode,
       expected_on: row.expectedOn,
+      sent_to_supplier: row.sentToSupplier,
       status: row.status,
       net_amount: row.netAmount,
       pending_amount: row.pendingAmount,

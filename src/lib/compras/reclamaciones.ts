@@ -1,10 +1,14 @@
 /*
   A quién toca reclamarle la fecha, y cuándo.
 
-  La regla la puso compras: a las 48 horas del pedido se le escribe una vez, y
-  a las 120 horas otra. Nada más; si después de dos no contesta, es un problema
-  de personas y no de recordatorios, y lo sigue quien lleva compras con el
-  botón de la pantalla.
+  La regla la puso compras: a los 2 días laborables del pedido se le escribe
+  una vez, y a los 5 otra. Nada más; si después de dos no contesta, es un
+  problema de personas y no de recordatorios, y lo sigue quien lleva compras
+  con el botón de la pantalla.
+
+  Laborables, no naturales: un pedido del viernes no lleva dos días de retraso
+  el domingo. Y solo se escribe si el pedido ya está pasado al proveedor; si
+  no, no lo ha recibido y no hay nada que reclamarle.
 
   Esto vive aparte de la ruta y del cron a propósito: decidir a quién se le
   escribe es lo único que puede equivocarse de verdad —un correo de más va a
@@ -42,7 +46,7 @@ export function estaPendiente(status: number | null | undefined): boolean {
   return status === null || status === undefined || status === ESTADO_PENDIENTE;
 }
 
-/** Los dos avisos: a los 2 y a los 5 días de hacer el pedido. */
+/** Los dos avisos: a los 2 y a los 5 días LABORABLES de hacer el pedido. */
 export const ESCALONES = [
   { nivel: 1 as const, dias: 2 },
   { nivel: 2 as const, dias: 5 },
@@ -71,6 +75,20 @@ export type PedidoReclamable = {
   lineasSinFecha: number;
   /** El estado de Sage: un pedido servido no se reclama aunque le sobren unidades. */
   status?: number | null;
+  /**
+   * «Pasado a proveedor» en Sage: si el pedido ya se le ha enviado.
+   *
+   * Mientras esté en «no», el proveedor no ha recibido nada y reclamarle una
+   * fecha es pedirle cuentas de algo que no le ha llegado. Se espera a que
+   * compras lo pase, y el plazo empieza a correr igualmente desde la fecha
+   * del pedido: lo que se mira aquí es si se puede escribir ya, no cuánto
+   * lleva esperando.
+   *
+   * Nulo cuando no se sabe —un agente de Sage antiguo no manda esta columna—.
+   * En ese caso se reclama como hasta ahora: dejar de reclamar por falta de
+   * un dato sería peor que el problema que arregla.
+   */
+  pasadoAProveedor?: boolean | null;
   pendingAmount: number;
 };
 
@@ -109,6 +127,36 @@ export function diasDesde(dia: string, hoy: string): number {
   return Math.max(0, Math.round((hasta - desde) / 86_400_000));
 }
 
+/**
+ * Días laborables entre dos fechas, sin contar el día del pedido.
+ *
+ * Los plazos de reclamar se cuentan así y no por días naturales: un pedido
+ * hecho el viernes no lleva dos días de retraso el domingo, porque el
+ * proveedor no ha tenido ni un día hábil para contestar. Contándolos
+ * naturales, todo lo pedido en jueves o viernes recibía su primer aviso el
+ * lunes a primera hora, cuando al otro lado nadie había abierto el correo.
+ *
+ * Festivos no se miran: son distintos en cada provincia y cada proveedor, y
+ * acertar con ellos importa mucho menos que no escribir en sábado.
+ */
+export function diasLaborablesDesde(dia: string, hoy: string): number {
+  const desde = new Date(`${dia}T00:00:00Z`);
+  const hasta = new Date(`${hoy}T00:00:00Z`);
+  if (Number.isNaN(desde.getTime()) || Number.isNaN(hasta.getTime())) return 0;
+  if (hasta <= desde) return 0;
+
+  let cuenta = 0;
+  const cursor = new Date(desde);
+  // Tope de seguridad: con dos años de pedidos no se llega, y una fecha
+  // absurda no puede dejar esto girando.
+  for (let paso = 0; paso < 4000 && cursor < hasta; paso += 1) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const diaSemana = cursor.getUTCDay();
+    if (diaSemana !== 0 && diaSemana !== 6) cuenta += 1;
+  }
+  return cuenta;
+}
+
 /** La clave con la que se mira el seguimiento de un pedido. */
 export function clavePedido(p: { companyCode: number; year: number; series: string; number: number }): string {
   return `${p.companyCode}|${p.year}|${p.series}|${p.number}`;
@@ -125,13 +173,16 @@ export function escalonQueToca(pedido: PedidoReclamable, seguimiento: Seguimient
   if (!estaPendiente(pedido.status)) return null;
   if (pedido.lineasSinFecha <= 0) return null;
   if (!pedido.supplierCode) return null;
+  // Si el pedido todavía no se le ha pasado al proveedor, no hay nada que
+  // reclamarle: no lo ha recibido.
+  if (pedido.pasadoAProveedor === false) return null;
   if (seguimiento && NO_SE_TOCA.has(seguimiento.state)) return null;
   if (seguimiento?.quietUntil && seguimiento.quietUntil.slice(0, 10) > hoy) return null;
 
   const hechos = seguimiento?.level ?? 0;
   const siguiente = ESCALONES.find((e) => e.nivel > hechos);
   if (!siguiente) return null;
-  return diasDesde(pedido.orderDate, hoy) >= siguiente.dias ? siguiente.nivel : null;
+  return diasLaborablesDesde(pedido.orderDate, hoy) >= siguiente.dias ? siguiente.nivel : null;
 }
 
 /**

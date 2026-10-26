@@ -31,9 +31,9 @@ export async function GET(request: Request) {
 
   const hoy = todayKey();
   const [{ data: pedidos, error: errorPedidos }, { data: lineas, error: errorLineas }, { data: seguimientos, error: errorSeguimiento }] = await Promise.all([
-    fetchAllPages<{ company_code: number; year: number; series: string; number: number; supplier_code: string | null; order_date: string; pending_amount: number; status: number | null }>(
+    fetchAllPages<{ company_code: number; year: number; series: string; number: number; supplier_code: string | null; order_date: string; pending_amount: number; status: number | null; sent_to_supplier: boolean | null }>(
       (from, to) => admin.from("sage_purchase_orders")
-        .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status")
+        .select("company_code, year, series, number, supplier_code, order_date, pending_amount, status, sent_to_supplier")
         .gt("pending_units", 0).or(`status.is.null,status.eq.${ESTADO_PENDIENTE}`).order("company_code").order("number").range(from, to)),
     fetchAllPages<{ company_code: number; year: number; series: string; number: number; expected_on: string | null }>(
       (from, to) => admin.from("sage_purchase_order_lines")
@@ -70,6 +70,7 @@ export async function GET(request: Request) {
     lineasSinFecha: sinFecha.get(clavePedido({ companyCode: p.company_code, year: p.year, series: p.series, number: p.number })) ?? 0,
     pendingAmount: Number(p.pending_amount),
     status: p.status,
+    pasadoAProveedor: p.sent_to_supplier,
   }));
 
   const grupos = reclamacionesDeHoy({ pedidos: reclamables, seguimiento, hoy });

@@ -15,20 +15,51 @@ const sin = new Map<string, Seguimiento>();
 const con = (p: PedidoReclamable, s: Partial<Seguimiento>) =>
   new Map([[clavePedido(p), { state: "sin_confirmar", level: 0, quietUntil: null, ...s }]]);
 
-test("el primer aviso sale a los 2 días del pedido, ni antes ni el día del pedido", () => {
+test("el primer aviso sale a los 2 días laborables, ni antes ni el día del pedido", () => {
+  // El 10/10/2026 es sábado: el domingo no cuenta, el lunes 12 va un día
+  // laborable y el martes 13 van dos.
   const p = pedido({ orderDate: "2026-10-10" });
   assert.equal(escalonQueToca(p, undefined, "2026-10-10"), null, "el mismo día no");
-  assert.equal(escalonQueToca(p, undefined, "2026-10-11"), null, "al día siguiente tampoco");
-  assert.equal(escalonQueToca(p, undefined, "2026-10-12"), 1, "a las 48 horas sí");
+  assert.equal(escalonQueToca(p, undefined, "2026-10-11"), null, "el domingo tampoco");
+  assert.equal(escalonQueToca(p, undefined, "2026-10-12"), null, "el lunes solo lleva uno");
+  assert.equal(escalonQueToca(p, undefined, "2026-10-13"), 1, "el martes sí");
 });
 
-test("el segundo sale a los 5 días, y solo si el primero ya salió", () => {
+test("el fin de semana no cuenta: lo pedido el viernes no se reclama el lunes", () => {
+  // El 16/10/2026 es viernes. Sábado y domingo no cuentan, así que el lunes
+  // 19 lleva un día laborable y el martes 20, dos.
+  const p = pedido({ orderDate: "2026-10-16" });
+  assert.equal(escalonQueToca(p, undefined, "2026-10-18"), null, "el domingo lleva cero");
+  assert.equal(escalonQueToca(p, undefined, "2026-10-19"), null, "el lunes lleva uno");
+  assert.equal(escalonQueToca(p, undefined, "2026-10-20"), 1, "el martes ya son dos");
+});
+
+test("el segundo sale a los 5 laborables, y solo si el primero ya salió", () => {
   const p = pedido({ orderDate: "2026-10-10" });
-  // Con el primero hecho: al quinto día toca el segundo.
-  assert.equal(escalonQueToca(p, { state: "reclamado", level: 1, quietUntil: null }, "2026-10-14"), null);
-  assert.equal(escalonQueToca(p, { state: "reclamado", level: 1, quietUntil: null }, "2026-10-15"), 2);
+  // Sábado 10: el jueves 15 lleva cuatro laborables y el viernes 16, cinco.
+  assert.equal(escalonQueToca(p, { state: "reclamado", level: 1, quietUntil: null }, "2026-10-15"), null);
+  assert.equal(escalonQueToca(p, { state: "reclamado", level: 1, quietUntil: null }, "2026-10-16"), 2);
   // Y después de los dos, no hay un tercero por mucho que pase el tiempo.
   assert.equal(escalonQueToca(p, { state: "reclamado", level: 2, quietUntil: null }, "2027-05-01"), null);
+});
+
+test("un pedido sin pasar al proveedor no se reclama, por viejo que sea", () => {
+  // Si no se le ha enviado, no lo ha recibido: reclamarle una fecha es
+  // pedirle cuentas de algo que no le ha llegado.
+  const sinPasar = pedido({ orderDate: "2026-09-01", pasadoAProveedor: false });
+  assert.equal(escalonQueToca(sinPasar, undefined, "2026-10-20"), null);
+
+  // En cuanto compras lo pasa entra por donde le toca, y el plazo se cuenta
+  // desde la fecha del pedido: uno viejo recibe el primero, no el segundo.
+  const yaPasado = pedido({ orderDate: "2026-09-01", pasadoAProveedor: true });
+  assert.equal(escalonQueToca(yaPasado, undefined, "2026-10-20"), 1);
+});
+
+test("si no se sabe si está pasado, se reclama como hasta ahora", () => {
+  // Un agente de Sage antiguo no manda esa columna. Dejar de reclamar por
+  // falta de un dato sería peor que el problema que arregla.
+  assert.equal(escalonQueToca(pedido({ orderDate: "2026-10-10", pasadoAProveedor: null }), undefined, "2026-10-13"), 1);
+  assert.equal(escalonQueToca(pedido({ orderDate: "2026-10-10" }), undefined, "2026-10-13"), 1);
 });
 
 test("un pedido viejo al que no se escribió nunca recibe el primero, no el segundo", () => {

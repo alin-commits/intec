@@ -1120,7 +1120,26 @@ function Preparar-Compras {
   $recepcionCabecera = Elegir "CabeceraPedidoProveedor" @("FechaRecepcion", "FechaEntrega", "FechaNecesaria")
   $recepcionLinea = Elegir "LineasPedidoProveedor" @("FechaRecepcion", "FechaEntrega", "FechaNecesaria")
   if (-not $recepcionLinea) { Avisar $avisosDeArranque "pedidos a proveedor: la linea no tiene fecha de recepcion; se usara solo la de la cabecera" }
+  # «Pasado a proveedor»: si el pedido ya se le ha enviado. Mientras esté en
+  # «no», el proveedor no lo ha recibido y no se le reclama nada.
+  #
+  # El nombre cambia según la versión de Sage, así que se prueban los que
+  # suelen ser. Si no aparece ninguno, se avisa con las columnas que SÍ hay y
+  # que suenan a eso: así se puede añadir el nombre bueno sin que nadie tenga
+  # que ir a mirarlo a Sage.
+  $pasado = Elegir "CabeceraPedidoProveedor" @(
+    "PasadoAProveedor", "PedidoPasadoAProveedor", "PasadoProveedor", "PedidoPasado",
+    "EnviadoAProveedor", "EnviadoProveedor", "Enviado", "Transmitido", "Comunicado")
+  if (-not $pasado) {
+    $suenan = @((Columnas "CabeceraPedidoProveedor") | Where-Object {
+      $_ -match "pasad|enviad|transmit|comunicad|emitid|impres|aprobad"
+    })
+    $pista = if ($suenan.Count -gt 0) { "las que hay parecidas: $($suenan -join ', ')" } else { "ninguna columna suena a eso" }
+    Avisar $avisosDeArranque "pedidos a proveedor: no encuentro la columna 'Pasado a proveedor'; $pista"
+  }
+
   return @{
+    PasadoAProveedor  = $pasado
     RecepcionCabecera = $recepcionCabecera
     RecepcionLinea    = $recepcionLinea
     Estado            = (Elegir "CabeceraPedidoProveedor" @("Estado", "StatusPedido"))
@@ -1145,12 +1164,29 @@ function Sql-ComprasPedidos($cfg) {
   $lineas = if ($cfg.Lineas) { "isnull(p.[$($cfg.Lineas)], 0)" } else { "0" }
   $importeLinea = if ($cfg.ImporteLinea) { "l.[$($cfg.ImporteLinea)]" } else { "0" }
   $pedidas = if ($cfg.Pedidas) { "l.[$($cfg.Pedidas)]" } else { "0" }
+  # En Sage esto puede venir como bit, como 'S'/'N' o como 0/1: se normaliza a
+  # 1 o 0 aquí, y si la columna no está, a nulo, que significa «no se sabe».
+  $pasado = if ($cfg.PasadoAProveedor) {
+    "case when cast(p.[$($cfg.PasadoAProveedor)] as nvarchar(10)) in ('1','S','SI','T','TRUE','Y') then 1 else 0 end"
+  } else { "cast(null as int)" }
+  # El group by se arma a mano porque solo puede llevar expresiones que miren
+  # una columna: SQL Server rechaza las constantes, y cuando una columna no
+  # está en esta instalacion su hueco en el select es un null o un cero.
+  $agrupar = @("p.CodigoEmpresa", "p.EjercicioPedido", "isnull(ltrim(rtrim(p.SeriePedido)), '')",
+    "p.NumeroPedido", "cast(p.FechaPedido as date)", "ltrim(rtrim(p.CodigoProveedor))")
+  if ($cfg.RecepcionCabecera) { $agrupar += $recepcion }
+  if ($cfg.PasadoAProveedor) { $agrupar += $pasado }
+  if ($cfg.Estado) { $agrupar += $estado }
+  if ($cfg.Importe) { $agrupar += $importe }
+  if ($cfg.Lineas) { $agrupar += $lineas }
+  $grupo = ($agrupar -join ", ")
   return @"
 select p.CodigoEmpresa, p.EjercicioPedido as Ejercicio,
   isnull(ltrim(rtrim(p.SeriePedido)), '') as Serie, p.NumeroPedido as Numero,
   cast(p.FechaPedido as date) as Fecha,
   ltrim(rtrim(p.CodigoProveedor)) as Proveedor,
   $recepcion as Recepcion,
+  $pasado as Pasado,
   $estado as Estado,
   $importe as Neto,
   $lineas as Lineas,
@@ -1163,8 +1199,7 @@ join LineasPedidoProveedor l
 where l.UnidadesPendientes > 0
   and p.FechaPedido >= dateadd(day, -$DiasComprasAtras, cast(getdate() as date))
   and p.CodigoEmpresa not in ($excluidas)
-group by p.CodigoEmpresa, p.EjercicioPedido, isnull(ltrim(rtrim(p.SeriePedido)), ''), p.NumeroPedido,
-  cast(p.FechaPedido as date), ltrim(rtrim(p.CodigoProveedor)), $recepcion, $estado, $importe, $lineas;
+group by $grupo;
 "@
 }
 
@@ -1212,6 +1247,12 @@ function Filas-ComprasPedidos($tabla) {
       orderDate     = ([datetime]$fila["Fecha"]).ToString("yyyy-MM-dd")
       supplierCode  = (Texto-O-Nulo $fila["Proveedor"] 40)
       expectedOn    = (Fecha-O-Nulo $fila["Recepcion"])
+      # Nulo si la columna no está en esta instalación de Sage: entonces el
+      # Hub no sabe si está pasado y reclama como hasta ahora.
+      sentToSupplier = $(
+        $v = (Entero-O-Nulo $fila["Pasado"])
+        if ($null -eq $v) { $null } else { $v -eq 1 }
+      )
       status        = (Entero-O-Nulo $fila["Estado"])
       netAmount     = (Numero $fila["Neto"])
       pendingAmount = (Numero $fila["PendienteImporte"])

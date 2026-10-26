@@ -71,6 +71,14 @@ type Pedido = {
   pending_units: number;
   /** El estado de Sage. Los servidos no llegan aquí: se filtran al leer. */
   status: number | null;
+  /**
+   * «Pasado a proveedor» en Sage. Nulo mientras el agente no mande la columna.
+   *
+   * En «no» el proveedor todavía no lo ha recibido: el aviso automático lo
+   * salta, y aquí se avisa sin quitar el botón, porque quien lleva compras
+   * puede tener un motivo que el automático no conoce.
+   */
+  sent_to_supplier: boolean | null;
 };
 
 type Linea = {
@@ -119,6 +127,8 @@ type Reclamacion = {
   redirigido?: string | null;
   /** De dónde sale; lo dice el servidor, que es quien lo sabe. */
   remitente?: string;
+  /** Cuántos de estos pedidos siguen sin pasar a proveedor en Sage. */
+  sinPasarAProveedor?: number;
 };
 
 /** Un correo que salió. */
@@ -259,7 +269,7 @@ export function ComprasView() {
       setAcceso("permitido");
 
       const [pedidosRes, lineasRes, proveedoresRes, seguimientoRes, enviosRes, respuestasRes] = await Promise.all([
-        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units, status").gt("pending_units", 0).order("company_code").order("number").range(desde, hasta)),
+        fetchAllPages((desde, hasta) => supabase.from("sage_purchase_orders").select("company_code, year, series, number, order_date, supplier_code, expected_on, net_amount, pending_amount, lines, pending_units, status, sent_to_supplier").gt("pending_units", 0).order("company_code").order("number").range(desde, hasta)),
         fetchAllPages((desde, hasta) => supabase.from("sage_purchase_order_lines").select("company_code, year, series, number, line_number, article_code, description, pending_units, expected_on, net_amount").gt("pending_units", 0).order("company_code").order("number").order("line_number").range(desde, hasta)),
         supabase.from("sage_suppliers").select("company_code, code, name, email"),
         leerSeguimiento(supabase),
@@ -474,6 +484,7 @@ export function ComprasView() {
       setReclamando((actual) => actual && {
         ...actual, destinatario: datos.destinatario, asunto: datos.asunto, html: datos.html, enviando: false,
         via: datos.via, enHilo: datos.enHilo, asuntoDelHilo: datos.asuntoDelHilo, redirigido: datos.redirigido, remitente: datos.remitente,
+        sinPasarAProveedor: Number(datos.sinPasarAProveedor ?? 0),
       });
     } catch {
       setReclamando(null);
@@ -778,6 +789,8 @@ export function ComprasView() {
                           {fila.pedido.lines} {fila.pedido.lines === 1 ? "línea" : "líneas"}
                           {estaPendiente(fila.pedido.status) ? "" : ` · ${nombreDelEstado(fila.pedido.status)} en Sage`}
                           {fila.seguimiento?.shipping_notice ? " · material enviado" : ""}
+                          {/* En Sage todavía no está pasado a proveedor: no lo ha recibido. */}
+                          {fila.pedido.sent_to_supplier === false ? <> · <strong className="texto-pendiente">sin pasar a proveedor</strong></> : ""}
                         </small>
                       </span>
                     </td>
@@ -815,8 +828,16 @@ export function ComprasView() {
                     {/* Los botones hacen lo suyo sin abrir además la ficha. */}
                     <td className="recent-inquiries-actions" onClick={(evento) => evento.stopPropagation()}>
                       {fila.sinFecha > 0 && fila.pedido.supplier_code && estaPendiente(fila.pedido.status) ? (
-                        <button type="button" className="button button-compact button-primary" disabled={!fila.proveedorEmail}
-                          title={fila.proveedorEmail ? `Escribir a ${fila.proveedorEmail}` : "Este proveedor no tiene correo en Sage"}
+                        <button type="button"
+                          className={fila.pedido.sent_to_supplier === false
+                            ? "button button-compact button-secondary"
+                            : "button button-compact button-primary"}
+                          disabled={!fila.proveedorEmail}
+                          title={!fila.proveedorEmail
+                            ? "Este proveedor no tiene correo en Sage"
+                            : fila.pedido.sent_to_supplier === false
+                              ? "En Sage este pedido aún no está pasado a proveedor: no lo ha recibido"
+                              : `Escribir a ${fila.proveedorEmail}`}
                           onClick={() => void prepararReclamacion(fila)}>Reclamar</button>
                       ) : null}
                       {fila.seguimiento?.proposed_on && !fila.seguimiento.confirmed_on ? (
@@ -849,6 +870,14 @@ export function ComprasView() {
                 {reclamando.redirigido ? (
                   <p className="form-error" style={{ margin: 0 }}>
                     Los envíos están desviados a <strong>{reclamando.redirigido}</strong>: esto no llega al proveedor.
+                  </p>
+                ) : null}
+                {/* El automático no reclama esto; a mano se puede, pero que se sepa. */}
+                {reclamando.sinPasarAProveedor ? (
+                  <p className="form-error" style={{ margin: 0 }}>
+                    {reclamando.sinPasarAProveedor === 1
+                      ? <>En Sage este pedido aún no está <strong>pasado a proveedor</strong>: el proveedor no lo ha recibido, así que le estarías pidiendo la fecha de algo que no le ha llegado.</>
+                      : <>En Sage {reclamando.sinPasarAProveedor} de estos pedidos aún no están <strong>pasados a proveedor</strong>: el proveedor no los ha recibido.</>}
                   </p>
                 ) : null}
                 <p className="muted" style={{ margin: 0 }}>
@@ -1044,6 +1073,18 @@ function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
           </p>
         </div>
       </section>
+
+      {fila.pedido.sent_to_supplier === false ? (
+        <section className="panel panel-padded">
+          <span className="eyebrow">Sin pasar a proveedor</span>
+          <p style={{ margin: "4px 0 0" }}>En Sage la casilla «Pasado a proveedor» está en «no».</p>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            El proveedor no ha recibido el pedido todavía, así que el aviso automático no se lo reclama
+            hasta que la casilla pase a «sí». Reclamar a mano se puede, pero le estarías pidiendo la fecha
+            de algo que no le ha llegado.
+          </p>
+        </section>
+      ) : null}
 
       {fila.seguimiento?.shipping_notice ? (
         <section className="panel panel-padded">
