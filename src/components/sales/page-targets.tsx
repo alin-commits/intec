@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { TrophyIcon, EuroIcon, CalendarIcon } from "@/components/icons";
@@ -9,7 +9,8 @@ import { euros, filterRows, groupRows, monthLongNames, monthNames, soloUnComerci
 import { createClient } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
 import type { SalesContext } from "./sales-context";
-import { Panel } from "./sales-ui";
+import { Panel, useSageQuery } from "./sales-ui";
+import { repartirElAno, repartirTrimestre, sumaDe, TRIMESTRES, variacionSobreAnterior } from "@/lib/sales-targets";
 
 /*
   Objetivos: el presupuesto de ventas, que no está en Sage y se pone aquí, y
@@ -62,11 +63,34 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [yearTotal, setYearTotal] = useState("");
   const [growth, setGrowth] = useState("5");
+  const [quarters, setQuarters] = useState<string[]>(["", "", "", ""]);
   // Otro ámbito u objetivos recién guardados: el formulario vuelve a lo que hay.
   if (draftKey !== scopeKey) {
     setDraftKey(scopeKey);
     setDraft(months.map(formatInput));
   }
+
+  /*
+    La venta del año anterior, mes a mes.
+
+    Se trae al entrar y no solo al pulsar «Calcular», porque de ella salen
+    otras tres cosas: la temporalidad con la que se reparte un total, la de
+    cada trimestre, y el porcentaje que dice si lo presupuestado sube o baja
+    respecto a lo que de verdad se vendió. Se pide el año entero: lo cargado
+    en el panel llega hasta hoy y un presupuesto se hace contra el año
+    completo.
+  */
+  const anteriorQuery = useSageQuery<SummaryRow[]>(
+    JSON.stringify(["objetivos-anterior", shownYear, ctx.reloadKey]),
+    async () => await createClient().rpc("sage_sales_summary", {
+      p_from: `${shownYear - 1}-01-01`, p_to: `${shownYear - 1}-12-31`, p_basis: "albaran",
+    }),
+  );
+  const anterior = useMemo(() => {
+    if (!anteriorQuery.data) return null;
+    const porMes = groupRows(filterRows(anteriorQuery.data, filters, ctx.repOf, ["channel", "month"]), (row) => row.month);
+    return Array.from({ length: 12 }, (_, index) => porMes.get(`${shownYear - 1}-${String(index + 1).padStart(2, "0")}`)?.net ?? 0);
+  }, [anteriorQuery.data, filters, ctx.repOf, shownYear]);
 
   // La venta real del ámbito, mes a mes (sin canal ni mes: el objetivo es del mes entero).
   const realRows = filterRows(ctx.rows, filters, ctx.repOf, ["channel", "month"]);
@@ -87,6 +111,15 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
     objetivo: Math.round(upTo(months, index)),
     ventas: index <= lastMonthIndex ? Math.round(upTo(real, index)) : 0,
   }));
+
+  /*
+    Lo que suman los doce meses escritos ahora mismo —no lo guardado— y cómo
+    queda contra lo que se vendió el año pasado. Es la cifra que se mira al
+    presupuestar: doce casillas sueltas no dicen si el año cuadra.
+  */
+  const totalDelAno = sumaDe(draft.map(parseAmount).map((value) => (value === null || Number.isNaN(value) ? null : value)));
+  const totalAnterior = anterior ? sumaDe(anterior) : 0;
+  const variacionDelAno = anterior && totalDelAno > 0 ? variacionSobreAnterior(totalDelAno, totalAnterior) : null;
 
   const scopeLabel = [
     filters.companies.length === 0 ? "Todo el grupo" : ctx.companyLabel,
@@ -136,36 +169,56 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   }
 
   function spread() {
-    // Reparte un total anual a partes iguales, para empezar desde algo.
+    /*
+      Reparte un total anual entre los doce meses con la forma que tuvo la
+      venta del año pasado. A doceavas solo cuando no hay año pasado del que
+      copiar: agosto no vende como marzo, y un presupuesto plano obliga a
+      corregir a mano justo los meses que más se desvían.
+    */
     const value = parseAmount(yearTotal);
     if (value === null || Number.isNaN(value)) {
       setMessage({ tone: "error", text: "Escribe el objetivo del año entero, por ejemplo 3.000.000." });
       return;
     }
     setMessage(null);
-    setDraft(Array.from({ length: 12 }, () => formatInput(Math.round((value / 12) * 100) / 100)));
+    setDraft(repartirElAno(value, anterior).map(formatInput));
   }
 
-  async function fromLastYear() {
+  /** El objetivo escrito para cada trimestre, repartido en sus tres meses. */
+  function spreadQuarters() {
+    const escritos = quarters.map(parseAmount);
+    if (escritos.some((value) => Number.isNaN(value))) {
+      setMessage({ tone: "error", text: "Hay algún trimestre que no es un número. Escribe solo cifras, por ejemplo 800.000." });
+      return;
+    }
+    if (escritos.every((value) => value === null)) {
+      setMessage({ tone: "error", text: "Escribe el objetivo de algún trimestre, por ejemplo 800.000 en T1." });
+      return;
+    }
+    setMessage(null);
+    let meses = draft.map(parseAmount).map((value) => (value === null || Number.isNaN(value) ? null : value));
+    escritos.forEach((importe, trimestre) => {
+      if (importe === null) return;
+      meses = repartirTrimestre({ meses, trimestre, importe, anterior });
+    });
+    setDraft(meses.map(formatInput));
+  }
+
+  function fromLastYear() {
     // El mismo mes del año anterior más un porcentaje, que es como se suele
-    // presupuestar. Se pide el año anterior entero: el panel solo tiene cargado
-    // hasta hoy para poder comparar.
+    // presupuestar.
     const percent = Number(growth.replace(",", "."));
     if (!Number.isFinite(percent)) {
       setMessage({ tone: "error", text: "El crecimiento tiene que ser un número, por ejemplo 5 o -2." });
       return;
     }
-    const { data, error } = await createClient().rpc("sage_sales_summary", { p_from: `${shownYear - 1}-01-01`, p_to: `${shownYear - 1}-12-31`, p_basis: "albaran" });
-    if (error) {
-      setMessage({ tone: "error", text: `No se pudo leer la venta de ${shownYear - 1}.` });
+    if (!anterior) {
+      setMessage({ tone: "error", text: anteriorQuery.loading ? `Todavía se está leyendo la venta de ${shownYear - 1}.` : `No se pudo leer la venta de ${shownYear - 1}.` });
       return;
     }
     setMessage(null);
-    const before = groupRows(filterRows((data ?? []) as SummaryRow[], filters, ctx.repOf, ["channel", "month"]), (row) => row.month);
-    setDraft(Array.from({ length: 12 }, (_, index) => {
-      const value = before.get(`${shownYear - 1}-${String(index + 1).padStart(2, "0")}`)?.net ?? 0;
-      return value > 0 ? formatInput(Math.round(value * (1 + percent / 100))) : "";
-    }));
+    setDraft(anterior.map((value) => (value > 0 ? formatInput(Math.round(value * (1 + percent / 100))) : "")));
+    setQuarters(["", "", "", ""]);
   }
 
   return (
@@ -225,8 +278,32 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
             <label>
               <span>{shownYear - 1} más un %</span>
               <input inputMode="decimal" value={growth} onChange={(event) => setGrowth(event.target.value)} aria-label="Crecimiento en porcentaje" />
-              <button type="button" className="button button-compact button-secondary" onClick={() => void fromLastYear()} disabled={!editable}>Calcular</button>
+              <button type="button" className="button button-compact button-secondary" onClick={fromLastYear} disabled={!editable}>Calcular</button>
             </label>
+            {/* Por trimestre, porque es como se habla del presupuesto: cada uno
+                baja a sus meses con el peso que tuvieron el año pasado. */}
+            <div className="sales-targets-quarters">
+              <span>Por trimestre</span>
+              <button type="button" className="button button-compact button-secondary" onClick={spreadQuarters} disabled={!editable}>Repartir</button>
+              <div className="sales-targets-quarter-fields">
+                {TRIMESTRES.map((trimestre, indice) => {
+                  const puesto = sumaDe(draft.map(parseAmount).map((value) => (value === null || Number.isNaN(value) ? null : value)), trimestre.meses);
+                  return (
+                    <label key={trimestre.nombre}>
+                      <small>{trimestre.nombre} · {trimestre.etiqueta}</small>
+                      <input
+                        inputMode="decimal"
+                        value={quarters[indice]}
+                        placeholder={puesto > 0 ? formatInput(puesto) : "—"}
+                        disabled={!editable}
+                        onChange={(event) => setQuarters((current) => current.map((item, position) => (position === indice ? event.target.value : item)))}
+                        aria-label={`Objetivo de ${trimestre.nombre} (${trimestre.etiqueta})`}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <div className="sales-targets-grid">
             {draft.map((value, index) => {
@@ -250,6 +327,21 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
               );
             })}
           </div>
+          {/* Lo que suman los doce, y si eso sube o baja respecto a lo que de
+              verdad se vendió. El porcentaje suelto no dice nada: al lado van
+              los euros que son esos puntos. */}
+          <p className="sales-targets-suma">
+            <span className="muted">Total {shownYear}</span>
+            <span>
+              <strong>{euros(totalDelAno)}</strong>
+              {variacionDelAno !== null ? (
+                <small className={variacionDelAno >= 0 ? "sales-up" : "sales-down"}>
+                  {" "}{variacionDelAno >= 0 ? "+" : "−"}{formatPercent(Math.abs(variacionDelAno))} sobre {shownYear - 1} ({euros(Math.abs(totalDelAno - totalAnterior))})
+                </small>
+              ) : <small className="muted"> {anteriorQuery.loading ? `leyendo ${shownYear - 1}…` : `sin venta en ${shownYear - 1} con la que comparar`}</small>}
+            </span>
+          </p>
+
           <div className="sales-targets-footer">
             {message ? <span className={message.tone === "ok" ? "sales-up" : "sales-down"} role="status">{message.text}</span>
               : <span className="muted">{editable ? "Deja vacío un mes para quitarle el objetivo." : "Los objetivos se ponen de uno en uno: una sociedad y un comercial."}</span>}
