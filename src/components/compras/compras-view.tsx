@@ -372,7 +372,14 @@ export function ComprasView() {
       proveedorNombre: proveedor?.name ?? pedido.supplier_code ?? "Sin proveedor",
       proveedorEmail: proveedor?.email ?? null,
       seguimiento: suyo ?? null,
-      contestado: suyo?.state === "contestado" && estado.sinFecha > 0,
+      /*
+        Que el proveedor haya contestado es un hecho, y no deja de serlo
+        porque luego entre la fecha en Sage. Antes esto llevaba un
+        `&& sinFecha > 0`, y el efecto era que en cuanto la fecha llegaba el
+        pedido se caía de la pestaña de contestados y volvía a verse como un
+        reclamado más, con su botón de «Ha contestado» otra vez.
+      */
+      contestado: suyo?.state === "contestado",
     };
   }), [pedidos, estadoDe, nombreProveedor, hoy, seguimientoDe]);
 
@@ -812,11 +819,14 @@ export function ComprasView() {
                       {fila.contestado ? (
                         <span className="sales-article" title={fila.seguimiento?.reply_summary ?? undefined}>
                           <span className="badge badge-active">ha contestado</span>
-                          {fila.seguimiento?.confirmed_on
-                            ? <small>da el {fila.seguimiento.confirmed_on} · <strong className="texto-pendiente">falta pasarlo a Sage</strong></small>
-                            : fila.seguimiento?.proposed_on
-                              ? <small>propone el {fila.seguimiento.proposed_on}</small>
-                              : <small>sin fecha todavía</small>}
+                          {/* «Falta pasarlo a Sage» solo mientras de verdad falte. */}
+                          {fila.sinFecha === 0
+                            ? <small>y la fecha ya está en Sage</small>
+                            : fila.seguimiento?.confirmed_on
+                              ? <small>da el {fila.seguimiento.confirmed_on} · <strong className="texto-pendiente">falta pasarlo a Sage</strong></small>
+                              : fila.seguimiento?.proposed_on
+                                ? <small>propone el {fila.seguimiento.proposed_on}</small>
+                                : <small>sin fecha todavía</small>}
                         </span>
                       ) : fila.seguimiento?.level ? (
                         <span className="sales-article">
@@ -950,15 +960,19 @@ function FormularioContestado({ onGuardar, onCancelar }: {
         Queda apuntado aquí y el pedido deja de reclamarse. La fecha sigue haciendo falta en Sage:
         en cuanto esté, el pedido pasa a confirmado él solo.
       </p>
-      <label>
-        <span>Fecha que ha dado <small className="muted">(si ha dado alguna)</small></span>
-        <DateField value={fecha} onChange={setFecha} />
-      </label>
-      <label>
-        <span>Nota <small className="muted">(opcional)</small></span>
-        <textarea rows={3} value={nota} onChange={(evento) => setNota(evento.target.value)}
-          placeholder="Lo que haya dicho: que falta material, que lo confirma la semana que viene…" />
-      </label>
+      {/* En form-grid para que los campos cojan el ancho: sueltos, el textarea
+          sale con el tamaño que le da el navegador y se pega a su etiqueta. */}
+      <div className="form-grid">
+        <label>
+          <span>Fecha que ha dado <small className="muted">(si ha dado alguna)</small></span>
+          <DateField value={fecha} onChange={setFecha} />
+        </label>
+        <label className="form-field-wide">
+          <span>Nota <small className="muted">(opcional)</small></span>
+          <textarea rows={3} value={nota} onChange={(evento) => setNota(evento.target.value)}
+            placeholder="Lo que haya dicho: que falta material, que lo confirma la semana que viene…" />
+        </label>
+      </div>
       <div className="modal-actions">
         <button type="button" className="button button-secondary" onClick={onCancelar}>Cancelar</button>
         <button type="submit" className="button" disabled={guardando}>{guardando ? "Guardando…" : "Apuntar"}</button>
