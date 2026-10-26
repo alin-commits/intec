@@ -162,7 +162,16 @@ export async function POST(request: Request) {
     const anthropic = new Anthropic();
     const respuesta = await anthropic.messages.create({
       model: MODELO,
-      max_tokens: 2000,
+      /*
+        Alto a propósito, como en compras.
+
+        Con 2.000 las preguntas del tipo «todos los equipos de 10 bar» salían
+        vacías o cortadas a media tabla: el modelo gastaba el presupuesto
+        razonando y no le quedaba nada para contestar. La API decía
+        stop_reason: max_tokens con 2.000 tokens de salida y 61 caracteres de
+        texto, que es la firma exacta de ese caso.
+      */
+      max_tokens: 16000,
       system: INSTRUCCIONES,
       messages: [
         ...datos.anteriores.map((m) => ({
@@ -183,12 +192,23 @@ export async function POST(request: Request) {
       .join("\n")
       .trim();
 
+    // Por qué paró. Una respuesta cortada a media tabla le llega al comercial
+    // como una lista entera, y no hay forma de que lo note: eso es peor que
+    // una lista corta que se presenta como corta.
+    if (respuesta.stop_reason !== "end_turn") {
+      console.warn(`Catálogos: paró por «${respuesta.stop_reason}» con ${texto.length} caracteres`
+        + ` y ${respuesta.usage.output_tokens} tokens de salida. Pregunta: ${datos.pregunta.slice(0, 70)}`);
+    }
+
     return NextResponse.json({
       respuesta: texto || "No he sabido responder a eso. Prueba a decirlo de otra forma.",
       // Lo que se ha mirado, para que el comercial pueda ir a comprobarlo.
       fuentes: trozos.map((t) => ({ proveedor: t.proveedor, fichero: t.fichero, pagina: t.pagina, año: t.año })),
       productos: precios.length,
       articulos: articulos.length,
+      cortada: respuesta.stop_reason === "max_tokens",
+      razon: respuesta.stop_reason,
+      tokensSalida: respuesta.usage.output_tokens,
     });
   } catch (fallo) {
     if (fallo instanceof Anthropic.RateLimitError) {
