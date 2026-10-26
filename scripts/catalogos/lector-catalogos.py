@@ -10,7 +10,15 @@ Lo que manda:
   - de los Excel de tarifas, una fila por producto: referencia, EAN,
     descripción y precio, ya normalizados aunque cada proveedor use su
     formato;
-  - de los PDF, el texto por páginas, para buscar características.
+  - de los PDF, el texto en trozos que se entiendan solos: las tablas fila a
+    fila con el nombre de cada columna delante, el resto en orden de lectura,
+    y todo encabezado por el título de su página.
+
+Lo de los PDF se hace así porque un catálogo cuenta las cosas en tablas, y
+el texto en crudo las deja como una ristra de números sin pies ni cabeza:
+«950 10 2 1 6 7 8». De ahí no sale una respuesta útil por mucho que se
+busque bien. Sacar las tablas cuesta unos 50 minutos de más en una pasada
+completa; con --sin-tablas se salta, y se lee peor.
 
 Lo que NO manda: los ficheros. En la carpeta hay 2,7 GB y un catálogo de
 376 MB. Lo que sube es el texto, que son unos 40 MB en total.
@@ -39,9 +47,14 @@ PUESTA EN MARCHA
 
      python lector-catalogos.py --limite 5
 
-4. La primera lectura completa (tarda; son 283 ficheros):
+4. La primera lectura completa (tarda; son 283 ficheros y unas 14.000
+   páginas de PDF, así que cuenta con hora y media):
 
      python lector-catalogos.py
+
+   Las siguientes son rápidas: solo se vuelve a leer lo que ha cambiado de
+   fecha o de tamaño. Para rehacerlo todo después de cambiar cómo se lee,
+   hace falta --todo.
 
 5. Programarlo, si se quiere. Una vez al día de sobra, que las tarifas
    cambian una vez al año:
@@ -96,6 +109,21 @@ TOPE_TROZO = 2500
 # Debajo de esto, la página no tiene texto de verdad: es un escaneo o una
 # maqueta en imagen.
 MINIMO_TEXTO_PAGINA = 40
+
+# Lo que deja Excel cuando una fórmula no sale: no es contenido, es un hueco.
+ERROR_DE_HOJA = re.compile(r"#(N/A|¡?REF|¡?VALOR|VALUE|DIV/0|NAME|NOMBRE|NULL|NUM)", re.IGNORECASE)
+
+# Buscar tablas en una página cuesta tiempo —un quinto de segundo— y en una de
+# texto corrido no hay ninguna. Se mira solo donde hay cifras suficientes para
+# que la haya. Con los 280 ficheros de la carpeta son unos 50 minutos de más
+# en una pasada completa, y de ahí sale lo que de verdad se pregunta: las
+# medidas, los caudales y los códigos. Se puede quitar con --sin-tablas.
+DIGITOS = re.compile(r"(?:\d[\d.,]*\s+){6}")
+CON_TABLAS = True
+
+# Por dónde se parte el texto de una página en piezas: por saltos de línea y
+# por finales de frase. Partir por ahí deja cada fila y cada párrafo entero.
+SEPARADOR = re.compile(r"\n+|(?<=[.;:])\s{2,}")
 
 EXTENSIONES = {".pdf", ".xlsx", ".xls", ".doc", ".docx"}
 
@@ -176,6 +204,21 @@ def hash_de(ruta, tam, modificado):
 
 # ---------------------------------------------------------------- Excel ----
 
+def sirve_como_texto(linea):
+    """
+    Si una línea de una hoja de cálculo dice algo que alguien pueda buscar.
+
+    Fuera las fórmulas rotas —#N/A, #¡REF!— y las filas que son solo cifras y
+    símbolos: en una tarifa que no se ha entendido, una fila sin palabras es
+    una referencia suelta sin su descripción, y para eso está la tabla de
+    precios.
+    """
+    if ERROR_DE_HOJA.search(linea):
+        return False
+    letras = sum(1 for c in linea if c.isalpha())
+    return letras >= 8 and letras >= len(linea) * 0.2
+
+
 def leer_excel(ruta):
     """Devuelve (precios, trozos, aviso)."""
     import openpyxl
@@ -214,10 +257,16 @@ def leer_excel(ruta):
                 # No se ha entendido el formato. Se guarda el texto en crudo
                 # para que al menos se pueda buscar por palabras, aunque no se
                 # pueda dar el precio exacto.
+                #
+                # Pero solo lo que sea texto: una hoja con fórmulas rotas
+                # llenaba el índice de líneas como «15201 #N/A #N/A», y esas
+                # no las busca nadie y compiten por salir con las que sí
+                # dicen algo. La mitad de lo guardado eran de esta clase.
                 for fila in filas:
                     linea = " ".join(str(c).strip() for c in fila if c is not None and str(c).strip())
-                    if len(linea) >= 20:
-                        trozos.append({"page": None, "content": linea[:TOPE_TROZO]})
+                    if len(linea) < 20 or not sirve_como_texto(linea):
+                        continue
+                    trozos.append({"page": None, "content": linea[:TOPE_TROZO]})
                 continue
 
             col_precio = mejor["price"][0]
@@ -252,6 +301,119 @@ def leer_excel(ruta):
 
 # ------------------------------------------------------------------ PDF ----
 
+def titulo_de(pagina):
+    """
+    De qué va la página, para encabezar sus trozos.
+
+    Es el texto más grande de la mitad de arriba: en un catálogo, el titular
+    de la página («Compresores de pistón AB») y no el pie ni la numeración.
+    Sin él, un trozo que dice «8 bar · 50 l/min · 2 CV» no deja saber de qué
+    producto habla, que es justo lo que pregunta el comercial.
+    """
+    try:
+        datos = pagina.get_text("dict")
+    except Exception:
+        return ""
+    alto = pagina.rect.height or 1
+    mejor, mejor_tam = "", 0
+    for bloque in datos.get("blocks", []):
+        for linea in bloque.get("lines", []):
+            arriba = linea.get("bbox", [0, 0, 0, 0])[1]
+            if arriba > alto * 0.45:
+                continue
+            texto = " ".join(t.get("text", "") for t in linea.get("spans", [])).strip()
+            tam = max((t.get("size", 0) for t in linea.get("spans", [])), default=0)
+            # Dos palabras como mínimo: descarta los números de página sueltos.
+            if tam > mejor_tam and len(texto) >= 6 and len(texto.split()) >= 2:
+                mejor, mejor_tam = texto, tam
+    return " ".join(mejor.split())[:120]
+
+
+def tablas_de(pagina):
+    """
+    Las tablas de la página, cada fila con el nombre de su columna delante.
+
+    Un catálogo pone las características en tablas, y el texto suelto las deja
+    como una ristra de números sin pies ni cabeza: «950 10 2 1 6 7 8». Así
+    cada fila se lee sola —«Código: AB000330115 · Diámetro: 115x1,0»— y se
+    encuentra buscando por lo que diga cualquiera de sus celdas.
+
+    Devuelve [] si esta versión de PyMuPDF no sabe sacarlas o si falla: es una
+    mejora, no un requisito, y un catálogo raro no puede tumbar la pasada.
+    """
+    try:
+        encontradas = pagina.find_tables()
+    except Exception:
+        return []
+    salida = []
+    for tabla in getattr(encontradas, "tables", []):
+        try:
+            filas = tabla.extract()
+        except Exception:
+            continue
+        if not filas or len(filas) < 2:
+            continue
+        cabecera = [" ".join(str(c).split())[:40] if c else "" for c in filas[0]]
+        # Una cabecera sin palabras no es cabecera: esa tabla va tal cual.
+        con_nombre = sum(1 for c in cabecera if re.search(r"[a-zA-ZáéíóúñÁÉÍÓÚÑ]{3}", c))
+        for fila in filas[1:]:
+            celdas = [" ".join(str(c).split()) if c else "" for c in fila]
+            if not any(celdas):
+                continue
+            if con_nombre >= 2:
+                partes = [f"{cabecera[i]}: {v}" if i < len(cabecera) and cabecera[i] else v
+                          for i, v in enumerate(celdas) if v]
+            else:
+                partes = [v for v in celdas if v]
+            linea = " · ".join(partes)
+            if len(linea) >= 12:
+                salida.append(linea)
+    return salida
+
+
+def partir(piezas, pagina, titulo):
+    """
+    Junta las piezas de una página en trozos, sin cortar ninguna por la mitad.
+
+    Antes se cortaba cada 2.500 caracteres a pelo y la cuenta caía donde caía:
+    a mitad de una fila de tabla, o entre el nombre de un producto y su
+    precio. Lo que queda partido ni lo encuentra la búsqueda ni lo entiende
+    quien lee la respuesta.
+
+    Cada trozo empieza por el título de la página. Cuesta 120 caracteres y
+    hace que el trozo se explique solo.
+    """
+    cabeza = f"{titulo}. " if titulo else ""
+    hueco = TOPE_TROZO - len(cabeza)
+    # El título suele ser también la primera línea de la página: ponerlo
+    # delante otra vez sería decirlo dos veces seguidas.
+    def montar(partes):
+        cuerpo = " ".join(partes)
+        return cuerpo if titulo and cuerpo.startswith(titulo) else cabeza + cuerpo
+
+    trozos, actual, largo = [], [], 0
+    for pieza in piezas:
+        pieza = " ".join(str(pieza).split())
+        if not pieza:
+            continue
+        # Una pieza más larga que el hueco va sola, partida como se pueda.
+        if len(pieza) > hueco:
+            if actual:
+                trozos.append(montar(actual))
+                actual, largo = [], 0
+            for j in range(0, len(pieza), hueco):
+                trozos.append(montar([pieza[j:j + hueco]]))
+            continue
+        if largo + len(pieza) + 1 > hueco and actual:
+            trozos.append(montar(actual))
+            actual, largo = [], 0
+        actual.append(pieza)
+        largo += len(pieza) + 1
+    if actual:
+        trozos.append(montar(actual))
+    return [{"page": pagina, "content": t} for t in trozos if len(t) >= MINIMO_TEXTO_PAGINA]
+
+
 def leer_pdf(ruta):
     """Devuelve (trozos, páginas, aviso)."""
     import pymupdf
@@ -265,12 +427,25 @@ def leer_pdf(ruta):
     try:
         total = doc.page_count
         for i in range(total):
-            texto = " ".join(doc[i].get_text().split())
+            pagina = doc[i]
+            # sort=True devuelve el texto en orden de lectura y no en el orden
+            # en que el PDF lo dibuja, que es lo que dejaba los números de una
+            # tabla delante del título al que pertenecen.
+            try:
+                crudo = pagina.get_text(sort=True)
+            except Exception:
+                crudo = pagina.get_text()
+            texto = " ".join(crudo.split())
             if len(texto) < MINIMO_TEXTO_PAGINA:
                 continue
             con_texto += 1
-            for j in range(0, len(texto), TOPE_TROZO):
-                trozos.append({"page": i + 1, "content": texto[j:j + TOPE_TROZO]})
+
+            titulo = titulo_de(pagina)
+            # Las tablas van primero y enteras: son las que llevan las medidas,
+            # los códigos y las características, que es lo que se pregunta.
+            piezas = tablas_de(pagina) if CON_TABLAS and DIGITOS.search(texto) else []
+            piezas += [p for p in SEPARADOR.split(crudo) if p.strip()]
+            trozos += partir(piezas, pagina=i + 1, titulo=titulo)
     finally:
         doc.close()
 
@@ -376,6 +551,8 @@ def main():
     p.add_argument("--limite", type=int, default=0, help="parar después de N ficheros (para probar)")
     p.add_argument("--solo", default="", help="solo los de este proveedor (la carpeta)")
     p.add_argument("--seco", action="store_true", help="leer y contar, sin mandar nada")
+    p.add_argument("--sin-tablas", action="store_true",
+                   help="no sacar las tablas de los PDF: va unas cinco veces más rápido y lee peor")
     p.add_argument("--volcar", default="", help="con --seco: escribir la primera tanda en este fichero")
     args = p.parse_args()
 
@@ -401,6 +578,9 @@ def main():
     except ImportError as falta:
         print(f"Falta una librería ({falta.name}). Instálala con:  pip install openpyxl pymupdf")
         return 1
+
+    global CON_TABLAS
+    CON_TABLAS = not args.sin_tablas
 
     hub = args.hub.rstrip("/")
     conocidos = {} if (args.todo or args.seco) else ya_leidos(hub, token)
