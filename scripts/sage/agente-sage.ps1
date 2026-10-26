@@ -127,7 +127,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-23 ocupado-no-es-caido"
+$VersionAgente = "2026-10-26 pasado-a-proveedor"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -2468,8 +2468,12 @@ if (-not $SoloVentas -and $cfgPagos) {
   # antes de mandar las remesas para que, si falla, el aviso llegue al Hub con
   # ellas: el 29 y el 30/09 falló y solo quedó dicho en el registro del servidor.
   $cartera = $null
+  # Que diga que version es en todas las lecturas y no solo en la larga de la
+  # noche: cuando algo no llega al Hub, lo primero que hay que saber es si en el
+  # servidor esta la copia nueva del agente o la de antes, y esperar a la noche
+  # para averiguarlo son horas de mirar donde no es.
+  Avisar $avisos "agente $VersionAgente"
   if ($lecturaLarga -or $Reconocer) {
-    Avisar $avisos "agente $VersionAgente"
     try { $cartera = Leer-CarteraPendiente $cfgPagos } catch { Avisar $avisos "cartera pendiente: $($_.Exception.Message)" }
     try { foreach ($nota in (Resumen-Remesas $cfgPagos)) { Avisar $avisos $nota } } catch { Avisar $avisos "resumen de remesas: $($_.Exception.Message)" }
   }
