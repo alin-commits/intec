@@ -64,7 +64,12 @@
   Basta con sustituir el archivo: las tareas programadas siguen igual. Para
   traer también el histórico de los datos nuevos, lanzarlo una vez a mano:
 
-       powershell -ExecutionPolicy Bypass -File C:\intec\agente-sage.ps1 -Dias 1500
+       powershell -ExecutionPolicy Bypass -File C:\intec\agente-sage.ps1 -Dias 1650
+
+  Mil seiscientos cincuenta días son los que hay cargados: el Hub tiene venta
+  desde junio de 2022. Con menos, los meses anteriores se quedan con los datos
+  de antes y sin lo que añada la versión nueva. Tarda un rato largo —va por
+  bloques de 45 días— y se puede lanzar en horario de trabajo: solo lee.
 
   ---------------------------------------------------------------------------
   Deja un registro en C:\intec\agente-sage.log con lo que hace cada ejecución.
@@ -127,7 +132,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-26 pasado-a-proveedor"
+$VersionAgente = "2026-10-26 subfamilia-y-pasado-a-proveedor"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -1007,8 +1012,18 @@ function Filas-ClientesDia($tabla) {
 function Sql-ClientesFamilia($cfg, $mesDesde, $mesHasta) {
   $familia = "isnull(ltrim(rtrim(cast($($cfg.Familia) as nvarchar(40)))), '')"
   $cliente = "ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40))))"
+  # La subfamilia, para poder preguntar quien compra una de ellas y no solo la
+  # familia entera. Sin columna de subfamilia va vacia y fuera del group by:
+  # SQL Server no deja agrupar por un valor fijo.
+  $subfamilia = "''"
+  $grupos = @("a.CodigoEmpresa", $cliente, "convert(char(7), a.FechaAlbaran, 120)", $familia)
+  if ($cfg.Subfamilia -ne "''") {
+    $subfamilia = "isnull(ltrim(rtrim(cast($($cfg.Subfamilia) as nvarchar(40)))), '')"
+    $grupos += $subfamilia
+  }
   return @"
 select a.CodigoEmpresa, $cliente as Cliente, convert(char(7), a.FechaAlbaran, 120) as Mes, $familia as Familia,
+  $subfamilia as Subfamilia,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
   sum(isnull($($cfg.Coste), 0)) as Coste,
   sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste,
@@ -1017,7 +1032,7 @@ $(Sql-UnirLineas $cfg)
 where $(Sql-Entre "a.FechaAlbaran" $mesDesde $mesHasta)
   and a.CodigoEmpresa not in ($excluidas)
   and isnull(ltrim(rtrim(a.CodigoCliente)), '') <> ''
-group by a.CodigoEmpresa, $cliente, convert(char(7), a.FechaAlbaran, 120), $familia;
+group by $($grupos -join ", ");
 "@
 }
 
@@ -1127,9 +1142,14 @@ function Preparar-Compras {
   # suelen ser. Si no aparece ninguno, se avisa con las columnas que SÍ hay y
   # que suenan a eso: así se puede añadir el nombre bueno sin que nadie tenga
   # que ir a mirarlo a Sage.
-  $pasado = Elegir "CabeceraPedidoProveedor" @(
+  # Los campos que cada casa se anade a medida llevan el prefijo CP_ en Sage
+  # («campo personalizado»), y este es uno: aqui se llama CP_PasadoProveedor.
+  # Se prueban los nombres a pelo y los mismos con el prefijo, para que en otra
+  # instalacion lo encuentre igual.
+  $nombresPasado = @(
     "PasadoAProveedor", "PedidoPasadoAProveedor", "PasadoProveedor", "PedidoPasado",
     "EnviadoAProveedor", "EnviadoProveedor", "Enviado", "Transmitido", "Comunicado")
+  $pasado = Elegir "CabeceraPedidoProveedor" @($nombresPasado + ($nombresPasado | ForEach-Object { "CP_$_" }))
   if (-not $pasado) {
     $suenan = @((Columnas "CabeceraPedidoProveedor") | Where-Object {
       $_ -match "pasad|enviad|transmit|comunicad|emitid|impres|aprobad"
@@ -1164,10 +1184,17 @@ function Sql-ComprasPedidos($cfg) {
   $lineas = if ($cfg.Lineas) { "isnull(p.[$($cfg.Lineas)], 0)" } else { "0" }
   $importeLinea = if ($cfg.ImporteLinea) { "l.[$($cfg.ImporteLinea)]" } else { "0" }
   $pedidas = if ($cfg.Pedidas) { "l.[$($cfg.Pedidas)]" } else { "0" }
-  # En Sage esto puede venir como bit, como 'S'/'N' o como 0/1: se normaliza a
-  # 1 o 0 aquí, y si la columna no está, a nulo, que significa «no se sabe».
+  # En Sage esto viene como bit, como 'S'/'N' o como 0/1, segun quien anadiera
+  # el campo: se normaliza aqui a 1, a 0, o a nulo.
+  #
+  # Solo se deja de reclamar cuando el dato dice que NO de forma reconocible.
+  # Lo que no se entienda —un nulo, el campo sin rellenar en los pedidos
+  # anteriores a que alguien anadiera la casilla, un valor raro— es «no se
+  # sabe», y eso se reclama como siempre: dejar de avisar por un hueco en los
+  # datos seria peor que el problema que esto arregla.
   $pasado = if ($cfg.PasadoAProveedor) {
-    "case when cast(p.[$($cfg.PasadoAProveedor)] as nvarchar(10)) in ('1','S','SI','T','TRUE','Y') then 1 else 0 end"
+    $col = "cast(p.[$($cfg.PasadoAProveedor)] as nvarchar(10))"
+    "case when $col in ('1','S','SI','T','TRUE','Y') then 1 when $col in ('0','N','NO','F','FALSE') then 0 else null end"
   } else { "cast(null as int)" }
   # El group by se arma a mano porque solo puede llevar expresiones que miren
   # una columna: SQL Server rechaza las constantes, y cuando una columna no
@@ -2290,6 +2317,7 @@ if (-not $SoloVentas) {
             customerCode   = (Texto $fila["Cliente"] 40)
             month          = "$([string]$fila["Mes"])-01"
             familyCode     = (Texto $fila["Familia"] 40)
+            subfamilyCode  = (Texto $fila["Subfamilia"] 40)
             netAmount      = (Numero $fila["Neto"])
             costAmount     = (Numero $fila["Coste"])
             netWithoutCost = (Numero $fila["NetoSinCoste"])
