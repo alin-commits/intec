@@ -4,9 +4,21 @@ import { createClient } from "@/lib/supabase/server";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { buildInviteEmail } from "@/lib/email-templates";
 import { appOrigin } from "@/lib/app-origin";
+import { USER_MANAGER_ROLES, hasAnyRole } from "@/lib/constants";
 import type { AppRole } from "@/lib/types";
 
-const allowedRoles = new Set<AppRole>(["admin", "commercial", "viewer", "it", "marketing", "direction", "accounting"]);
+/*
+  Los roles que se pueden dar en una invitación son los mismos que ofrece la
+  pantalla de Usuarios, y se traen de allí en vez de volver a escribirlos.
+
+  Estaban escritos a mano, y por eso invitar a alguien como «Agencia» —o como
+  «Compras»— fallaba con «selecciona al menos un rol válido»: la pantalla los
+  ofrecía y esta lista, hecha antes de que esos roles existieran, no los
+  conocía. Así un rol nuevo entra solo, y los que no se reparten desde aquí
+  —el propietario y los del gestor de contraseñas— siguen fuera, porque
+  USER_MANAGER_ROLES se construye quitándolos.
+*/
+const allowedRoles = new Set<AppRole>(USER_MANAGER_ROLES);
 
 function normalizeRoles(input: unknown): AppRole[] | null {
   if (!Array.isArray(input) || input.length === 0) return null;
@@ -24,7 +36,12 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
     const { data: currentProfile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
-    if (!currentProfile || !currentProfile.roles.includes("admin") || !currentProfile.is_active) {
+    /*
+      Con hasAnyRole y no con includes("admin"): el propietario pasa por todas
+      partes, igual que hace current_user_has_any_role() en la base. Preguntado
+      a mano, esta puerta se le quedaba cerrada.
+    */
+    if (!currentProfile || !currentProfile.is_active || !hasAnyRole(currentProfile.roles as AppRole[], ["admin"])) {
       return NextResponse.json({ error: "Solo un administrador puede invitar usuarios." }, { status: 403 });
     }
 

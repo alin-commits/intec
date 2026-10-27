@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import * as constantes from "../src/lib/constants.ts";
 import { ALL_APP_ROLES, CARDS_ROLES, CONSULTAS_EDIT_ROLES, CONSULTAS_ROLES, CONTRASENAS_ROLES, DASHBOARD_ROLES, SALES_ROLES, UNITS_ROLES, USER_MANAGER_ROLES, hasAnyRole, roleLabels } from "../src/lib/constants.ts";
 import type { AppRole } from "../src/lib/types.ts";
@@ -56,4 +57,32 @@ test("la agencia no entra en ninguna otra lista de permisos", () => {
     if ((valor as AppRole[]).includes("agency")) coladas.push(nombre);
   }
   assert.deepEqual(coladas, [], `la agencia no debería estar en: ${coladas.join(", ")}`);
+});
+
+/*
+  Y que la invitación no vuelva a llevar su propia lista.
+
+  El rol existía, la pantalla lo ofrecía y el test de arriba ya lo exigía, pero
+  invitar fallaba igual: la API tenía los roles escritos a mano en un Set, de
+  antes de que la agencia existiera. Que un rol nuevo funcione no puede
+  depender de que alguien se acuerde de tocar ese fichero, así que se mira el
+  código: tiene que traerlos de USER_MANAGER_ROLES y no enumerarlos.
+*/
+test("la invitación reparte los mismos roles que la pantalla de usuarios", () => {
+  const fuente = readFileSync(new URL("../src/app/api/users/invite/route.ts", import.meta.url), "utf8");
+  assert.match(fuente, /new Set<AppRole>\(USER_MANAGER_ROLES\)/, "los roles permitidos salen de USER_MANAGER_ROLES");
+  assert.doesNotMatch(fuente, /new Set<AppRole>\(\[/, "y no se vuelven a escribir a mano");
+});
+
+/*
+  El propietario invita y borra, como entra en todo lo demás. Las dos puertas
+  preguntaban por el rol con includes("admin"), que es justo lo que hasAnyRole
+  existe para evitar.
+*/
+test("las puertas de Usuarios preguntan con hasAnyRole, no con includes", () => {
+  for (const ruta of ["../src/app/api/users/invite/route.ts", "../src/app/api/users/[id]/route.ts"]) {
+    const fuente = readFileSync(new URL(ruta, import.meta.url), "utf8");
+    assert.doesNotMatch(fuente, /roles\.includes\("admin"\)/, `${ruta} deja fuera al propietario`);
+    assert.match(fuente, /hasAnyRole\(/, `${ruta} tiene que usar hasAnyRole`);
+  }
 });

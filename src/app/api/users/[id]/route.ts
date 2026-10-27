@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { hasAnyRole } from "@/lib/constants";
+import type { AppRole } from "@/lib/types";
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -12,7 +14,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
     const { data: currentProfile } = await supabase.from("profiles").select("roles, is_active").eq("id", user.id).maybeSingle();
-    if (!currentProfile || !currentProfile.roles.includes("admin") || !currentProfile.is_active) {
+    // El propietario también, como en todas las demás puertas.
+    if (!currentProfile || !currentProfile.is_active || !hasAnyRole(currentProfile.roles as AppRole[], ["admin"])) {
       return NextResponse.json({ error: "Solo un administrador puede eliminar usuarios." }, { status: 403 });
     }
 
