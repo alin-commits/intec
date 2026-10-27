@@ -92,9 +92,16 @@ function CabeceraConsultas({ columna, etiqueta, orden, onOrden }: {
 }) {
   const activa = orden.columna === columna;
   return (
-    <th aria-sort={activa ? (orden.desc ? "descending" : "ascending") : undefined}>
-      <button type="button" className="sort-button" onClick={() => onOrden(columna)}>
-        {etiqueta} <span aria-hidden="true">{activa ? (orden.desc ? "↓" : "↑") : "↕"}</span>
+    <th aria-sort={activa ? (orden.desc ? "descending" : "ascending") : "none"}>
+      {/*
+        sort-header y no sort-button: es la de la tabla de leads, y lleva
+        inline-flex, su hueco y white-space: nowrap. Con sort-button, que es
+        un botón suelto, la flecha se iba a la línea de abajo en cuanto la
+        columna era estrecha y la cabecera ocupaba dos renglones.
+      */}
+      <button type="button" className={activa ? "sort-header active" : "sort-header"} onClick={() => onOrden(columna)} title="Ordenar">
+        {etiqueta}
+        <span aria-hidden="true">{activa ? (orden.desc ? "↓" : "↑") : "↕"}</span>
       </button>
     </th>
   );
