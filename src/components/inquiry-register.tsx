@@ -45,18 +45,35 @@ type HistorialDeFicha = { inquiryId: string; rows: InquiryLogRow[] | null; faile
   aquí: si cambia cómo se cuenta lo que pasó, cambia en las dos a la vez.
 */
 function HistorialDeLaConsulta({ historial }: { historial: HistorialDeFicha }) {
-  if (!historial || historial.rows === null) return <p className="muted">Cargando…</p>;
-  if (historial.failed) return <p className="muted">El historial todavía no está disponible.</p>;
-  if (historial.rows.length === 0) return <p className="muted">Todavía no hay nada apuntado.</p>;
+  const cuerpo = !historial || historial.rows === null
+    ? <p className="muted">Cargando…</p>
+    : historial.failed
+      ? <p className="muted">El historial todavía no está disponible.</p>
+      : historial.rows.length === 0
+        ? <p className="muted">Todavía no hay nada apuntado.</p>
+        : (
+          /*
+            Más separación entre líneas y más sangría que la de los leads.
+
+            Aquí cada línea es corta —una fecha y una frase— y pegadas se leen
+            como un párrafo en vez de como una lista de cosas que pasaron. El
+            espacio va aquí y no en la hoja de estilos porque .lead-record-list
+            la comparten los leads y el CRM, y no toca cambiársela a ellos.
+          */
+          <ol className="lead-record-list" style={{ gap: 14 }}>
+            {historial.rows.map((row) => (
+              <li key={row.id} className={LOG_KIND_CLASS[row.kind] ?? ""} style={{ paddingLeft: 14, paddingBottom: 12 }}>
+                <span>{formatDateTime(row.created_at)}</span>
+                <p>{row.text}{row.actor_name ? ` · ${displayName(row.actor_name)}` : ""}</p>
+              </li>
+            ))}
+          </ol>
+        );
   return (
-    <ol className="lead-record-list">
-      {historial.rows.map((row) => (
-        <li key={row.id} className={LOG_KIND_CLASS[row.kind] ?? ""}>
-          <span>{formatDateTime(row.created_at)}</span>
-          <p>{row.text}{row.actor_name ? ` · ${displayName(row.actor_name)}` : ""}</p>
-        </li>
-      ))}
-    </ol>
+    <div className="ticket-details-section">
+      <h3 style={{ marginBottom: 12 }}>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
+      {cuerpo}
+    </div>
   );
 }
 
@@ -1897,8 +1914,7 @@ export function InquiryRegister() {
           <p className="muted">La venta sale del estado: al pasar la consulta a oferta, ganado o perdido se apunta sola con el valor de arriba, y si se vuelve atrás se quita.</p>
         )}
 
-        <h3>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
-        <HistorialDeLaConsulta historial={historial} />
+        <div style={{ marginTop: 22 }}><HistorialDeLaConsulta historial={historial} /></div>
 
         <div className="modal-actions">
           <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cerrar</button>
@@ -1952,10 +1968,7 @@ export function InquiryRegister() {
                 </div>
               </>
             )}
-            <div className="ticket-details-section">
-              <h3>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
-              <HistorialDeLaConsulta historial={historial} />
-            </div>
+            <HistorialDeLaConsulta historial={historial} />
           </div>
         ) : null}
         <div className="modal-actions">
