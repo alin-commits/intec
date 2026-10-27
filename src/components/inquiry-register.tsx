@@ -12,7 +12,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { CONSULTAS_ROLES, contactStatusBadges, contactStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, inquiryStatusOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { CONSULTAS_EDIT_ROLES, CONSULTAS_ROLES, contactStatusBadges, contactStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, inquiryStatusOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
 import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { writeRows } from "@/lib/supabase/write";
@@ -266,10 +266,10 @@ export function InquiryRegister() {
         const { data: profile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
         if (!active) return;
         const roles = (profile?.roles ?? []) as AppRole[];
-        setCanRegister(Boolean(profile && hasAnyRole(roles, ["admin", "commercial"])));
+        setCanRegister(Boolean(profile && hasAnyRole(roles, CONSULTAS_EDIT_ROLES)));
         setIsAdmin(roles.includes("admin"));
         setAccess(profile && hasAnyRole(roles, CONSULTAS_ROLES) ? "allowed" : "denied");
-        const unitScoped = hasAnyRole(roles, ["commercial"]) && !hasAnyRole(roles, ["admin", "viewer"]);
+        const unitScoped = hasAnyRole(roles, ["commercial", "agency"]) && !hasAnyRole(roles, ["admin", "viewer"]);
         if (unitScoped) {
           const { data: assignments } = await supabase.from("profile_business_units").select("business_unit_id").eq("profile_id", authData.user.id);
           setAssignedUnitIds((assignments ?? []).map((row) => String(row.business_unit_id)));

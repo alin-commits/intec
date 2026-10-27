@@ -12,7 +12,7 @@ import { AvisoCompras } from "@/components/compras/aviso-compras";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CATALOGOS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
+import { CAMPAIGNS_ROLES, CARDS_ROLES, CATALOGOS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CONTRASENAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -106,11 +106,12 @@ const departamentos: { id: string; label: string; entradas: Entrada[] }[] = [
     { href: "/unidades", label: "Unidades", icon: UnidadesIcon, roles: UNITS_ROLES },
     { href: "/usuarios", label: "Usuarios", icon: UsuariosIcon, roles: ["admin"] },
   ] },
-  // El gestor de contraseñas lo alcanza cualquiera con cuenta: lo que ve
-  // dentro se decide credencial a credencial.
+  // El gestor de contraseñas lo alcanza casi cualquiera con cuenta: lo que ve
+  // dentro se decide credencial a credencial. La agencia no, que es gente de
+  // fuera y no tiene por qué ver ni la puerta.
   { id: "utilidades", label: "Utilidades", entradas: [
     { href: "/catalogos", label: "Catálogos", icon: SearchIcon, roles: CATALOGOS_ROLES },
-    { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon },
+    { href: "/contrasenas", label: "Contraseñas", icon: KeyIcon, roles: CONTRASENAS_ROLES },
   ] },
 ];
 

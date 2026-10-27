@@ -20,6 +20,7 @@ const GROUP_LABELS: Record<AppRole, string> = {
   vault_admin: "Admin. de contraseñas",
   accounting: "Administración",
   purchasing: "Compras",
+  agency: "Agencia",
 };
 
 export function SendAnnouncementModal({ open, onClose, onSent }: { open: boolean; onClose: () => void; onSent: (message: string) => void }) {

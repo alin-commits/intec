@@ -33,9 +33,21 @@ export const roleLabels: Record<AppRole, string> = {
   vault_admin: "Admin. de contraseñas",
   accounting: "Administración",
   purchasing: "Compras",
+  agency: "Agencia",
 };
 
-export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction"];
+export const CONSULTAS_ROLES: AppRole[] = ["admin", "commercial", "viewer", "direction", "agency"];
+
+/*
+  Quién puede tocar las consultas, y no solo verlas.
+
+  La agencia de fuera entra a mirar lo que llega a los comerciales y no tiene
+  por qué poder cambiarlo. La base ya lo impide —sus políticas de escritura
+  exigen admin o commercial—, pero la pantalla tiene que saberlo también:
+  enseñar botones que van a fallar es peor que no enseñarlos.
+*/
+export const CONSULTAS_EDIT_ROLES: AppRole[] = ["admin", "commercial"];
+
 /**
  * Catálogos: los mismos que ya ven los artículos y los precios en Sage.
  *
@@ -103,7 +115,17 @@ export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];
 /** Everyone except the employee role, whose only page is Contraseñas. */
 export const DASHBOARD_ROLES: AppRole[] = ["admin", "commercial", "viewer", "it", "marketing", "direction", "vault_admin"];
 
-export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "accounting", "purchasing", "employee", "vault_admin"];
+export const ALL_APP_ROLES: AppRole[] = ["owner", "admin", "commercial", "viewer", "it", "marketing", "direction", "accounting", "purchasing", "employee", "vault_admin", "agency"];
+/*
+  Quién alcanza el gestor de contraseñas.
+
+  Era «cualquiera con cuenta», porque lo que se ve dentro se decide credencial
+  a credencial. Con la agencia eso deja de valer: es gente de fuera de la casa
+  y no tiene por qué ver ni la puerta. Se construye quitando, para que un rol
+  que se cree mañana siga entrando como hasta ahora y solo haya que pensarlo
+  cuando se quiera dejar a alguien fuera.
+*/
+export const CONTRASENAS_ROLES: AppRole[] = ALL_APP_ROLES.filter((rol) => rol !== "agency");
 
 /**
  * Los roles del gestor de contraseñas no se reparten desde la pantalla de
