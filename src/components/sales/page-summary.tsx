@@ -6,7 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { ConversionIcon, EuroIcon, UsuariosIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, signedEuros, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type SalesContext } from "./sales-context";
@@ -27,6 +27,25 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   const totals = useCustomerTotals(ctx);
 
   const { current, previous, currentMargin, previousMargin, marginSpansMatch, monthly, currentDiscount, previousDiscount } = model;
+
+  /*
+    Lo que vendieron las empresas del grupo que no pasaban por Sage.
+
+    Suma en el total, que es lo que se pidió: sin ello 2025 salía corto y nadie
+    sabía cuánto. Suma también en el periodo de al lado, porque si no la
+    comparación diría que se ha crecido un 4% cuando lo único que ha pasado es
+    que este año sí se cuenta Jender y el anterior no.
+
+    Solo suma aquí y en el reparto por mes. No puede sumar en productos, en
+    clientes ni por comercial: el origen son cuadros de dirección con una cifra
+    al mes por empresa, y repartirla por familias sería inventársela. Por eso
+    el total lo dice en voz alta, para que nadie busque el descuadre.
+  */
+  const deFuera = ctx.externalSales.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
+  const deFueraAntes = ctx.previousExternalSales.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
+  const empresasDeFuera = [...new Set(ctx.externalSales.map((fila) => fila.source))];
+  const ventasConFuera = current.net + deFuera;
+  const ventasAntesConFuera = previous.net + deFueraAntes;
   const marginDelta = currentMargin && previousMargin && marginSpansMatch;
   // Un descuento que sube es malo: la flecha va en verde cuando baja.
   const discountChange = currentDiscount && previousDiscount ? tenths(currentDiscount.percent - previousDiscount.percent) : null;
@@ -134,7 +153,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
       key: "albaranes",
       etiqueta: "Albaranes",
       valor: numberFormatter.format(current.documents),
-      nota: <>{delta(variation(current.documents, previous.documents)).delta} · {ctx.comparisonHelper}</>,
+      nota: <>{delta(variation(current.documents, previous.documents), `${current.documents >= previous.documents ? "+" : "-"}${numberFormatter.format(Math.abs(current.documents - previous.documents))}`).delta} · {ctx.comparisonHelper}</>,
     },
     {
       key: "descuento",
@@ -151,7 +170,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
       key: "mes",
       etiqueta: `Va de ${monthName(monthly.currentMonth.key)}`,
       valor: euros(monthly.currentMonth.bucket.net),
-      nota: currentPair ? <>{delta(variation(monthly.currentMonth.bucket.net, monthly.currentMonth.beforeNet)).delta} frente a los mismos días de {monthName(currentPair)}</> : "lo que llevamos de mes",
+      nota: currentPair ? <>{delta(variation(monthly.currentMonth.bucket.net, monthly.currentMonth.beforeNet), signedEuros(monthly.currentMonth.bucket.net - monthly.currentMonth.beforeNet)).delta} frente a los mismos días de {monthName(currentPair)}</> : "lo que llevamos de mes",
       onClick: () => ctx.setFilters({ months: monthly.currentMonth ? [monthly.currentMonth.key] : [] }),
       accion: "Filtrar este mes",
     } as Cifra] : []),
@@ -277,14 +296,16 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
         <div className="kpi-grid-duo sales-board-narrow">
           <KpiCard
             label={hayMesMarcado(filters) ? `Ventas de ${periodName}` : "Ventas"}
-            value={euros(current.net)}
-            helper={ctx.comparisonHelper}
+            value={euros(ventasConFuera)}
+            helper={deFuera > 0
+              ? `${ctx.comparisonHelper} · incluye ${euros(deFuera)} de ${empresasDeFuera.join(" y ")}, que no pasan por Sage`
+              : ctx.comparisonHelper}
             icon={<EuroIcon />}
             tone="indigo"
             sparkline={chispa.ventas}
             onClick={() => ctx.goTo("ventas")}
             actionLabel="Ver detalle"
-            {...delta(variation(current.net, previous.net))}
+            {...delta(variation(ventasConFuera, ventasAntesConFuera), signedEuros(ventasConFuera - ventasAntesConFuera))}
           />
           <KpiCard
             label="Margen"
@@ -295,7 +316,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             sparkline={monthly.marginComplete ? chispa.margen : undefined}
             onClick={() => ctx.goTo("ventas")}
             actionLabel="Ver margen"
-            {...(marginDelta ? delta(variation(currentMargin.amount, previousMargin.amount)) : { delta: "Sin comparación", positive: true })}
+            {...(marginDelta ? delta(variation(currentMargin.amount, previousMargin.amount), signedEuros(currentMargin.amount - previousMargin.amount)) : { delta: "Sin comparación", positive: true })}
           />
           <KpiCard
             label="Margen %"
@@ -314,7 +335,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             icon={<UsuariosIcon />}
             tone="amber"
             sparkline={chispa.ticket}
-            {...delta(variation(ticket(current), ticket(previous)))}
+            {...delta(variation(ticket(current), ticket(previous)), `${ticket(current) >= ticket(previous) ? "+" : "-"}${ticketFormatter.format(Math.abs(ticket(current) - ticket(previous)))}`)}
           />
         </div>
 

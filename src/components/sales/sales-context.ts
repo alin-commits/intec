@@ -6,8 +6,8 @@ import type { PeriodChoice, SalesPeriod } from "@/lib/sales-period";
   datos ya cargados, los filtros y cómo cambiarlos, y cómo abrir una lista.
 */
 
-export type SalesPageKey = "resumen" | "ventas" | "comercial" | "productos" | "clientes" | "comparador" | "objetivos";
-export type SalesDimension = "company" | "channel" | "rep" | "month" | "family";
+export type SalesPageKey = "resumen" | "ventas" | "comercial" | "productos" | "clientes" | "proveedores" | "comparador" | "objetivos";
+export type SalesDimension = "company" | "channel" | "rep" | "month" | "family" | "subfamily" | "supplier";
 
 /**
  * Las páginas y los filtros que respeta cada una. Un filtro que una página no
@@ -18,8 +18,18 @@ export const salesPages: { key: SalesPageKey; label: string; applies: SalesDimen
   { key: "resumen", label: "Resumen", applies: ["company", "channel", "rep", "month"] },
   { key: "ventas", label: "Ventas y margen", applies: ["company", "channel", "rep", "month"] },
   { key: "comercial", label: "Comercial", applies: ["company", "channel", "rep", "month"] },
-  { key: "productos", label: "Productos", applies: ["company", "channel", "rep", "month", "family"] },
-  { key: "clientes", label: "Clientes", applies: ["company", "channel", "rep", "month", "family"] },
+  /*
+    La subfamilia la aplican Productos y Clientes. En el comparador no: compara
+    familias entre sí y las saca del diario por familia, que no baja a la
+    subfamilia, así que allí el filtro sale en gris en vez de hacer como que
+    filtra. En Resumen y Ventas tampoco se aplica la familia, por lo mismo: sus
+    datos son totales por sociedad, canal y comercial, sin catálogo.
+  */
+  { key: "productos", label: "Productos", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
+  { key: "clientes", label: "Clientes", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
+  // El proveedor solo lo aplica su propia página: lo demás del panel se
+  // reparte por cliente o por familia, y ahí no hay proveedor que mirar.
+  { key: "proveedores", label: "Proveedores", applies: ["company", "channel", "rep", "month", "family", "subfamily", "supplier"] },
   // El comparador vive de lo marcado: todos los filtros se aplican, porque son
   // justo lo que compara.
   { key: "comparador", label: "Comparador", applies: ["company", "channel", "rep", "month", "family"] },
@@ -53,6 +63,22 @@ export type ListRequest =
 
 export type FamilyName = { company_code: number; code: string; name: string };
 
+/**
+ * Una venta que no pasó por Sage.
+ *
+ * Empresas del grupo que se llevaron fuera hasta que entraron en Sage: Jender
+ * hasta octubre de 2025, Blizcool todavía. Suman en los totales del panel y
+ * van marcadas por origen, porque cuando un número no cuadra manda Sage y eso
+ * solo se sostiene sabiendo qué parte no viene de él.
+ *
+ * Vienen por mes y sociedad y nada más: son cuadros de dirección, no
+ * albaranes. Así que suman en el total y en el reparto por mes, pero no se
+ * pueden repartir por familia, cliente ni comercial.
+ */
+export type ExternalSale = { month: string; source: string; company_code: number | null; net_amount: number };
+/** El nombre de una subfamilia. La clave es la pareja, no el código suelto. */
+export type SubfamilyName = { family_code: string; code: string; name: string | null };
+
 /** Un cliente de Sage, para abrir su ficha. El nombre, si se sabe, sale mientras carga. */
 export type CustomerRef = { company_code: number; customer_code: string; name?: string | null };
 
@@ -81,6 +107,14 @@ export type SalesRpcArgs = {
    */
   p_companies?: number[];
   p_families?: string[];
+  /** Las subfamilias marcadas, como «familia:subfamilia». */
+  p_subfamilies?: string[];
+  /*
+    El proveedor no está aquí a propósito: solo lo entiende su propia página,
+    que lo coge de los filtros. Metido aquí viajaría a las funciones de
+    clientes y de productos, que no tienen ese parámetro, y la llamada no es
+    que filtrara de menos: fallaría entera.
+  */
   p_months?: string[];
 };
 
@@ -119,10 +153,15 @@ export type SalesContext = {
   reps: Rep[];
   families: FamilyName[];
   familyName: (code: string) => string;
+  /** Cómo se llama una subfamilia marcada, dada su clave «familia:subfamilia». */
+  subfamilyName: (key: string) => string;
   repOf: (companyCode: number, repCode: number | null) => RepIdentity;
   repName: (key: string) => string;
   rows: SummaryRow[];
   previousRows: SummaryRow[];
+  /** Lo que no pasó por Sage, del periodo y del de al lado. */
+  externalSales: ExternalSale[];
+  previousExternalSales: ExternalSale[];
   model: SalesModel;
   /** Los filtros tal como los piden las funciones de la base de datos. */
   rpc: SalesRpcArgs;

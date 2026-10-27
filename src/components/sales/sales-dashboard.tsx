@@ -12,6 +12,7 @@ import {
   PROVISIONAL_DAYS,
   repPairsFor,
   seriesFor,
+  sinSubfamiliasHuerfanas,
   UNASSIGNED_KEY,
   type Company,
   type Rep,
@@ -38,7 +39,7 @@ import { loadCurrentProfile } from "@/lib/supabase/current-profile";
 import { SageRefreshButton } from "@/components/sage-refresh-button";
 import { SageFreshness } from "@/components/sage-freshness";
 import { chipNote, SalesFilterBar, type ActiveChip } from "./sales-filter-bar";
-import { type CustomerRef, type FamilyName, type ListRequest, type SageDetail, type SalesContext, type SalesPageKey, salesPages, type SalesRpcArgs } from "./sales-context";
+import { type CustomerRef, type ExternalSale, type FamilyName, type ListRequest, type SageDetail, type SalesContext, type SalesPageKey, salesPages, type SalesRpcArgs, type SubfamilyName } from "./sales-context";
 import { SalesListModal } from "./sales-list-modal";
 import { CustomerSheet } from "./customer-sheet";
 import { SummaryPage } from "./page-summary";
@@ -46,6 +47,7 @@ import { SalesMarginPage } from "./page-sales";
 import { CommercialPage } from "./page-commercial";
 import { ProductsPage } from "./page-products";
 import { CustomersPage } from "./page-customers";
+import { SuppliersPage } from "./page-suppliers";
 import { ComparadorPage } from "./page-comparador";
 import { AvisoComparador } from "./aviso-comparador";
 import { TargetsPage } from "./page-targets";
@@ -83,6 +85,9 @@ function readUrl(): { page: SalesPageKey | null; choice: PeriodChoice | null; co
       repKeys: (params.get("r") ?? "").split(",").filter(Boolean),
       months: (month ?? "").split(",").filter((item) => /^\d{4}-\d{2}$/.test(item)),
       families: (params.get("f") ?? "").split(",").filter(Boolean),
+      // "familia:subfamilia", que es como se marcan.
+      subfamilies: (params.get("sf") ?? "").split(",").filter((item) => item.includes(":")),
+      suppliers: (params.get("pv") ?? "").split(",").filter(Boolean),
     },
   };
 }
@@ -108,10 +113,13 @@ export function SalesDashboard() {
   /** Los filtros tal como se eligieron; los que no existen en el año cargado no se aplican. */
   const [requested, setRequested] = useState<SalesFilters>(noFilters);
   const [rows, setRows] = useState<SummaryRow[]>([]);
+  const [externalSales, setExternalSales] = useState<ExternalSale[]>([]);
+  const [previousExternalSales, setPreviousExternalSales] = useState<ExternalSale[]>([]);
   const [previousRows, setPreviousRows] = useState<SummaryRow[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
   const [families, setFamilies] = useState<FamilyName[]>([]);
+  const [subfamilies, setSubfamilies] = useState<SubfamilyName[]>([]);
   const [busy, setBusy] = useState(false);
   /** A qué periodo pertenecen las filas de ahora: mientras llega otro se sigue pintando este. */
   const [loaded, setLoaded] = useState<{ choice: PeriodChoice; compare: CompareChoice } | null>(null);
@@ -139,13 +147,16 @@ export function SalesDashboard() {
         }
         const supabase = createClient();
         const exists = (table: string) => supabase.from(table).select("company_code").limit(1);
-        const [yearRows, firstRows, companyRows, repRows, runRows, familyRows, customers, articles, offers, orders, incidents] = await Promise.all([
+        const [yearRows, firstRows, companyRows, repRows, runRows, familyRows, subfamilyRows, customers, articles, offers, orders, incidents] = await Promise.all([
           supabase.rpc("sage_sales_years"),
           supabase.from("sage_sales_daily").select("day").eq("basis", "albaran").order("day").limit(1),
           supabase.from("sage_companies").select("code, name, is_active").order("code"),
           supabase.from("sage_reps").select("company_code, code, name, is_person"),
           supabase.from("sage_sync_runs").select("started_at, ok, covered_from, covered_to").eq("ok", true).order("started_at", { ascending: false }).limit(1),
           supabase.from("sage_families").select("company_code, code, name"),
+          // Para poder decir el nombre de la subfamilia marcada en su etiqueta:
+          // el código suelto ("003") no le dice nada a nadie.
+          supabase.from("sage_subfamilies").select("family_code, code, name"),
           exists("sage_customer_days"),
           exists("sage_article_sales_monthly"),
           exists("sage_offer_documents"),
@@ -175,6 +186,7 @@ export function SalesDashboard() {
         setCompanies((companyRows.data ?? []) as Company[]);
         setReps((repRows.data ?? []) as Rep[]);
         setFamilies((familyRows.data ?? []) as FamilyName[]);
+        setSubfamilies((subfamilyRows.data ?? []) as SubfamilyName[]);
         const has = (result: { data: unknown[] | null; error: unknown }) => !result.error && (result.data ?? []).length > 0;
         setDetail({ customers: has(customers), articles: has(articles), offers: has(offers), orders: has(orders), incidents: has(incidents) });
         setCanSeeLeads(hasAnyRole(profile.roles, LEADS_ROLES));
@@ -209,15 +221,35 @@ export function SalesDashboard() {
           supabase.rpc("sage_sales_summary", { p_from: range.from, p_to: range.to, p_basis: basis })
             .order("month").order("company_code").order("series").order("rep_code")
             .range(start, end));
-        const [current, before] = await Promise.all([
+        /*
+          Y lo que no pasó por Sage, del mismo tramo.
+
+          Si la migración que crea esa tabla no está puesta, la llamada falla y
+          se sigue con lo de Sage: estas cifras suman, pero no pueden ser la
+          razón de que el panel entero deje de cargar.
+        */
+        const loadExternas = async (range: DateRange | null): Promise<ExternalSale[]> => {
+          if (!range) return [];
+          const { data, error } = await supabase.rpc("external_sales_in_range", { p_from: range.from, p_to: range.to });
+          if (error) {
+            console.warn("No se pudieron leer las ventas de fuera de Sage:", error.message);
+            return [];
+          }
+          return (data ?? []) as ExternalSale[];
+        };
+        const [current, before, externas, externasAntes] = await Promise.all([
           load(base),
           baseCompare ? load(baseCompare) : Promise.resolve({ data: [] as SummaryRow[], error: null }),
+          loadExternas(base),
+          loadExternas(baseCompare ?? null),
         ]);
         const failure = current.error ?? before.error;
         if (failure) throw failure;
         if (!active) return;
         setRows(current.data);
         setPreviousRows(before.data);
+        setExternalSales(externas);
+        setPreviousExternalSales(externasAntes);
         setLoaded({ choice, compare: compareChoice });
         setBusy(false);
       } catch (cause) {
@@ -262,6 +294,8 @@ export function SalesDashboard() {
     if (requested.channels.length > 0) params.set("c", requested.channels.join(","));
     if (requested.repKeys.length > 0) params.set("r", requested.repKeys.join(","));
     if (requested.families.length > 0) params.set("f", requested.families.join(","));
+    if (requested.subfamilies.length > 0) params.set("sf", requested.subfamilies.join(","));
+    if (requested.suppliers.length > 0) params.set("pv", requested.suppliers.join(","));
     const query = params.toString();
     const next = `${window.location.pathname}${query ? `?${query}` : ""}`;
     if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, "", next);
@@ -305,6 +339,10 @@ export function SalesDashboard() {
     repKeys: requested.repKeys.filter((item) => available.reps.has(item)),
     months: requested.months.filter((item) => shownBase.months.includes(item)),
     families: requested.families,
+    // La subfamilia se queda como está, igual que la familia: su catálogo no
+    // depende de lo cargado del periodo, sino de la familia a la que pertenece.
+    subfamilies: requested.subfamilies,
+    suppliers: requested.suppliers,
   }), [requested, available.channels, available.reps, shownBase.months]);
 
   const period = useMemo(
@@ -340,6 +378,7 @@ export function SalesDashboard() {
     p_series: seriesFor(filters.channels, allSeries),
     ...(filters.companies.length > 0 ? { p_companies: filters.companies } : {}),
     ...(filters.families.length > 0 ? { p_families: filters.families } : {}),
+    ...(filters.subfamilies.length > 0 ? { p_subfamilies: filters.subfamilies } : {}),
     // La lista de meses solo se manda cuando hace falta: si los marcados van
     // seguidos, el tramo de fechas ya los describe exactamente y preguntar por
     // meses no cambiaría nada. Con huecos —enero y julio— el tramo traería de
@@ -372,7 +411,20 @@ export function SalesDashboard() {
     [familyNames],
   );
 
-  const setFilters = useCallback((patch: Partial<SalesFilters>) => setRequested((current) => ({ ...current, ...patch })), []);
+  const subfamilyNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of subfamilies) {
+      const key = `${row.family_code}:${row.code}`;
+      if (row.name && !map.has(key)) map.set(key, row.name);
+    }
+    return map;
+  }, [subfamilies]);
+  const subfamilyName = useCallback(
+    (key: string) => subfamilyNames.get(key) ?? `Subfamilia ${key.split(":")[1] ?? key}`,
+    [subfamilyNames],
+  );
+
+  const setFilters = useCallback((patch: Partial<SalesFilters>) => setRequested((current) => sinSubfamiliasHuerfanas({ ...current, ...patch })), []);
   const toggle = useCallback(<K extends keyof SalesFilters>(key: K, value: SalesFilters[K]) => {
     setRequested((current) => ({ ...current, [key]: current[key] === value ? null : value }));
   }, []);
@@ -400,7 +452,7 @@ export function SalesDashboard() {
     setRequested((current) => {
       const lista = current[key] as SalesFilters[K][number][];
       const puesto = lista.includes(value);
-      return { ...current, [key]: puesto ? lista.filter((item) => item !== value) : [...lista, value] };
+      return sinSubfamiliasHuerfanas({ ...current, [key]: puesto ? lista.filter((item) => item !== value) : [...lista, value] });
     });
   }, []);
 
@@ -453,10 +505,13 @@ export function SalesDashboard() {
     reps,
     families,
     familyName,
+    subfamilyName,
     repOf,
     repName,
     rows,
     previousRows,
+    externalSales,
+    previousExternalSales,
     model,
     rpc,
     rpcCompare,
@@ -543,6 +598,20 @@ export function SalesDashboard() {
       key: "families",
       label: `${requested.families.length === 1 ? "Familia" : "Familias"}: ${juntar(requested.families.map(familyName))}`,
       note: chipNote("family", pageInfo.applies, false),
+    });
+  }
+  if (requested.suppliers.length > 0) {
+    chips.push({
+      key: "suppliers",
+      label: `${requested.suppliers.length === 1 ? "Proveedor" : "Proveedores"}: ${juntar(requested.suppliers)}`,
+      note: chipNote("supplier", pageInfo.applies, false),
+    });
+  }
+  if (requested.subfamilies.length > 0) {
+    chips.push({
+      key: "subfamilies",
+      label: `${requested.subfamilies.length === 1 ? "Subfamilia" : "Subfamilias"}: ${juntar(requested.subfamilies.map(subfamilyName))}`,
+      note: chipNote("subfamily", pageInfo.applies, false),
     });
   }
 
@@ -665,6 +734,7 @@ export function SalesDashboard() {
         {page === "comercial" ? <CommercialPage ctx={context} /> : null}
         {page === "productos" ? <ProductsPage ctx={context} /> : null}
         {page === "clientes" ? <CustomersPage ctx={context} /> : null}
+        {page === "proveedores" ? <SuppliersPage ctx={context} /> : null}
         {page === "comparador" ? <ComparadorPage ctx={context} /> : null}
 
         {/* Quien marca varias cosas casi siempre quiere verlas una contra otra. */}
