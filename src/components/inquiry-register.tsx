@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
@@ -35,19 +35,43 @@ type InquiryLogRow = { id: number; created_at: string; actor_name: string | null
 /** El color de cada tipo de línea, el mismo que en el registro de los leads y del CRM. */
 const LOG_KIND_CLASS: Record<string, string> = { alta: "lead-record-meta", estado: "lead-record-estado", datos: "" };
 
-/*
-  Una cabecera de la lista de consultas.
+/** Lo que una ficha sabe de su historial mientras lo trae. */
+type HistorialDeFicha = { inquiryId: string; rows: InquiryLogRow[] | null; failed: boolean } | null;
 
-  Ordena al pulsarla y, si se le pasa un filtro, lo lleva debajo. Las dos cosas
-  van juntas en el mismo sitio a propósito: quien busca algo mira la columna
-  donde está, no una barra de filtros en otra parte de la pantalla.
+/*
+  El historial de una consulta, tal como se ve en su ficha.
+
+  Lo pintan las dos fichas —la que edita y la de solo mirar— y por eso vive
+  aquí: si cambia cómo se cuenta lo que pasó, cambia en las dos a la vez.
 */
-function CabeceraConsultas({ columna, etiqueta, orden, onOrden, filtro }: {
+function HistorialDeLaConsulta({ historial }: { historial: HistorialDeFicha }) {
+  if (!historial || historial.rows === null) return <p className="muted">Cargando…</p>;
+  if (historial.failed) return <p className="muted">El historial todavía no está disponible.</p>;
+  if (historial.rows.length === 0) return <p className="muted">Todavía no hay nada apuntado.</p>;
+  return (
+    <ol className="lead-record-list">
+      {historial.rows.map((row) => (
+        <li key={row.id} className={LOG_KIND_CLASS[row.kind] ?? ""}>
+          <span>{formatDateTime(row.created_at)}</span>
+          <p>{row.text}{row.actor_name ? ` · ${displayName(row.actor_name)}` : ""}</p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/*
+  Una cabecera de la lista de consultas: ordena al pulsarla y dice por dónde va.
+
+  Los filtros no viven aquí. Metidos en la cabecera engordaban la fila y la
+  tabla se leía peor; están arriba, en su propia barra, entre el buscador y la
+  tabla.
+*/
+function CabeceraConsultas({ columna, etiqueta, orden, onOrden }: {
   columna: OrdenConsultas;
   etiqueta: string;
   orden: { columna: OrdenConsultas; desc: boolean };
   onOrden: (columna: OrdenConsultas) => void;
-  filtro?: ReactNode;
 }) {
   const activa = orden.columna === columna;
   return (
@@ -55,12 +79,9 @@ function CabeceraConsultas({ columna, etiqueta, orden, onOrden, filtro }: {
       <button type="button" className="sort-button" onClick={() => onOrden(columna)}>
         {etiqueta} <span aria-hidden="true">{activa ? (orden.desc ? "↓" : "↑") : "↕"}</span>
       </button>
-      {filtro}
     </th>
   );
 }
-
-
 
 type CompareMode = "previous" | "current" | "previous_year" | "none";
 
@@ -240,7 +261,9 @@ export function InquiryRegister() {
   const [filtroOrigen, setFiltroOrigen] = useState<"all" | "single" | "weekly">("all");
   const [ordenConsultas, setOrdenConsultas] = useState<{ columna: OrdenConsultas; desc: boolean }>({ columna: "fecha", desc: true });
   /** El historial de la consulta abierta: null mientras carga. */
-  const [historial, setHistorial] = useState<{ inquiryId: string; rows: InquiryLogRow[] | null; failed: boolean } | null>(null);
+  const [historial, setHistorial] = useState<HistorialDeFicha>(null);
+  /** La consulta que se está mirando sin poder tocarla. */
+  const [viewingRecord, setViewingRecord] = useState<InquiryRecord | null>(null);
   const [salesExpanded, setSalesExpanded] = useState(false);
   const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
@@ -764,26 +787,59 @@ export function InquiryRegister() {
       notes: record.notes ?? "",
     });
     setMessage(null);
-    /*
-      Y su historial, que lo escribe la base sola.
+    cargarHistorial(record.id);
+  }
 
-      Se pide aquí y no al cargar la pantalla porque son tantas líneas como
-      consultas hay: traerlas todas para enseñar las de una sola sería pedir
-      miles de filas que nadie va a mirar.
-    */
+  /*
+    El historial de una consulta, que lo escribe la base sola.
+
+    Se pide al abrir la ficha y no al cargar la pantalla porque son tantas
+    líneas como consultas hay: traerlas todas para enseñar las de una sola
+    sería pedir miles de filas que nadie va a mirar.
+  */
+  function cargarHistorial(inquiryId: string) {
     if (!configured) {
-      setHistorial({ inquiryId: record.id, rows: [], failed: false });
+      setHistorial({ inquiryId, rows: [], failed: false });
       return;
     }
-    setHistorial({ inquiryId: record.id, rows: null, failed: false });
+    setHistorial({ inquiryId, rows: null, failed: false });
     void createClient().from("inquiry_log").select("id, created_at, actor_name, kind, text")
-      .eq("inquiry_id", record.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .eq("inquiry_id", inquiryId).order("created_at", { ascending: false }).order("id", { ascending: false })
       .then(({ data, error }) => {
         // Si para cuando llega ya se está mirando otra consulta, esto no pinta nada.
-        setHistorial((actual) => (actual?.inquiryId === record.id
-          ? { inquiryId: record.id, rows: error ? [] : (data ?? []) as InquiryLogRow[], failed: Boolean(error) }
+        setHistorial((actual) => (actual?.inquiryId === inquiryId
+          ? { inquiryId, rows: error ? [] : (data ?? []) as InquiryLogRow[], failed: Boolean(error) }
           : actual));
       });
+  }
+
+  /*
+    Abrir la ficha de una consulta.
+
+    Quien puede cambiarla la abre para editarla; quien no —la agencia, una
+    cuenta de solo lectura, dirección— la abre para mirarla. Antes no había
+    manera: el único camino a la ficha era el botón «Editar», que a ellos no
+    les sale, así que la consulta se quedaba en lo que cupiera en su fila.
+  */
+  function abrirFicha(record: InquiryRecord) {
+    if (canRegister) {
+      openEditRecord(record);
+      return;
+    }
+    setViewingRecord(record);
+    cargarHistorial(record.id);
+  }
+
+  /*
+    Pulsar en la fila también abre la ficha, menos donde ya hay algo que pulsar.
+
+    En la fila hay un desplegable de estado y los botones del final: sin esta
+    comprobación, cambiar el estado abriría además la ficha, y borrar abriría
+    la ficha de lo que se está borrando.
+  */
+  function abrirFichaDesdeLaFila(event: MouseEvent<HTMLTableRowElement>, record: InquiryRecord) {
+    if ((event.target as HTMLElement).closest("button, select, input, a, label")) return;
+    abrirFicha(record);
   }
 
   async function saveEditRecord() {
@@ -1390,6 +1446,40 @@ export function InquiryRegister() {
               placeholder="Buscar por nombre, empresa, teléfono, correo o lo que pide"
             />
           </label>
+          {/*
+            Los filtros, entre el buscador y la tabla.
+
+            Aquí y no dentro de las cabeceras: metidos ahí engordaban la fila
+            de títulos y la tabla se leía peor. Son cuatro, que es justo lo que
+            cabe en la rejilla de .filter-bar.
+          */}
+          <div className="filter-bar">
+            <label><span>Marca</span>
+              <select value={filtroMarca} onChange={(event) => filtrar(setFiltroMarca, event.target.value)}>
+                <option value="all">Todas</option>
+                {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              </select>
+            </label>
+            <label><span>Canal</span>
+              <select value={filtroCanal} onChange={(event) => filtrar(setFiltroCanal, event.target.value as "all" | InquiryType)}>
+                <option value="all">Todos</option>
+                {inquiryChannelOrder.map((canal) => <option key={canal} value={canal}>{inquiryChannelLabels[canal]}</option>)}
+              </select>
+            </label>
+            <label><span>Estado</span>
+              <select value={filtroEstado} onChange={(event) => filtrar(setFiltroEstado, event.target.value as "all" | InquiryStatus)}>
+                <option value="all">Todos</option>
+                {inquiryStatusOrder.map((estado) => <option key={estado} value={estado}>{contactStatusLabels[estado]}</option>)}
+              </select>
+            </label>
+            <label><span>Origen</span>
+              <select value={filtroOrigen} onChange={(event) => filtrar(setFiltroOrigen, event.target.value as "all" | "single" | "weekly")}>
+                <option value="all">Todos</option>
+                <option value="single">Individual</option>
+                <option value="weekly">Semanal</option>
+              </select>
+            </label>
+          </div>
           {/* Con filtros puestos, la salida tiene que estar a la vista: una
               tabla vacía por un filtro olvidado parece una tabla rota. */}
           {hayFiltrosDeLista ? (
@@ -1401,30 +1491,13 @@ export function InquiryRegister() {
               }}>Quitar filtros</button>
             </p>
           ) : null}
-          <div className="table-scroll"><table><thead><tr>
+          <div className="table-scroll"><table className="sales-clickable-table"><thead><tr>
             <CabeceraConsultas columna="fecha" etiqueta="Fecha" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
-            <CabeceraConsultas columna="unidad" etiqueta="Marca" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
-              <select className="table-select" value={filtroMarca} aria-label="Filtrar por marca" onChange={(event) => filtrar(setFiltroMarca, event.target.value)}>
-                <option value="all">Todas</option>
-                {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
-              </select>} />
+            <CabeceraConsultas columna="unidad" etiqueta="Marca" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="contacto" etiqueta="Contacto" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
-            <CabeceraConsultas columna="canal" etiqueta="Canal" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
-              <select className="table-select" value={filtroCanal} aria-label="Filtrar por canal" onChange={(event) => filtrar(setFiltroCanal, event.target.value as "all" | InquiryType)}>
-                <option value="all">Todos</option>
-                {inquiryChannelOrder.map((canal) => <option key={canal} value={canal}>{inquiryChannelLabels[canal]}</option>)}
-              </select>} />
-            <CabeceraConsultas columna="estado" etiqueta="Estado" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
-              <select className="table-select" value={filtroEstado} aria-label="Filtrar por estado" onChange={(event) => filtrar(setFiltroEstado, event.target.value as "all" | InquiryStatus)}>
-                <option value="all">Todos</option>
-                {inquiryStatusOrder.map((estado) => <option key={estado} value={estado}>{contactStatusLabels[estado]}</option>)}
-              </select>} />
-            <CabeceraConsultas columna="origen" etiqueta="Origen" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
-              <select className="table-select" value={filtroOrigen} aria-label="Filtrar por origen" onChange={(event) => filtrar(setFiltroOrigen, event.target.value as "all" | "single" | "weekly")}>
-                <option value="all">Todos</option>
-                <option value="single">Individual</option>
-                <option value="weekly">Semanal</option>
-              </select>} />
+            <CabeceraConsultas columna="canal" etiqueta="Canal" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <CabeceraConsultas columna="estado" etiqueta="Estado" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <CabeceraConsultas columna="origen" etiqueta="Origen" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="cantidad" etiqueta="Cantidad" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="valor" etiqueta="Valor" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <th></th>
@@ -1433,13 +1506,16 @@ export function InquiryRegister() {
             const recordSales = salesByInquiry.get(record.id) ?? [];
             const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
             return (
-              <tr key={record.id}>
+              <tr key={record.id} onClick={(event) => abrirFichaDesdeLaFila(event, record)}>
                 <td>{formatDate(record.createdAt)}</td>
                 <td>{unit?.name ?? "—"}</td>
                 <td>
                   {record.entryMode === "weekly"
                     ? <span className="muted">—</span>
-                    : <><strong>{record.contactName || "Sin nombre"}</strong><small>{[record.companyName, record.productInterest].filter(Boolean).join(" · ") || "—"}</small></>}
+                    : <>
+                        <button type="button" className="sales-row-button" onClick={() => abrirFicha(record)}>{record.contactName || "Sin nombre"}</button>
+                        <small>{[record.companyName, record.productInterest].filter(Boolean).join(" · ") || "—"}</small>
+                      </>}
                 </td>
                 <td><span className={`badge badge-channel-${record.inquiryType}`}>{inquiryChannelLabels[record.inquiryType]}</span></td>
                 <td>
@@ -1822,22 +1898,68 @@ export function InquiryRegister() {
         )}
 
         <h3>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
-        {!historial || historial.rows === null ? <p className="muted">Cargando…</p>
-          : historial.failed ? <p className="muted">El historial todavía no está disponible.</p>
-            : historial.rows.length === 0 ? <p className="muted">Todavía no hay nada apuntado.</p> : (
-              <ol className="lead-record-list">
-                {historial.rows.map((row) => (
-                  <li key={row.id} className={LOG_KIND_CLASS[row.kind] ?? ""}>
-                    <span>{formatDateTime(row.created_at)}</span>
-                    <p>{row.text}{row.actor_name ? ` · ${displayName(row.actor_name)}` : ""}</p>
-                  </li>
-                ))}
-              </ol>
-            )}
+        <HistorialDeLaConsulta historial={historial} />
 
         <div className="modal-actions">
           <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cerrar</button>
           <button type="button" className="button button-primary" disabled={busy} onClick={() => void saveEditRecord()}>{busy ? "Guardando…" : "Guardar cambios"}</button>
+        </div>
+      </Modal>
+
+      {/*
+        La misma consulta para quien no puede cambiarla: los datos, lo que
+        pide, las notas y el historial. Sin un solo campo editable, que es
+        más honesto que enseñar casillas apagadas.
+      */}
+      <Modal
+        open={Boolean(viewingRecord)}
+        title={viewingRecord?.entryMode === "weekly" ? "Recuento semanal" : (viewingRecord?.contactName || "Consulta")}
+        eyebrow="Consulta"
+        scrollInside
+        onClose={() => setViewingRecord(null)}
+      >
+        {viewingRecord ? (
+          <div className="ticket-details">
+            <div className="ticket-details-grid">
+              <div><span>Fecha</span><strong>{formatDate(viewingRecord.createdAt)}</strong></div>
+              <div><span>Marca</span><strong>{units.find((unit) => unit.id === viewingRecord.businessUnitId)?.name ?? "—"}</strong></div>
+              <div><span>Canal</span><strong>{inquiryChannelLabels[viewingRecord.inquiryType]}</strong></div>
+              <div><span>Origen</span><strong>{viewingRecord.entryMode === "weekly" ? "Recuento semanal" : "Individual"}</strong></div>
+              {viewingRecord.entryMode === "weekly" ? (
+                <div><span>Cantidad</span><strong>{numberFormatter.format(viewingRecord.count)}</strong></div>
+              ) : (
+                <>
+                  <div><span>Estado</span><strong>{contactStatusLabels[viewingRecord.status ?? "contactado"]}</strong></div>
+                  <div><span>Empresa</span><strong>{viewingRecord.companyName || "—"}</strong></div>
+                  <div><span>Teléfono</span><strong>{viewingRecord.phone ? <a href={`tel:${viewingRecord.phone.replace(/\s+/g, "")}`}>{viewingRecord.phone}</a> : "—"}</strong></div>
+                  <div><span>Correo</span><strong>{viewingRecord.email ? <a href={`mailto:${viewingRecord.email}`}>{viewingRecord.email}</a> : "—"}</strong></div>
+                  <div><span>Venta</span><strong>{(() => {
+                    const suyas = salesByInquiry.get(viewingRecord.id) ?? [];
+                    return suyas.length > 0 ? currencyFormatter.format(suyas.reduce((suma, entry) => suma + entry.value, 0)) : "—";
+                  })()}</strong></div>
+                </>
+              )}
+            </div>
+            {viewingRecord.entryMode === "weekly" ? null : (
+              <>
+                <div className="ticket-details-section">
+                  <h3>Qué pide</h3>
+                  <p>{viewingRecord.productInterest || "No se apuntó."}</p>
+                </div>
+                <div className="ticket-details-section">
+                  <h3>Notas</h3>
+                  <p>{viewingRecord.notes || "Sin notas."}</p>
+                </div>
+              </>
+            )}
+            <div className="ticket-details-section">
+              <h3>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
+              <HistorialDeLaConsulta historial={historial} />
+            </div>
+          </div>
+        ) : null}
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={() => setViewingRecord(null)}>Cerrar</button>
         </div>
       </Modal>
 
