@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
@@ -13,12 +13,13 @@ import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import { CONSULTAS_EDIT_ROLES, CONSULTAS_ROLES, contactStatusBadges, contactStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, inquiryStatusOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { hayFiltrosPuestos, listaDeConsultas, type OrdenConsultas } from "@/lib/consultas-lista";
 import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
 import { writeRows } from "@/lib/supabase/write";
 import { reportSafeError } from "@/lib/errors";
 import { dateKeyInMadrid, dayNumber, daysInMonth, isoWeekStart, monthKey, monthLabel, monthRange, monthShortLabel, monthWeekBuckets, previousMonthKey, previousYearMonthKey, todayKey, yearOfMonth, yearRange } from "@/lib/dates";
-import { currencyFormatter, formatDate, formatPercent, numberFormatter } from "@/lib/format";
+import { currencyFormatter, displayName, formatDate, formatDateTime, formatPercent, numberFormatter } from "@/lib/format";
 import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -27,6 +28,37 @@ import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { TablePagination } from "@/components/ui/table-pagination";
 
 type ViewMode = "month" | "year";
+
+/** Una línea del historial de una consulta (inquiry_log), que se apunta sola. */
+type InquiryLogRow = { id: number; created_at: string; actor_name: string | null; kind: string; text: string };
+
+/** El color de cada tipo de línea, el mismo que en el registro de los leads y del CRM. */
+const LOG_KIND_CLASS: Record<string, string> = { alta: "lead-record-meta", estado: "lead-record-estado", datos: "" };
+
+/*
+  Una cabecera de la lista de consultas.
+
+  Ordena al pulsarla y, si se le pasa un filtro, lo lleva debajo. Las dos cosas
+  van juntas en el mismo sitio a propósito: quien busca algo mira la columna
+  donde está, no una barra de filtros en otra parte de la pantalla.
+*/
+function CabeceraConsultas({ columna, etiqueta, orden, onOrden, filtro }: {
+  columna: OrdenConsultas;
+  etiqueta: string;
+  orden: { columna: OrdenConsultas; desc: boolean };
+  onOrden: (columna: OrdenConsultas) => void;
+  filtro?: ReactNode;
+}) {
+  const activa = orden.columna === columna;
+  return (
+    <th aria-sort={activa ? (orden.desc ? "descending" : "ascending") : undefined}>
+      <button type="button" className="sort-button" onClick={() => onOrden(columna)}>
+        {etiqueta} <span aria-hidden="true">{activa ? (orden.desc ? "↓" : "↑") : "↕"}</span>
+      </button>
+      {filtro}
+    </th>
+  );
+}
 
 
 
@@ -195,6 +227,20 @@ export function InquiryRegister() {
   const [saleEditDraft, setSaleEditDraft] = useState<{ businessUnitId: string; saleType: SaleType; value: string; count: string }>({ businessUnitId: "", saleType: "pedido", value: "", count: "1" });
   const [paginaConsultas, setPaginaConsultas] = useState(0);
   const [busquedaConsultas, setBusquedaConsultas] = useState("");
+  /*
+    Los filtros y el orden de la lista, los que viven en sus cabeceras.
+
+    Van aparte de los de arriba —marca y canal mandan sobre todo el panel, las
+    estadísticas y las gráficas incluidas— porque aquí no se cambia lo que se
+    está analizando: se busca una consulta concreta dentro de lo que ya hay.
+  */
+  const [filtroMarca, setFiltroMarca] = useState("all");
+  const [filtroCanal, setFiltroCanal] = useState<"all" | InquiryType>("all");
+  const [filtroEstado, setFiltroEstado] = useState<"all" | InquiryStatus>("all");
+  const [filtroOrigen, setFiltroOrigen] = useState<"all" | "single" | "weekly">("all");
+  const [ordenConsultas, setOrdenConsultas] = useState<{ columna: OrdenConsultas; desc: boolean }>({ columna: "fecha", desc: true });
+  /** El historial de la consulta abierta: null mientras carga. */
+  const [historial, setHistorial] = useState<{ inquiryId: string; rows: InquiryLogRow[] | null; failed: boolean } | null>(null);
   const [salesExpanded, setSalesExpanded] = useState(false);
   const [saleUrlChecked, setSaleUrlChecked] = useState(false);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
@@ -445,20 +491,6 @@ export function InquiryRegister() {
 
   const recentSales = useMemo(() => filteredSales.slice().sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt)).slice(0, 30), [filteredSales]);
 
-  const recentInquiries = useMemo(() => {
-    const texto = busquedaConsultas.trim().toLowerCase();
-    return filtered
-      .filter((record) => !texto || [record.contactName, record.companyName, record.phone, record.email, record.productInterest, record.notes]
-        .some((campo) => (campo ?? "").toLowerCase().includes(texto)))
-      .slice()
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [filtered, busquedaConsultas]);
-  /** Diez por página: una lista más larga no se lee, se busca. */
-  const CONSULTAS_POR_PAGINA = 10;
-  const paginasConsultas = Math.max(1, Math.ceil(recentInquiries.length / CONSULTAS_POR_PAGINA));
-  const paginaConsultasActual = Math.min(paginaConsultas, paginasConsultas - 1);
-  const consultasDeLaPagina = recentInquiries.slice(paginaConsultasActual * CONSULTAS_POR_PAGINA, paginaConsultasActual * CONSULTAS_POR_PAGINA + CONSULTAS_POR_PAGINA);
-
   const salesByInquiry = useMemo(() => {
     const map = new Map<string, SalesEntry[]>();
     for (const entry of salesEntries) {
@@ -469,6 +501,59 @@ export function InquiryRegister() {
     }
     return map;
   }, [salesEntries]);
+
+  /** Lo que vale una consulta: la suma de sus ventas. Hace falta para ordenar por ella. */
+  const valorDe = useMemo(() => (record: InquiryRecord) =>
+    (salesByInquiry.get(record.id) ?? []).reduce((suma, entry) => suma + entry.value, 0), [salesByInquiry]);
+
+  const filtrosDeLista = useMemo(() => ({
+    texto: busquedaConsultas, marca: filtroMarca, canal: filtroCanal, estado: filtroEstado, origen: filtroOrigen,
+  }), [busquedaConsultas, filtroMarca, filtroCanal, filtroEstado, filtroOrigen]);
+
+  /*
+    Qué consultas se ven y en qué orden lo decide consultas-lista.
+
+    Las reglas están ahí y no aquí porque tienen esquinas —filtrar por estado
+    deja fuera los recuentos semanales, el desempate es por identificador para
+    que la lista no baile— y ahí se pueden leer y probar sin montar la
+    pantalla entera.
+  */
+  const recentInquiries = useMemo(() => listaDeConsultas(filtered, filtrosDeLista, ordenConsultas, {
+    marcaDe: (id) => units.find((unit) => unit.id === id)?.name ?? "",
+    canalDe: (canal) => inquiryChannelLabels[canal],
+    estadoDe: (estado) => contactStatusLabels[estado],
+    valorDe,
+  }), [filtered, filtrosDeLista, ordenConsultas, units, valorDe]);
+
+  /** Diez por página: una lista más larga no se lee, se busca. */
+  const CONSULTAS_POR_PAGINA = 10;
+  const paginasConsultas = Math.max(1, Math.ceil(recentInquiries.length / CONSULTAS_POR_PAGINA));
+  const paginaConsultasActual = Math.min(paginaConsultas, paginasConsultas - 1);
+  const consultasDeLaPagina = recentInquiries.slice(paginaConsultasActual * CONSULTAS_POR_PAGINA, paginaConsultasActual * CONSULTAS_POR_PAGINA + CONSULTAS_POR_PAGINA);
+  const hayFiltrosDeLista = hayFiltrosPuestos(filtrosDeLista);
+
+  /*
+    Tocar un filtro devuelve a la primera página.
+
+    Si no, se queda en la página 4 de una lista que ahora tiene dos y la tabla
+    sale vacía sin que nada lo explique. Va en el propio manejador y no en un
+    efecto —que es lo que pedía el cuerpo— porque cambiar estado dentro de un
+    efecto repinta de más; el buscador de aquí al lado ya lo hace así.
+  */
+  function filtrar<T>(poner: (valor: T) => void, valor: T) {
+    setPaginaConsultas(0);
+    poner(valor);
+  }
+
+  /** Pulsar una cabecera ordena por ella; pulsarla otra vez le da la vuelta. */
+  function cambiarOrdenConsultas(columna: OrdenConsultas) {
+    setPaginaConsultas(0);
+    setOrdenConsultas((actual) => actual.columna === columna
+      ? { columna, desc: !actual.desc }
+      // Lo que son cifras o fechas empieza de mayor a menor; lo que son
+      // palabras, de la A a la Z.
+      : { columna, desc: columna === "fecha" || columna === "cantidad" || columna === "valor" });
+  }
 
   const editingRecordSales = useMemo(() => editingRecord ? (salesByInquiry.get(editingRecord.id) ?? []) : [], [editingRecord, salesByInquiry]);
 
@@ -679,6 +764,26 @@ export function InquiryRegister() {
       notes: record.notes ?? "",
     });
     setMessage(null);
+    /*
+      Y su historial, que lo escribe la base sola.
+
+      Se pide aquí y no al cargar la pantalla porque son tantas líneas como
+      consultas hay: traerlas todas para enseñar las de una sola sería pedir
+      miles de filas que nadie va a mirar.
+    */
+    if (!configured) {
+      setHistorial({ inquiryId: record.id, rows: [], failed: false });
+      return;
+    }
+    setHistorial({ inquiryId: record.id, rows: null, failed: false });
+    void createClient().from("inquiry_log").select("id, created_at, actor_name, kind, text")
+      .eq("inquiry_id", record.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .then(({ data, error }) => {
+        // Si para cuando llega ya se está mirando otra consulta, esto no pinta nada.
+        setHistorial((actual) => (actual?.inquiryId === record.id
+          ? { inquiryId: record.id, rows: error ? [] : (data ?? []) as InquiryLogRow[], failed: Boolean(error) }
+          : actual));
+      });
   }
 
   async function saveEditRecord() {
@@ -1285,7 +1390,45 @@ export function InquiryRegister() {
               placeholder="Buscar por nombre, empresa, teléfono, correo o lo que pide"
             />
           </label>
-          <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Contacto</th><th>Canal</th><th>Estado</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{consultasDeLaPagina.map((record) => {
+          {/* Con filtros puestos, la salida tiene que estar a la vista: una
+              tabla vacía por un filtro olvidado parece una tabla rota. */}
+          {hayFiltrosDeLista ? (
+            <p className="muted">
+              Filtrando {numberFormatter.format(recentInquiries.length)} de {numberFormatter.format(filtered.length)} consultas{" "}
+              <button type="button" className="button button-compact button-secondary" onClick={() => {
+                setPaginaConsultas(0);
+                setFiltroMarca("all"); setFiltroCanal("all"); setFiltroEstado("all"); setFiltroOrigen("all");
+              }}>Quitar filtros</button>
+            </p>
+          ) : null}
+          <div className="table-scroll"><table><thead><tr>
+            <CabeceraConsultas columna="fecha" etiqueta="Fecha" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <CabeceraConsultas columna="unidad" etiqueta="Marca" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
+              <select className="table-select" value={filtroMarca} aria-label="Filtrar por marca" onChange={(event) => filtrar(setFiltroMarca, event.target.value)}>
+                <option value="all">Todas</option>
+                {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+              </select>} />
+            <CabeceraConsultas columna="contacto" etiqueta="Contacto" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <CabeceraConsultas columna="canal" etiqueta="Canal" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
+              <select className="table-select" value={filtroCanal} aria-label="Filtrar por canal" onChange={(event) => filtrar(setFiltroCanal, event.target.value as "all" | InquiryType)}>
+                <option value="all">Todos</option>
+                {inquiryChannelOrder.map((canal) => <option key={canal} value={canal}>{inquiryChannelLabels[canal]}</option>)}
+              </select>} />
+            <CabeceraConsultas columna="estado" etiqueta="Estado" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
+              <select className="table-select" value={filtroEstado} aria-label="Filtrar por estado" onChange={(event) => filtrar(setFiltroEstado, event.target.value as "all" | InquiryStatus)}>
+                <option value="all">Todos</option>
+                {inquiryStatusOrder.map((estado) => <option key={estado} value={estado}>{contactStatusLabels[estado]}</option>)}
+              </select>} />
+            <CabeceraConsultas columna="origen" etiqueta="Origen" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} filtro={
+              <select className="table-select" value={filtroOrigen} aria-label="Filtrar por origen" onChange={(event) => filtrar(setFiltroOrigen, event.target.value as "all" | "single" | "weekly")}>
+                <option value="all">Todos</option>
+                <option value="single">Individual</option>
+                <option value="weekly">Semanal</option>
+              </select>} />
+            <CabeceraConsultas columna="cantidad" etiqueta="Cantidad" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <CabeceraConsultas columna="valor" etiqueta="Valor" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <th></th>
+          </tr></thead><tbody>{consultasDeLaPagina.map((record) => {
             const unit = units.find((item) => item.id === record.businessUnitId);
             const recordSales = salesByInquiry.get(record.id) ?? [];
             const recordSalesTotal = recordSales.reduce((sum, entry) => sum + entry.value, 0);
@@ -1677,6 +1820,20 @@ export function InquiryRegister() {
         {editingRecord?.entryMode === "weekly" ? null : (
           <p className="muted">La venta sale del estado: al pasar la consulta a oferta, ganado o perdido se apunta sola con el valor de arriba, y si se vuelve atrás se quita.</p>
         )}
+
+        <h3>Historial <small className="muted">se apunta solo y no se puede modificar</small></h3>
+        {!historial || historial.rows === null ? <p className="muted">Cargando…</p>
+          : historial.failed ? <p className="muted">El historial todavía no está disponible.</p>
+            : historial.rows.length === 0 ? <p className="muted">Todavía no hay nada apuntado.</p> : (
+              <ol className="lead-record-list">
+                {historial.rows.map((row) => (
+                  <li key={row.id} className={LOG_KIND_CLASS[row.kind] ?? ""}>
+                    <span>{formatDateTime(row.created_at)}</span>
+                    <p>{row.text}{row.actor_name ? ` · ${displayName(row.actor_name)}` : ""}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
 
         <div className="modal-actions">
           <button type="button" className="button button-secondary" onClick={() => setEditingRecord(null)}>Cerrar</button>
