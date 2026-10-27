@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { euros, tenths, variation } from "@/lib/sales-model";
 
 /*
   Piezas que comparten las páginas de Ventas.
@@ -103,20 +104,27 @@ export type Column<T> = {
   text?: boolean;
   /** Se esconde en el móvil, donde no caben todas. */
   optional?: boolean;
+  /**
+   * Lo que pone esta columna en la fila de Total. Suma de todas las filas, no
+   * solo de las que se ven: con `limit`, el total sigue siendo el del periodo.
+   * Un porcentaje no se promedia, se recalcula sobre los sumandos.
+   */
+  total?: (rows: T[]) => ReactNode;
 };
 
 /**
  * Una tabla que se ordena pulsando la cabecera y que filtra pulsando la fila,
  * como las de Power BI. `rowKey` identifica la fila y `activeKey` la resalta.
  */
-export function DataTable<T>({ rows, columns, rowKey, activeKey = null, onRowClick, initialSort, footer, empty = "Sin datos en este periodo.", limit }: {
+export function DataTable<T>({ rows, columns, rowKey, activeKey = null, onRowClick, initialSort, expand, empty = "Sin datos en este periodo.", limit }: {
   rows: T[];
   columns: Column<T>[];
   rowKey: (row: T) => string;
   activeKey?: string | null;
   onRowClick?: (row: T) => void;
   initialSort?: { key: string; desc: boolean };
-  footer?: ReactNode;
+  /** Lo que se despliega debajo de una fila, a todo lo ancho; sin nada que enseñar, null. */
+  expand?: (row: T) => ReactNode;
   empty?: string;
   limit?: number;
 }) {
@@ -132,6 +140,17 @@ export function DataTable<T>({ rows, columns, rowKey, activeKey = null, onRowCli
       })
     : rows;
   const visible = limit && !showAll ? sorted.slice(0, limit) : sorted;
+  /*
+    La fila de Total la montan las propias columnas, para que no se descoloque
+    cuando una columna sale o deja de salir (la comparación, la comisión...),
+    que es justo lo que pasaba al escribir el pie a mano. Con una sola fila no
+    se pone: el total sería ella misma.
+  */
+  const totals = rows.length > 1 && columns.some((item) => item.total) ? columns.map((item, index) => (
+    <td key={item.key} className={`${item.text ? "is-text" : ""}${item.optional ? " is-optional" : ""}`}>
+      {item.total ? item.total(rows) : index === 0 ? "Total" : null}
+    </td>
+  )) : null;
 
   return (
     <>
@@ -159,23 +178,27 @@ export function DataTable<T>({ rows, columns, rowKey, activeKey = null, onRowCli
             {visible.map((row) => {
               const key = rowKey(row);
               const active = activeKey === key;
+              const detail = expand?.(row);
               return (
-                <tr key={key} className={`${onRowClick ? "is-clickable" : ""}${active ? " is-active" : ""}`} onClick={onRowClick ? () => onRowClick(row) : undefined}>
-                  {columns.map((item, index) => (
-                    <td key={item.key} className={`${item.text ? "is-text" : ""}${item.optional ? " is-optional" : ""}`}>
-                      {index === 0 && onRowClick ? (
-                        <button type="button" className="sales-row-button" aria-pressed={active} onClick={(event) => { event.stopPropagation(); onRowClick(row); }}>
-                          {item.render(row)}
-                        </button>
-                      ) : item.render(row)}
-                    </td>
-                  ))}
-                </tr>
+                <Fragment key={key}>
+                  <tr className={`${onRowClick ? "is-clickable" : ""}${active ? " is-active" : ""}`} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+                    {columns.map((item, index) => (
+                      <td key={item.key} className={`${item.text ? "is-text" : ""}${item.optional ? " is-optional" : ""}`}>
+                        {index === 0 && onRowClick ? (
+                          <button type="button" className="sales-row-button" aria-pressed={active} onClick={(event) => { event.stopPropagation(); onRowClick(row); }}>
+                            {item.render(row)}
+                          </button>
+                        ) : item.render(row)}
+                      </td>
+                    ))}
+                  </tr>
+                  {detail ? <tr className="sales-row-detail"><td colSpan={columns.length}>{detail}</td></tr> : null}
+                </Fragment>
               );
             })}
             {rows.length === 0 ? <tr><td colSpan={columns.length} className="muted is-text">{empty}</td></tr> : null}
           </tbody>
-          {footer ? <tfoot>{footer}</tfoot> : null}
+          {totals ? <tfoot><tr>{totals}</tr></tfoot> : null}
         </table>
       </div>
       {limit && rows.length > limit ? (
@@ -225,6 +248,33 @@ export function PendingDetail({ what }: { what: string }) {
 /** Aviso de que no se pudo cargar un cuadro, sin tumbar el resto de la página. */
 export function LoadFailed({ what }: { what: string }) {
   return <p className="sales-load-failed">No se pudo cargar {what}. Recarga la página para intentarlo otra vez.</p>;
+}
+
+/**
+ * La variación contra el periodo con el que se compara: el porcentaje y, justo
+ * debajo, lo que ese porcentaje son en dinero. El porcentaje solo no dice nada
+ * —un +340 % puede ser un cliente de tres mil euros, y un -34 % medio millón—,
+ * así que la cifra va siempre al lado. Cuando no hay base con la que comparar
+ * (el periodo anterior fue cero) no hay porcentaje que calcular, pero la
+ * diferencia sí se puede decir, y se dice.
+ */
+export function changeCell(now: number, before: number, format: (value: number) => string = euros) {
+  const raw = variation(now, before);
+  const diff = now - before;
+  // Al redondear a euros, una diferencia de céntimos es ninguna diferencia.
+  const amount = Math.round(diff) !== 0
+    ? <span className="sales-change-amount">{diff > 0 ? "+" : "-"}{format(Math.abs(diff))}</span>
+    : null;
+  if (raw === null) return amount ? <span className={diff > 0 ? "sales-up" : "sales-down"}>{amount}</span> : <span className="muted">—</span>;
+  // Sin "-0,0 %" en rojo: lo que no se mueve ni una décima va sin color.
+  const value = tenths(raw);
+  if (value === 0) return <span>0,0 %{amount}</span>;
+  return (
+    <span className={value > 0 ? "sales-up" : "sales-down"}>
+      {value > 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %
+      {amount}
+    </span>
+  );
 }
 
 /** Días con decimal, para plazos medios. */

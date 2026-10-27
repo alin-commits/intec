@@ -51,8 +51,17 @@ export type SalesFilters = {
   months: string[];
   /** Las familias marcadas. Vacío: todas. */
   families: string[];
+  /**
+   * Las subfamilias marcadas, como «familia:subfamilia» ("11:003"). Vacío: todas.
+   *
+   * Con la familia delante porque el código de subfamilia es correlativo
+   * dentro de cada familia y se repite entre ellas: suelto no identifica nada.
+   */
+  subfamilies: string[];
+  /** Los proveedores marcados, por su código de Sage. Vacío: todos. */
+  suppliers: string[];
 };
-export const noFilters: SalesFilters = { companies: [], channels: [], repKeys: [], months: [], families: [] };
+export const noFilters: SalesFilters = { companies: [], channels: [], repKeys: [], months: [], families: [], subfamilies: [], suppliers: [] };
 
 /**
  * El único valor marcado, o null si no hay ninguno o hay varios.
@@ -63,6 +72,23 @@ export const noFilters: SalesFilters = { companies: [], channels: [], repKeys: [
  * lo del periodo entero.
  */
 export const soloUno = <T>(marcados: T[]): T | null => (marcados.length === 1 ? marcados[0] : null);
+
+/**
+ * Quita las subfamilias marcadas que ya no caen dentro de ninguna familia.
+ *
+ * Una subfamilia solo tiene sentido dentro de su familia: al cambiar las
+ * familias marcadas, las que se quedan fuera se van con ellas, y sin ninguna
+ * familia marcada no queda ninguna. Se aplica donde se cambia el filtro y no
+ * en la pantalla de productos: las familias también se marcan desde la barra
+ * de arriba y desde el comparador, y una subfamilia huérfana filtrando por
+ * detrás no la entendería nadie.
+ */
+export function sinSubfamiliasHuerfanas(next: SalesFilters): SalesFilters {
+  if (next.subfamilies.length === 0) return next;
+  if (next.families.length === 0) return { ...next, subfamilies: [] };
+  const suyas = next.subfamilies.filter((key) => next.families.includes(key.slice(0, key.indexOf(":"))));
+  return suyas.length === next.subfamilies.length ? next : { ...next, subfamilies: suyas };
+}
 
 /** Si algo pasa el filtro. Sin nada marcado pasan todos. */
 export const marcado = <T>(marcados: T[], valor: T) => marcados.length === 0 || marcados.includes(valor);
@@ -146,6 +172,13 @@ export function addRow(bucket: Bucket, row: SummaryRow): void {
 export function mergeBucket(target: Bucket, source: Bucket): Bucket {
   for (const key of Object.keys(target) as (keyof Bucket)[]) target[key] += source[key];
   return target;
+}
+
+/** El bucket de un montón de filas, para la fila de Total de una tabla. */
+export function sumBuckets<T>(rows: T[], pick: (row: T) => Bucket): Bucket {
+  const bucket = emptyBucket();
+  for (const row of rows) mergeBucket(bucket, pick(row));
+  return bucket;
 }
 
 export function sumRows(list: SummaryRow[]): Bucket {
@@ -277,11 +310,20 @@ export type PeriodView = {
 export const variation = (now: number, before: number) => (before > 0 ? ((now - before) / before) * 100 : null);
 /** Redondeado a una décima, y sin "-0,0": un -0,02 % no es una bajada que pintar en rojo. */
 export const tenths = (value: number) => Math.round(value * 10) / 10 || 0;
-export const delta = (value: number | null) => {
+/**
+ * El porcentaje de un KPI y, si se le pasa, lo que ese porcentaje es en dinero:
+ * "+93,8 % · +33.967 €". El porcentaje solo se presta a leerlo al revés de lo
+ * que dice (un +300 % sobre dos mil euros no es una buena noticia).
+ */
+export const delta = (value: number | null, amount?: string | null) => {
   if (value === null) return { delta: "Sin comparación", positive: true };
   const rounded = tenths(value);
-  return { delta: `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1).replace(".", ",")} %`, positive: rounded >= 0 };
+  const percent = `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1).replace(".", ",")} %`;
+  return { delta: amount ? `${percent} · ${amount}` : percent, positive: rounded >= 0 };
 };
+
+/** "+33.967 €" o "-52.408 €": una diferencia con su signo delante. */
+export const signedEuros = (value: number) => `${value >= 0 ? "+" : "-"}${euros(Math.abs(value))}`;
 
 /**
  * En Sage la misma persona está dada de alta varias veces: un código por
@@ -886,6 +928,8 @@ export function yearlyView(input: {
       months: own.length,
       complete: own.length === 12 && own.every((month) => closed.has(month)),
       change: common.length > 0 ? variation(now, before) : null,
+      /** Lo que crece o baja en dinero en esos mismos meses, para decirlo al lado del porcentaje. */
+      changeAmount: common.length > 0 ? now - before : null,
       /** Los meses que entran en la variación, cuando no son los doce. */
       span,
     };

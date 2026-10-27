@@ -72,3 +72,45 @@ export function familyMargin(row: { trusted_net: number; trusted_cost: number; t
   if (base <= 0 || cost <= 0) return null;
   return ((base - cost) / base) * 100;
 }
+
+/**
+ * Las piezas con las que se calculan venta, margen y descuento de una fila de
+ * familia, subfamilia, marca o artículo. Sirven para la fila de Total: sumar
+ * los sumandos y recalcular los porcentajes sobre ellos, porque un margen
+ * medio de porcentajes no es el margen del conjunto.
+ */
+export type SalesParts = {
+  net: number;
+  units: number;
+  documents: number;
+  articles: number;
+  customers: number;
+  trusted_net: number;
+  trusted_cost: number;
+  trusted_without_cost: number;
+  gross_amount: number;
+  gross_net: number;
+};
+
+export function sumParts<T>(rows: T[], pick: (row: T) => Partial<SalesParts>): SalesParts {
+  const total: SalesParts = { net: 0, units: 0, documents: 0, articles: 0, customers: 0, trusted_net: 0, trusted_cost: 0, trusted_without_cost: 0, gross_amount: 0, gross_net: 0 };
+  for (const row of rows) {
+    const part = pick(row);
+    for (const key of Object.keys(total) as (keyof SalesParts)[]) total[key] += Number(part[key] ?? 0);
+  }
+  return total;
+}
+
+/** Lo que trae una fila que guarda la venta en `net_amount` (subfamilias, marcas, artículos). */
+export const partsOf = (row: { net_amount: number | string; trusted_net?: number; trusted_cost?: number; trusted_without_cost?: number; gross_amount?: number; gross_net?: number; units?: number; documents?: number; articles?: number; customers?: number }): Partial<SalesParts> => ({
+  net: Number(row.net_amount),
+  units: Number(row.units ?? 0),
+  documents: Number(row.documents ?? 0),
+  articles: Number(row.articles ?? 0),
+  customers: Number(row.customers ?? 0),
+  trusted_net: Number(row.trusted_net ?? 0),
+  trusted_cost: Number(row.trusted_cost ?? 0),
+  trusted_without_cost: Number(row.trusted_without_cost ?? 0),
+  gross_amount: Number(row.gross_amount ?? 0),
+  gross_net: Number(row.gross_net ?? 0),
+});
