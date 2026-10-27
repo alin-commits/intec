@@ -18,6 +18,7 @@ import {
   repPairsFor,
   soloUnComercial,
   seriesFor,
+  sinSubfamiliasHuerfanas,
   targetsFor,
   targetToDate,
   yearlyView,
@@ -273,4 +274,30 @@ test("targetsFor con varios comerciales marcados suma los objetivos de cada uno"
   // Un mes que solo tiene objetivo de uno de los dos sale con el suyo.
   assert.equal(targetsFor(targets, 2026, [], ["ana", "luis"])[9], 2000);
   assert.equal(targetsFor(targets, 2026, [], ["luis"])[9], null);
+});
+
+test("una subfamilia marcada se cae con su familia", () => {
+  const base = { ...noFilters, families: ["11"], subfamilies: ["11:003"] };
+  // Mientras su familia siga marcada, se queda.
+  assert.deepEqual(sinSubfamiliasHuerfanas(base).subfamilies, ["11:003"]);
+  // Al cambiar a otra familia, la subfamilia de la anterior no se queda
+  // filtrando por detrás.
+  assert.deepEqual(sinSubfamiliasHuerfanas({ ...base, families: ["12"] }).subfamilies, []);
+  // Y sin ninguna familia marcada tampoco: la subfamilia se elige dentro de
+  // una familia, no suelta.
+  assert.deepEqual(sinSubfamiliasHuerfanas({ ...base, families: [] }).subfamilies, []);
+});
+
+test("con varias familias marcadas se quedan las subfamilias de las que sigan", () => {
+  const filtros = { ...noFilters, families: ["11", "12"], subfamilies: ["11:003", "12:001"] };
+  assert.deepEqual(sinSubfamiliasHuerfanas(filtros).subfamilies, ["11:003", "12:001"]);
+  assert.deepEqual(sinSubfamiliasHuerfanas({ ...filtros, families: ["12"] }).subfamilies, ["12:001"]);
+  // El código de subfamilia se repite entre familias: lo que manda es la pareja
+  // entera, no el número de atrás.
+  assert.deepEqual(sinSubfamiliasHuerfanas({ ...filtros, families: ["11"], subfamilies: ["12:003"] }).subfamilies, []);
+});
+
+test("sin subfamilias marcadas, los filtros no se tocan", () => {
+  const filtros = { ...noFilters, families: ["11"] };
+  assert.equal(sinSubfamiliasHuerfanas(filtros), filtros, "el mismo objeto: nada que recortar");
 });

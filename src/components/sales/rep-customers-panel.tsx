@@ -107,6 +107,7 @@ export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
         </span>
       ),
       sort: (fila) => nombreDe(fila),
+      total: (filas) => `Total · ${numberFormatter.format(filas.length)} clientes`,
     },
     {
       key: "comercial", header: "Comercial", text: true, optional: true,
@@ -114,8 +115,8 @@ export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
       sort: (fila) => (fila.rep_code === null ? "" : ctx.repOf(fila.company_code, fila.rep_code).label),
     },
     conImporte
-      ? { key: "neto", header: "Comprado", render: (fila) => euros(Number(fila.net_amount)), sort: (fila) => Number(fila.net_amount) }
-      : { key: "antes", header: "Compraba antes", render: (fila) => (Number(fila.previous_amount) > 0 ? euros(Number(fila.previous_amount)) : <span className="muted">nunca</span>), sort: (fila) => Number(fila.previous_amount) },
+      ? { key: "neto", header: "Comprado", render: (fila) => euros(Number(fila.net_amount)), sort: (fila) => Number(fila.net_amount), total: (filas) => euros(filas.reduce((suma, fila) => suma + Number(fila.net_amount), 0)) }
+      : { key: "antes", header: "Compraba antes", render: (fila) => (Number(fila.previous_amount) > 0 ? euros(Number(fila.previous_amount)) : <span className="muted">nunca</span>), sort: (fila) => Number(fila.previous_amount), total: (filas) => euros(filas.reduce((suma, fila) => suma + Number(fila.previous_amount), 0)) },
     {
       key: "ultima", header: "Última compra", optional: true,
       render: (fila) => (fila.last_purchase ? <>{shortDate(fila.last_purchase)}{fila.days_since_last !== null ? <small className="muted"> · hace {numberFormatter.format(fila.days_since_last)} días</small> : null}</> : <span className="muted">nunca</span>),

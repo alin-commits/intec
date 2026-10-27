@@ -8,6 +8,8 @@ import {
   invoiceYears,
   lastCompleteMonth,
   latestSnapshot,
+  partsOf,
+  sumParts,
   trustedNewCustomersFrom,
   type SnapshotRow,
 } from "../src/lib/sage-panel.ts";
@@ -197,4 +199,26 @@ test("el margen por familia deja fuera lo que no tiene coste", () => {
   assert.equal(familyMargin({ trusted_net: 1000, trusted_cost: 600, trusted_without_cost: 200 }), 25);
   assert.equal(familyMargin({ trusted_net: 1000, trusted_cost: 0, trusted_without_cost: 1000 }), null, "sin coste no hay margen, no un 100 %");
   assert.equal(familyMargin({ trusted_net: 0, trusted_cost: 0, trusted_without_cost: 0 }), null);
+});
+
+test("la fila de Total suma los sumandos y recalcula los porcentajes", () => {
+  // Dos familias: una vende mucho con poco margen y otra poco con mucho. El
+  // margen del conjunto es el de los euros, no la media de los dos porcentajes.
+  const familias = [
+    { net_amount: 1000, trusted_net: 1000, trusted_cost: 900, trusted_without_cost: 0, gross_amount: 1200, gross_net: 1000, articles: 3 },
+    { net_amount: 100, trusted_net: 100, trusted_cost: 50, trusted_without_cost: 0, gross_amount: 200, gross_net: 100, articles: 2 },
+  ];
+  const total = sumParts(familias, partsOf);
+  assert.equal(total.net, 1100);
+  assert.equal(total.articles, 5);
+  // 1.100 de venta con 950 de coste: 13,6 %, no el 35 % de promediar 10 % y 50 %.
+  assert.equal(Math.round(familyMargin(total)!), 14);
+  assert.equal(total.gross_amount, 1400);
+});
+
+test("las piezas de una fila sin coste fiable cuentan como cero, no rompen la suma", () => {
+  const total = sumParts([{ net_amount: "250", documents: 4 }, { net_amount: 250, documents: 1 }], partsOf);
+  assert.equal(total.net, 500);
+  assert.equal(total.documents, 5);
+  assert.equal(familyMargin(total), null, "sin coste no hay margen que enseñar en el pie");
 });

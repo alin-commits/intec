@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { type Bucket, bucketDiscount, euros, hayMesMarcado, soloUnComercial, soloUno, tenths, ticketFormatter, variation, yearlyView } from "@/lib/sales-model";
+import { type Bucket, bucketDiscount, euros, hayMesMarcado, signedEuros, sumBuckets, soloUnComercial, soloUno, tenths, ticketFormatter, variation, yearlyView } from "@/lib/sales-model";
 import type { SalesContext } from "./sales-context";
 import { DataTable, Panel, type Column } from "./sales-ui";
 
@@ -13,7 +13,6 @@ import { DataTable, Panel, type Column } from "./sales-ui";
   miran varios años, un año contra otro.
 */
 
-const signedEuros = (value: number) => `${value >= 0 ? "+" : "-"}${euros(Math.abs(value))}`;
 /**
  * Un cambio, en verde si sube (o en rojo, con `inverse`, para lo que es malo
  * que suba, como el descuento). Lo que no se mueve ni una décima va sin color.
@@ -203,16 +202,17 @@ export function YearsPanels({ ctx }: { ctx: SalesContext }) {
         <strong>{row.year}</strong>
         {row.complete ? null : <small>{row.year === lastYear && period.basePartial ? "en curso" : `${row.months} ${row.months === 1 ? "mes" : "meses"}`}</small>}
       </span>
-    ), sort: (row) => row.year },
-    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
+    ), sort: (row) => row.year, total: (rows) => `Total · ${rows.length} años` },
+    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net, total: (rows) => euros(sumBuckets(rows, (row) => row.bucket).net) },
     { key: "var", header: "Crece", render: (row) => (
       <span title={row.span ? `Solo ${row.span}, los meses cerrados que tienen los dos años` : undefined}>
         {percentChange(row.change)}{row.span && row.change !== null ? <small className="muted"> {row.span}</small> : null}
+        {row.changeAmount !== null && Math.round(row.changeAmount) !== 0 ? <span className="sales-change-amount">{signedEuros(row.changeAmount)}</span> : null}
       </span>
     ), sort: (row) => row.change ?? -Infinity },
-    { key: "dto", header: "Dto.", render: (row) => { const discount = bucketDiscount(row.bucket); return discount ? formatPercent(discount.percent) : <span className="muted">—</span>; }, sort: (row) => bucketDiscount(row.bucket)?.percent ?? -Infinity },
-    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
-    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticketFormatter.format(ticketOf(row.bucket)), sort: (row) => ticketOf(row.bucket) },
+    { key: "dto", header: "Dto.", render: (row) => { const discount = bucketDiscount(row.bucket); return discount ? formatPercent(discount.percent) : <span className="muted">—</span>; }, sort: (row) => bucketDiscount(row.bucket)?.percent ?? -Infinity, total: (rows) => { const discount = bucketDiscount(sumBuckets(rows, (row) => row.bucket)); return discount ? formatPercent(discount.percent) : <span className="muted">—</span>; } },
+    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents, total: (rows) => numberFormatter.format(sumBuckets(rows, (row) => row.bucket).documents) },
+    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticketFormatter.format(ticketOf(row.bucket)), sort: (row) => ticketOf(row.bucket), total: (rows) => ticketFormatter.format(ticketOf(sumBuckets(rows, (row) => row.bucket))) },
   ];
   return (
     <>

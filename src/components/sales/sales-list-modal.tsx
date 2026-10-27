@@ -76,7 +76,11 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
     ...(rpc.p_months ? { p_months: rpc.p_months } : {}),
   };
   const args = request?.type === "clientes"
-    ? { ...base, p_kind: request.kind, ...(rpc.p_families ? { p_families: rpc.p_families } : {}), p_days: request.days ?? 30 }
+    ? {
+      ...base, p_kind: request.kind, p_days: request.days ?? 30,
+      ...(rpc.p_families ? { p_families: rpc.p_families } : {}),
+      ...(rpc.p_subfamilies ? { p_subfamilies: rpc.p_subfamilies } : {}),
+    }
     : request ? { ...base, p_kind: request.kind } : null;
   const fn = request?.type === "clientes" ? "sage_customer_list" : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
   const key = request && args ? JSON.stringify([fn, args, ctx.reloadKey]) : null;
@@ -126,7 +130,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
           <strong>{row.trade_name || row.name}</strong>
           <small>{[row.trade_name ? row.name : null, row.customer_code, multiCompany ? company(row.company_code) : null].filter(Boolean).join(" · ")}</small>
         </span>
-      ), sort: (row) => row.trade_name || row.name },
+      ), sort: (row) => row.trade_name || row.name, total: (rows) => `Total · ${numberFormatter.format(rows.length)} clientes` },
       { key: "contacto", header: "Contacto", text: true, render: (row) => {
         // Primero la persona (con su teléfono directo) y luego los datos generales del
         // cliente, sin repetir el mismo número dos veces.
@@ -143,7 +147,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       } },
       { key: "zona", header: "Zona", text: true, optional: true, render: (row) => [row.municipality, row.province].filter(Boolean).join(", ") || "—", sort: (row) => row.province ?? "" },
       { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => rep(row.company_code, row.rep_code), sort: (row) => rep(row.company_code, row.rep_code) },
-      { key: "compra", header: request.kind === "perdidos" ? `En ${lostCustomers(ctx.period).previous}` : request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+      { key: "compra", header: request.kind === "perdidos" ? `En ${lostCustomers(ctx.period).previous}` : request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
       { key: "ultima", header: "Última", render: (row) => (
         <span className="sales-article">
           <strong>{shortDate(row.last_purchase)}</strong>
@@ -180,11 +184,11 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
           <strong>{row.customer_name ?? row.customer_code ?? "Sin cliente"}</strong>
           <small>{row.series}/{row.number} · {channelLabel(row.series)}{multiCompany ? ` · ${company(row.company_code)}` : ""}</small>
         </span>
-      ), sort: (row) => row.customer_name ?? "" },
+      ), sort: (row) => row.customer_name ?? "", total: (rows) => `Total · ${numberFormatter.format(rows.length)} ofertas` },
       { key: "fecha", header: "Fecha", render: (row) => shortDate(row.offer_date), sort: (row) => row.offer_date },
       { key: "validez", header: "Válida hasta", optional: true, render: (row) => shortDate(row.valid_until), sort: (row) => row.valid_until ?? "" },
       { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => rep(row.company_code, row.rep_code), sort: (row) => rep(row.company_code, row.rep_code) },
-      { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+      { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
       request.kind === "rechazadas"
         ? { key: "motivo", header: "Motivo", text: true, render: (row) => row.reason || "—", sort: (row) => row.reason }
         : { key: "pedido", header: "Pedido", render: (row) => (Number(row.ordered_amount) > 0 ? `${euros(Number(row.ordered_amount))} · ${shortDate(row.first_order_on)}` : <span className="muted">—</span>), sort: (row) => Number(row.ordered_amount) },
@@ -213,13 +217,13 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
           <strong>{row.customer_name ?? row.customer_code ?? "Sin cliente"}</strong>
           <small>{row.series}/{row.number} · {channelLabel(row.series)}{row.from_offer ? " · desde oferta" : ""}{multiCompany ? ` · ${company(row.company_code)}` : ""}</small>
         </span>
-      ), sort: (row) => row.customer_name ?? "" },
+      ), sort: (row) => row.customer_name ?? "", total: (rows) => `Total · ${numberFormatter.format(rows.length)} pedidos` },
       { key: "fecha", header: "Fecha", render: (row) => shortDate(row.order_date), sort: (row) => row.order_date },
       { key: "pedida", header: "Para el", optional: true, render: (row) => shortDate(row.needed_on), sort: (row) => row.needed_on ?? "" },
       { key: "servido", header: "Servido", optional: true, render: (row) => shortDate(row.first_delivery_on), sort: (row) => row.first_delivery_on ?? "" },
       { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => rep(row.company_code, row.rep_code), sort: (row) => rep(row.company_code, row.rep_code) },
-      { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
-      { key: "pendiente", header: "Pendiente", render: (row) => (Number(row.pending_amount) > 0 ? euros(Number(row.pending_amount)) : <span className="muted">—</span>), sort: (row) => Number(row.pending_amount) },
+      { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
+      { key: "pendiente", header: "Pendiente", render: (row) => (Number(row.pending_amount) > 0 ? euros(Number(row.pending_amount)) : <span className="muted">—</span>), sort: (row) => Number(row.pending_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.pending_amount), 0)) },
     ];
     table = <DataTable rows={list} columns={columns} rowKey={(row) => `${row.company_code}-${row.year}-${row.series}-${row.number}`} onRowClick={openCustomer} initialSort={{ key: request.kind === "pendientes" ? "pendiente" : "importe", desc: true }} limit={100} empty={result.loading ? "Cargando…" : "Ningún pedido con estos filtros."} />;
     const columnasPedido: CsvColumn<OrderRow>[] = [

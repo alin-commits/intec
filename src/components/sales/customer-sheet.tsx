@@ -25,7 +25,7 @@ import { addDays, dateKey, monthsBetween, shortRange } from "@/lib/sales-period"
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { CustomerRef, SalesContext } from "./sales-context";
-import { DataTable, LoadFailed, shortDate, useSageQuery, type Column } from "./sales-ui";
+import { changeCell, DataTable, LoadFailed, shortDate, useSageQuery, type Column } from "./sales-ui";
 
 /*
   La ficha de un cliente: quién es y a quién llamar, cuánto compra y cómo va
@@ -84,7 +84,6 @@ const percent = (raw: number | null): ReactNode => {
   const value = tenths(raw);
   return <span className={value > 0 ? "sales-up" : value < 0 ? "sales-down" : undefined}>{value > 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %</span>;
 };
-const change = (now: number, before: number) => percent(variation(now, before));
 const ticketOf = (bucket: Bucket) => (bucket.documents ? bucket.net / bucket.documents : 0);
 const phoneLink = (value: string) => <a key={value} href={`tel:${value.replace(/\s+/g, "")}`}>{value}</a>;
 
@@ -267,15 +266,15 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
     { key: "pedido", header: "Pedido", text: true, render: (row) => (
       <span className="sales-article"><strong>{row.series}/{row.number}</strong><small>{channelLabel(row.series)}{row.from_offer ? " · desde oferta" : ""}</small></span>
     ), sort: (row) => `${row.year}-${row.series}-${String(row.number).padStart(8, "0")}` },
-    { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
-    { key: "pendiente", header: "Por servir", optional: true, render: (row) => (Number(row.pending_amount) > 0 ? euros(Number(row.pending_amount)) : muted()), sort: (row) => Number(row.pending_amount) },
+    { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
+    { key: "pendiente", header: "Por servir", optional: true, render: (row) => (Number(row.pending_amount) > 0 ? euros(Number(row.pending_amount)) : muted()), sort: (row) => Number(row.pending_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.pending_amount), 0)) },
     { key: "estado", header: "Estado", text: true, render: (row) => { const state = orderLabels[orderState(row, today)]; return pill(state.label, state.tone); }, sort: (row) => orderState(row, today) },
     { key: "para", header: "Para el", optional: true, render: (row) => shortDate(row.needed_on), sort: (row) => row.needed_on ?? "" },
   ];
   const offerColumns: Column<Offer>[] = [
     { key: "fecha", header: "Fecha", text: true, render: (row) => shortDate(row.offer_date), sort: (row) => row.offer_date },
     { key: "oferta", header: "Oferta", text: true, render: (row) => <strong>{row.series}/{row.number}</strong>, sort: (row) => `${row.year}-${row.series}-${String(row.number).padStart(8, "0")}` },
-    { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
+    { key: "importe", header: "Importe", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
     { key: "estado", header: "Estado", text: true, render: (row) => {
       const { state, reason } = offerState(row, today);
       return pill(state === "rechazada" && reason ? `Rechazada: ${reason}` : offerLabels[state].label, offerLabels[state].tone, reason || undefined);
@@ -283,12 +282,13 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
     { key: "validez", header: "Válida hasta", optional: true, render: (row) => shortDate(row.valid_until), sort: (row) => row.valid_until ?? "" },
   ];
   type FamilyLine = (typeof familyView.list)[number];
+  const sumFamilies = (rows: FamilyLine[]) => rows.reduce((total, row) => ({ net: total.net + row.net, before: total.before + row.before }), { net: 0, before: 0 });
   const familyColumns: Column<FamilyLine>[] = [
     { key: "familia", header: "Familia", text: true, render: (row) => row.name, sort: (row) => row.name },
-    { key: "compra", header: "Compra", render: (row) => euros(row.net), sort: (row) => row.net },
-    { key: "peso", header: "Peso", optional: true, render: (row) => (familyView.total > 0 ? formatPercent((Math.max(row.net, 0) / familyView.total) * 100) : "—"), sort: (row) => row.net },
+    { key: "compra", header: "Compra", render: (row) => euros(row.net), sort: (row) => row.net, total: (rows) => euros(sumFamilies(rows).net) },
+    { key: "peso", header: "Peso", optional: true, render: (row) => (familyView.total > 0 ? formatPercent((Math.max(row.net, 0) / familyView.total) * 100) : "—"), sort: (row) => row.net, total: (rows) => (familyView.total > 0 ? formatPercent((Math.max(sumFamilies(rows).net, 0) / familyView.total) * 100) : "—") },
     ...(period.compare
-      ? [{ key: "antes", header: `vs ${period.compareShort}`, render: (row: FamilyLine) => change(row.net, row.before) ?? muted(), sort: (row: FamilyLine) => variation(row.net, row.before) ?? -Infinity }]
+      ? [{ key: "antes", header: `vs ${period.compareShort}`, render: (row: FamilyLine) => changeCell(row.net, row.before), sort: (row: FamilyLine) => variation(row.net, row.before) ?? -Infinity, total: (rows: FamilyLine[]) => changeCell(sumFamilies(rows).net, sumFamilies(rows).before) }]
       : []),
   ];
 
@@ -348,12 +348,12 @@ export function CustomerSheet({ customer, ctx, onClose, onBack }: {
                 <Stat
                   label={`Compra en ${ctx.periodName}`}
                   value={loading ? "…" : euros(now.net)}
-                  detail={before ? <>{change(now.net, before.net) ?? "—"} frente a {period.compareShort} ({euros(before.net)})</> : "sin comparar"}
+                  detail={before ? <>{percent(variation(now.net, before.net)) ?? "—"} frente a {period.compareShort} ({euros(before.net)})</> : "sin comparar"}
                 />
                 <Stat
                   label="Últimos 12 meses"
                   value={loading ? "…" : euros(lastYear.net)}
-                  detail={<>{change(lastYear.net, yearBefore.net) ?? "—"} frente a los 12 anteriores</>}
+                  detail={<>{percent(variation(lastYear.net, yearBefore.net)) ?? "—"} frente a los 12 anteriores ({euros(yearBefore.net)})</>}
                 />
                 <Stat
                   label="Última compra"
