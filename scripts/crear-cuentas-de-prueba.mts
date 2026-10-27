@@ -25,6 +25,10 @@ const CUENTAS = [
   { rol: "accounting", nombre: "Administración (prueba)", correo: "pruebas.administracion@suministrointec.com", conMarcas: false },
   { rol: "purchasing", nombre: "Compras (prueba)", correo: "pruebas.compras@suministrointec.com", conMarcas: false },
   { rol: "employee", nombre: "Empleado (prueba)", correo: "pruebas.empleado@suministrointec.com", conMarcas: false },
+  // La agencia mira las consultas acotada por marca, igual que un comercial:
+  // sin marcas asignadas la prueba enseñaría una pantalla vacía en vez del
+  // caso normal.
+  { rol: "agency", nombre: "Agencia (prueba)", correo: "pruebas.agencia@suministrointec.com", conMarcas: true },
 ] as const;
 
 const columna = await admin.from("profiles").select("is_preview").limit(1);
