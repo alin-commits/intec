@@ -2,12 +2,12 @@
 
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { type Bucket, bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, filterRows, groupRows, hayMesMarcado, mergeBucket, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, type SummaryRow, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { type Bucket, bucketDiscount, bucketMargin, channelLabel, euros, filterRows, groupRows, hayMesMarcado, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, sumBuckets, type SummaryRow, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
-import { DataTable, LoadFailed, Panel, useSageQuery, type Column } from "./sales-ui";
+import { changeCell, DataTable, LoadFailed, Panel, useSageQuery, type Column } from "./sales-ui";
 
 /*
   Ventas y margen: el detalle de lo que el resumen enseña en grande. Tablas que
@@ -15,14 +15,6 @@ import { DataTable, LoadFailed, Panel, useSageQuery, type Column } from "./sales
   mes, su venta día a día y por semanas.
 */
 
-const change = (now: number, before: number) => {
-  const raw = variation(now, before);
-  if (raw === null) return <span className="muted">—</span>;
-  // Sin "-0,0 %" en rojo: lo que no se mueve ni una décima va sin color.
-  const value = tenths(raw);
-  if (value === 0) return <span>0,0 %</span>;
-  return <span className={value > 0 ? "sales-up" : "sales-down"}>{value > 0 ? "+" : ""}{value.toFixed(1).replace(".", ",")} %</span>;
-};
 const marginCell = (bucket: Bucket, kind: "amount" | "percent") => {
   const margin = bucketMargin(bucket);
   if (!margin) return <span className="muted">—</span>;
@@ -53,54 +45,58 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const versusHeader = `vs ${period.compareShort ?? ""}`;
 
   type MonthRow = (typeof model.monthly.months)[number];
+  /*
+    Los totales de cada tabla se suman de sus propias filas y no del modelo:
+    así la fila de Total es exactamente lo que hay encima, incluso cuando la
+    tabla deja algo fuera. El margen y el descuento no se promedian, se
+    recalculan sobre el bucket ya sumado.
+  */
+  const beforeOf = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
   const monthColumns: Column<MonthRow>[] = [
     { key: "mes", header: "Mes", text: true, render: (row) => <span className="sales-capitalize">{period.multiYear ? monthWithYear(row.key) : monthName(row.key)}</span>, sort: (row) => row.key },
-    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
+    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net, total: (rows) => euros(sumBuckets(rows, (row) => row.bucket).net) },
     ...(monthCompared ? [
       // Cada fila lleva al lado su pareja: con un año contra el anterior, la columna es ese año.
-      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (row.beforeNet ? euros(row.beforeNet) : <span className="muted">—</span>), sort: (row: MonthRow) => row.beforeNet },
-      { key: "var", header: "Variación", render: (row: MonthRow) => change(row.bucket.net, row.beforeNet), sort: (row: MonthRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity },
+      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (row.beforeNet ? euros(row.beforeNet) : <span className="muted">—</span>), sort: (row: MonthRow) => row.beforeNet, total: (rows: MonthRow[]) => euros(beforeOf(rows, (row) => row.beforeNet)) },
+      { key: "var", header: "Variación", render: (row: MonthRow) => changeCell(row.bucket.net, row.beforeNet), sort: (row: MonthRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity, total: (rows: MonthRow[]) => changeCell(sumBuckets(rows, (row) => row.bucket).net, beforeOf(rows, (row) => row.beforeNet)) },
     ] : []),
-    { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity },
-    { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity },
-    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
-    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
-    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0) },
+    { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "amount") },
+    { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "percent") },
+    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket), total: (rows) => discountCell(sumBuckets(rows, (row) => row.bucket)) },
+    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents, total: (rows) => numberFormatter.format(sumBuckets(rows, (row) => row.bucket).documents) },
+    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0), total: (rows) => ticket(sumBuckets(rows, (row) => row.bucket)) },
   ];
 
   type RepRow = (typeof model.byRep)[number];
   const repColumns: Column<RepRow>[] = [
     { key: "nombre", header: "Comercial", text: true, render: (row) => <span className={row.key === UNASSIGNED_KEY ? "muted" : undefined}>{row.name}</span>, sort: (row) => row.name },
-    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
+    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net, total: (rows) => euros(sumBuckets(rows, (row) => row.bucket).net) },
     ...(ctx.comparisonAvailable
-      ? [{ key: "var", header: versusHeader, render: (row: RepRow) => change(row.bucket.net, row.beforeNet), sort: (row: RepRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity }]
+      ? [{ key: "var", header: versusHeader, render: (row: RepRow) => changeCell(row.bucket.net, row.beforeNet), sort: (row: RepRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity, total: (rows: RepRow[]) => changeCell(sumBuckets(rows, (row) => row.bucket).net, beforeOf(rows, (row) => row.beforeNet)) }]
       : []),
-    { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity },
-    { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity },
-    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
+    { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "amount") },
+    { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "percent") },
+    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket), total: (rows) => discountCell(sumBuckets(rows, (row) => row.bucket)) },
     // En Sage pueden no usarse comisiones: entonces la columna no sale, en vez de una fila de ceros.
     ...(model.hasCommissions
-      ? [{ key: "comision", header: "Comisión", optional: true, render: (row: RepRow) => commissionCell(row.bucket), sort: (row: RepRow) => row.bucket.commission }]
+      ? [{ key: "comision", header: "Comisión", optional: true, render: (row: RepRow) => commissionCell(row.bucket), sort: (row: RepRow) => row.bucket.commission, total: (rows: RepRow[]) => commissionCell(sumBuckets(rows, (row) => row.bucket)) }]
       : []),
-    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
-    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0) },
+    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents, total: (rows) => numberFormatter.format(sumBuckets(rows, (row) => row.bucket).documents) },
+    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0), total: (rows) => ticket(sumBuckets(rows, (row) => row.bucket)) },
   ];
 
   type ChannelRow = (typeof channels)[number];
   const channelColumns: Column<ChannelRow>[] = [
     { key: "canal", header: "Canal", text: true, render: (row) => row.label, sort: (row) => row.label },
-    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net },
+    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net, total: (rows) => euros(sumBuckets(rows, (row) => row.bucket).net) },
     ...(ctx.comparisonAvailable
-      ? [{ key: "var", header: versusHeader, render: (row: ChannelRow) => change(row.bucket.net, row.before), sort: (row: ChannelRow) => variation(row.bucket.net, row.before) ?? -Infinity }]
+      ? [{ key: "var", header: versusHeader, render: (row: ChannelRow) => changeCell(row.bucket.net, row.before), sort: (row: ChannelRow) => variation(row.bucket.net, row.before) ?? -Infinity, total: (rows: ChannelRow[]) => changeCell(sumBuckets(rows, (row) => row.bucket).net, beforeOf(rows, (row) => row.before)) }]
       : []),
-    { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => bucketMargin(row.bucket)?.percent ?? -Infinity },
-    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket) },
-    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents },
-    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0) },
+    { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => bucketMargin(row.bucket)?.percent ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "percent") },
+    { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket), total: (rows) => discountCell(sumBuckets(rows, (row) => row.bucket)) },
+    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents, total: (rows) => numberFormatter.format(sumBuckets(rows, (row) => row.bucket).documents) },
+    { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0), total: (rows) => ticket(sumBuckets(rows, (row) => row.bucket)) },
   ];
-
-  const monthTotal = model.monthly.months.reduce((total, month) => mergeBucket(total, month.bucket), emptyBucket());
-  const monthBefore = model.monthly.months.reduce((sum, month) => sum + month.beforeNet, 0);
 
   return (
     <div className="page-stack">
@@ -128,23 +124,6 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
             rowKey={(row) => row.key}
             activeKey={soloUnMes(filters)}
             onRowClick={(row) => ctx.toggleMonth(row.key)}
-            footer={model.monthly.months.length > 1 ? (
-              <tr>
-                <td className="is-text"><strong>Total</strong></td>
-                <td><strong>{euros(monthTotal.net)}</strong></td>
-                {monthCompared ? (
-                  <>
-                    <td className="is-optional">{monthBefore ? euros(monthBefore) : "—"}</td>
-                    <td>{change(monthTotal.net, monthBefore)}</td>
-                  </>
-                ) : null}
-                <td className="is-optional">{marginCell(monthTotal, "amount")}</td>
-                <td>{marginCell(monthTotal, "percent")}</td>
-                <td>{discountCell(monthTotal)}</td>
-                <td className="is-optional">{numberFormatter.format(monthTotal.documents)}</td>
-                <td className="is-optional">{ticket(monthTotal)}</td>
-              </tr>
-            ) : undefined}
           />
         </Panel>
 
@@ -280,7 +259,7 @@ function DailyPanel({ ctx }: { ctx: SalesContext }) {
                 <i className="is-before" style={{ width: `${Math.max(1, (Math.max(week.before, 0) / weekMax) * 100)}%` }} />
               </span>
               <strong>{euros(week.net)}</strong>
-              <small>{change(week.net, week.before)}</small>
+              <small>{changeCell(week.net, week.before)}</small>
             </li>
           ))}
         </ul>

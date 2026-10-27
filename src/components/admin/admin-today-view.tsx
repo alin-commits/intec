@@ -278,11 +278,11 @@ export function AdminTodayView() {
         <small>{[row.description ? row.bank_name : null, row.account_code, multiCompany ? companyName(row.company_code) : null].filter(Boolean).join(" · ")}</small>
       </span>
     ), sort: (row) => row.description || row.bank_name || row.account_code },
-    { key: "saldo", header: "Saldo", render: (row) => (row.balance === null ? muted() : <span className={row.balance < 0 ? "sales-down" : undefined}>{money(row.balance)}</span>), sort: (row) => row.balance ?? -Infinity },
+    { key: "saldo", header: "Saldo", render: (row) => (row.balance === null ? muted() : <span className={row.balance < 0 ? "sales-down" : undefined}>{money(row.balance)}</span>), sort: (row) => row.balance ?? -Infinity, total: () => money(banks.totals.balance) },
     { key: "dia", header: "A día", optional: true, render: (row) => (row.balanceDay ? shortDate(row.balanceDay) : muted()), sort: (row) => row.balanceDay ?? "" },
     { key: "linea", header: "Línea", optional: true, render: (row) => (row.credit_limit ? money(Number(row.credit_limit)) : muted()), sort: (row) => Number(row.credit_limit ?? 0) },
     { key: "dispuesto", header: "Dispuesto", optional: true, render: (row) => (row.credit_limit ? money(Number(row.credit_used ?? 0)) : muted()), sort: (row) => Number(row.credit_used ?? 0) },
-    { key: "disponible", header: "Disponible", render: (row) => (row.available === null ? muted() : money(row.available)), sort: (row) => row.available ?? -Infinity },
+    { key: "disponible", header: "Disponible", render: (row) => (row.available === null ? muted() : money(row.available)), sort: (row) => row.available ?? -Infinity, total: () => money(banks.totals.available) },
   ];
   const balanceIsOld = banks.totals.oldestDay !== null && daysBetween(banks.totals.oldestDay, today) > 3;
 
@@ -526,16 +526,6 @@ export function AdminTodayView() {
                 columns={bankColumns}
                 rowKey={(row) => row.key}
                 initialSort={{ key: "saldo", desc: true }}
-                footer={(
-                  <tr>
-                    <td className="is-text"><strong>Total</strong></td>
-                    <td><strong>{money(banks.totals.balance)}</strong></td>
-                    <td className="is-optional" />
-                    <td className="is-optional" />
-                    <td className="is-optional" />
-                    <td><strong>{money(banks.totals.available)}</strong></td>
-                  </tr>
-                )}
               />
             </>
           )}
