@@ -19,6 +19,7 @@ import { Toast } from "@/components/ui/toast";
 import { KpiCard } from "@/components/kpi-card";
 import { CrmIcon, PlusCircleIcon, SearchIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
+import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 
 type ContactDraft = {
   businessUnitId: string;
@@ -136,6 +137,7 @@ export function CrmManager() {
   const [pendingValue, setPendingValue] = useState("");
   const [pendingDelete, setPendingDelete] = useState<CrmContact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [viewingContact, setViewingContact] = useState<CrmContact | null>(null);
   /** El historial del contacto abierto: null mientras carga. */
   const [history, setHistory] = useState<{ contactId: string; rows: CrmLogRow[] | null; failed: boolean } | null>(null);
@@ -441,6 +443,51 @@ export function CrmManager() {
     }
   }
 
+  /*
+    El mismo listado en PDF, para enseñarlo en vez de para seguir trabajando
+    con él. Vectorial: se amplía sin pixelarse y se puede buscar texto dentro.
+
+    El generador se carga al pulsar y no antes: son 300 KB que no hacen falta
+    para mirar la pantalla.
+  */
+  async function exportContactsPdf() {
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const unit = unitFilter === "all" ? null : units.find((item) => item.id === unitFilter);
+      const scopeSlug = unit ? unit.slug : "todas";
+      const porEstado = CRM_STATUSES
+        .map((estado) => ({ label: estado.label, count: visibleContacts.filter((contact) => contact.status === estado.value).length }));
+      const { exportCrmReportPdf } = await import("@/lib/crm-report-pdf");
+      await exportCrmReportPdf(
+        visibleContacts.map((contact) => ({
+          fullName: contact.fullName,
+          companyName: contact.companyName ?? null,
+          businessUnitId: contact.businessUnitId ?? null,
+          phone: contact.phone ?? null,
+          companyEmail: contact.companyEmail ?? null,
+          city: contact.city ?? null,
+          status: String(contact.status ?? ""),
+          saleValue: contact.saleValue ?? null,
+          statusChangedAt: contact.statusChangedAt ?? null,
+          origin: contact.origin ?? null,
+          createdAt: contact.createdAt,
+        })),
+        {
+          scopeLabel: unit ? unit.name : "Todas las unidades",
+          unitName: (id) => units.find((item) => item.id === id)?.name ?? "",
+          statusLabel: (status) => statusInfo(status as CrmStatus).label,
+          porEstado,
+          filename: `crm_contactos_${scopeSlug}_${new Date().toISOString().slice(0, 10)}.pdf`,
+        },
+      );
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   function exportContactsCsv() {
     const unit = unitFilter === "all" ? null : units.find((item) => item.id === unitFilter);
     const scopeSlug = unit ? unit.slug : "todas";
@@ -478,7 +525,7 @@ export function CrmManager() {
       <section className="section-heading">
         <div><p>Contactos generados a través de campañas o consultas, organizados por empresa.</p></div>
         <div className="panel-heading-trailing">
-          <button type="button" className="button button-compact button-secondary" onClick={exportContactsCsv}>Exportar CSV</button>
+          <ReportExportButtons onExportCsv={exportContactsCsv} onExportPdf={() => void exportContactsPdf()} pdfBusy={pdfBusy} />
           {canEdit ? <button type="button" className="button button-primary" onClick={openNew}>+ Nuevo contacto</button> : null}
         </div>
       </section>

@@ -1121,6 +1121,72 @@ export function InquiryRegister() {
     ]);
   }
 
+  /** Cómo se llama el tramo y el ámbito que se está viendo, para la portada. */
+  const etiquetaDelPeriodo = () => (viewMode === "month" ? selectedMonth : String(selectedYear));
+  const etiquetaDelAmbito = () =>
+    selectedUnit === "all" ? "Todas las unidades" : units.find((unit) => unit.id === selectedUnit)?.name ?? "Todas las unidades";
+
+  /*
+    Las dos listas en PDF. El generador se carga al pulsar: son 300 KB que no
+    hacen falta para mirar la pantalla.
+  */
+  async function exportInquiriesPdf() {
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const { exportInquiryListPdf } = await import("@/lib/inquiry-list-pdf");
+      await exportInquiryListPdf(
+        filtered.map((record) => {
+          const ventas = salesByInquiry.get(record.id) ?? [];
+          return {
+            createdAt: record.createdAt,
+            unitName: units.find((unit) => unit.id === record.businessUnitId)?.name ?? "",
+            channelLabel: inquiryChannelLabels[record.inquiryType],
+            contactName: record.contactName ?? null,
+            companyName: record.companyName ?? null,
+            phone: record.phone ?? null,
+            email: record.email ?? null,
+            productInterest: record.productInterest ?? null,
+            statusKey: record.entryMode === "weekly" ? null : String(record.status ?? "contactado"),
+            statusLabel: record.entryMode === "weekly" ? "—" : contactStatusLabels[record.status ?? "contactado"],
+            origin: record.entryMode === "weekly" ? "Semanal" : "Individual",
+            count: Number(record.count ?? 0),
+            value: ventas.reduce((suma, entrada) => suma + entrada.value, 0),
+            saleTypes: ventas.map((entrada) => saleTypeLabels[entrada.saleType]).join(" · "),
+          };
+        }),
+        { periodLabel: etiquetaDelPeriodo(), scopeLabel: etiquetaDelAmbito(), filename: `consultas_${etiquetaDelPeriodo()}.pdf` },
+      );
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  async function exportSalesPdf() {
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const { exportSaleListPdf } = await import("@/lib/inquiry-list-pdf");
+      await exportSaleListPdf(
+        filteredSales.map((entry) => ({
+          occurredOn: entry.occurredOn,
+          unitName: units.find((unit) => unit.id === entry.businessUnitId)?.name ?? "",
+          typeLabel: saleTypeLabels[entry.saleType],
+          origin: saleOrigin(entry),
+          count: Number(entry.count ?? 0),
+          value: Number(entry.value ?? 0),
+        })),
+        { periodLabel: etiquetaDelPeriodo(), scopeLabel: etiquetaDelAmbito(), filename: `ventas_${etiquetaDelPeriodo()}.pdf` },
+      );
+    } catch (cause) {
+      setMessage(reportSafeError(cause, "No se pudo generar el PDF."));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   function changeSort(column: ChannelTableColumn) {
     if (column === sortColumn) setSortDirection((current) => current === "asc" ? "desc" : "asc");
     else {
@@ -1206,7 +1272,7 @@ export function InquiryRegister() {
             <div><span className="eyebrow">Control</span><h2>Consultas del periodo</h2><p className="panel-subtitle">Las individuales llevan ficha y estado; las semanales son un recuento y no tienen nombre.</p></div>
             <div className="panel-heading-trailing">
               <span className="muted">Pulsa Editar para ver o cambiar la ficha, el estado y sus ventas</span>
-              <button type="button" className="button button-compact button-secondary" onClick={exportInquiriesCsv}>Exportar CSV</button>
+              <ReportExportButtons onExportCsv={exportInquiriesCsv} onExportPdf={() => void exportInquiriesPdf()} pdfBusy={pdfBusy} />
             </div>
           </div>
           <label className="list-search">
@@ -1267,7 +1333,7 @@ export function InquiryRegister() {
             <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
             <div className="panel-heading-trailing">
               <span className="muted">Incluye ventas por consulta, bloques semanales y las de los leads. Corrige un error editando la venta, o elimínala si no debía existir; las de un lead se cambian desde el lead</span>
-              <button type="button" className="button button-compact button-secondary" onClick={exportSalesCsv}>Exportar CSV</button>
+              <ReportExportButtons onExportCsv={exportSalesCsv} onExportPdf={() => void exportSalesPdf()} pdfBusy={pdfBusy} />
             </div>
           </div>
           <div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Cantidad</th><th>Valor</th><th></th></tr></thead><tbody>{recentSales.slice(0, salesExpanded ? recentSales.length : 5).map((entry) => {
