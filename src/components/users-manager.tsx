@@ -7,11 +7,18 @@ import { reportSafeError } from "@/lib/errors";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { SearchIcon } from "@/components/icons";
 import { Toast } from "@/components/ui/toast";
 import type { AppRole, Profile } from "@/lib/types";
 import { PageLoader } from "@/components/ui/page-loader";
 
 const STORAGE_KEY = "intec-demo-users";
+
+/** Sin tildes ni mayúsculas, para que «jose» encuentre a «José». */
+const plano = (texto: string) => texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** Qué cuentas se enseñan: las de la casa, las de prueba o todas. */
+type TipoDeCuenta = "all" | "reales" | "prueba";
 
 function mapProfile(row: Record<string, unknown>): Profile {
   return {
@@ -99,6 +106,16 @@ export function UsersManager() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   const [editando, setEditando] = useState<string | null>(null);
+  /*
+    Buscar y filtrar la lista.
+
+    Las cuentas de prueba viven mezcladas con las de verdad y son ocho: con
+    ellas delante, encontrar a una persona concreta es ir leyendo. Esto no
+    cambia ningún permiso, solo qué filas se pintan.
+  */
+  const [busqueda, setBusqueda] = useState("");
+  const [tipoDeCuenta, setTipoDeCuenta] = useState<TipoDeCuenta>("all");
+  const [filtroRol, setFiltroRol] = useState<"all" | AppRole>("all");
   const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [businessUnits, setBusinessUnits] = useState<UnitOption[]>([]);
@@ -184,6 +201,22 @@ export function UsersManager() {
     setProfiles(next);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
+
+  const usuariosFiltrados = useMemo(() => {
+    const texto = plano(busqueda.trim());
+    return profiles.filter((profile) => {
+      if (tipoDeCuenta === "reales" && profile.isPreview) return false;
+      if (tipoDeCuenta === "prueba" && !profile.isPreview) return false;
+      if (filtroRol !== "all" && !profile.roles.includes(filtroRol)) return false;
+      if (!texto) return true;
+      // Por nombre, por correo y por el rol tal como se lee: quien busca
+      // «compras» espera encontrar al de compras, no acordarse de su nombre.
+      const donde = [profile.fullName, profile.email ?? "", ...profile.roles.map((role) => roleLabels[role] ?? role)];
+      return donde.some((campo) => plano(campo).includes(texto));
+    });
+  }, [profiles, busqueda, tipoDeCuenta, filtroRol]);
+
+  const hayFiltros = tipoDeCuenta !== "all" || filtroRol !== "all" || busqueda.trim() !== "";
 
   async function updateProfile(id: string, patch: Partial<Pick<Profile, "roles" | "isActive">>) {
     setMessage(null);
@@ -324,10 +357,40 @@ export function UsersManager() {
 
       <section className="panel table-panel">
         <div className="panel-heading"><div><span className="eyebrow">Equipo</span><h2>Usuarios registrados</h2></div></div>
+        <label className="list-search">
+          <span className="sr-only">Buscar usuarios</span>
+          <SearchIcon />
+          <input
+            type="search"
+            value={busqueda}
+            onChange={(event) => setBusqueda(event.target.value)}
+            placeholder="Buscar por nombre, correo o rol"
+          />
+        </label>
+        <div className="filter-bar">
+          <label><span>Tipo de cuenta</span>
+            <select value={tipoDeCuenta} onChange={(event) => setTipoDeCuenta(event.target.value as TipoDeCuenta)}>
+              <option value="all">Todas</option>
+              <option value="reales">Personas</option>
+              <option value="prueba">Cuentas de prueba</option>
+            </select>
+          </label>
+          <label><span>Rol</span>
+            <select value={filtroRol} onChange={(event) => setFiltroRol(event.target.value as "all" | AppRole)}>
+              <option value="all">Todos</option>
+              {USER_MANAGER_ROLES.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
+            </select>
+          </label>
+          <div className="filter-summary"><span>Se ven</span><strong>{usuariosFiltrados.length} de {profiles.length}</strong></div>
+        </div>
         <div className="table-scroll">
           <table className="users-table">
             <thead><tr><th>Usuario</th><th>Email</th><th>Roles</th><th>Marcas asignadas</th><th>Estado</th><th></th></tr></thead>
-            <tbody>{profiles.map((profile) => {
+            <tbody>{usuariosFiltrados.length === 0 ? (
+              <tr><td colSpan={6} className="muted">
+                {hayFiltros ? "Ningún usuario encaja con lo que has puesto." : "Todavía no hay usuarios."}
+              </td></tr>
+            ) : null}{usuariosFiltrados.map((profile) => {
               const esPropietario = profile.roles.includes("owner");
               const abierto = editando === profile.id;
               return (
