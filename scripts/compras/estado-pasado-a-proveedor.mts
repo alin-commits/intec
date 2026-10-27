@@ -68,7 +68,7 @@ if (error) {
 }
 
 // Qué versión del agente hay en el servidor: la dice él en cada lectura desde
-// la versión «2026-10-26 pasado-a-proveedor». Si no sale ninguna, la copia del
+// la versión «2026-10-26 subfamilia-y-pasado-a-proveedor». Si no sale ninguna, la copia del
 // servidor es anterior a esa.
 const version = (lecturas ?? [])
   .map((fila) => /agente (\d{4}-\d{2}-\d{2}[^|]*)/.exec(String(fila.message ?? "")))
