@@ -443,8 +443,36 @@ def leer_pdf(ruta):
             titulo = titulo_de(pagina)
             # Las tablas van primero y enteras: son las que llevan las medidas,
             # los códigos y las características, que es lo que se pregunta.
-            piezas = tablas_de(pagina) if CON_TABLAS and DIGITOS.search(texto) else []
-            piezas += [p for p in SEPARADOR.split(crudo) if p.strip()]
+            tablas = tablas_de(pagina) if CON_TABLAS and DIGITOS.search(texto) else []
+            piezas = list(tablas)
+            """
+            Y el resto de la página, sin lo que ya va en las tablas.
+
+            Antes se añadía el texto crudo entero: una página de tarifa se
+            indexaba dos veces, una con las filas etiquetadas y otra como
+            ristra de números. Eso dobla el índice, parte el presupuesto de
+            trozos de cada envío y hace que la misma página salga dos veces
+            compitiendo consigo misma en la búsqueda.
+
+            Se quita quedándose con las líneas del texto que no estén ya
+            dentro de alguna fila de tabla. Comparando sin espacios: la tabla
+            da «115x1,0» donde el texto suelto puede dar «115 x 1,0».
+            """
+            def apretado(valor):
+                return "".join(valor.split()).lower()
+
+            yaEnTablas = {apretado(fila) for fila in tablas}
+            def esta_en_una_tabla(linea):
+                corta = apretado(linea)
+                if len(corta) < 8:
+                    return False
+                return any(corta in fila for fila in yaEnTablas)
+
+            sobrante = "\n".join(
+                linea for linea in crudo.splitlines()
+                if not esta_en_una_tabla(linea)
+            )
+            piezas += [p for p in SEPARADOR.split(sobrante) if p.strip()]
             trozos += partir(piezas, pagina=i + 1, titulo=titulo)
     finally:
         doc.close()

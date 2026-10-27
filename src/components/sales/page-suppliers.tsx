@@ -93,9 +93,33 @@ export function SuppliersPage({ ctx }: { ctx: SalesContext }) {
     },
   );
 
-  const filas = proveedores.data ?? [];
+  /*
+    Lo marcado manda sobre la tabla.
+
+    Con uno marcado se abre su detalle debajo; con dos o más no hay detalle
+    que abrir —serían dos tablas— pero la tabla sí se queda con ellos, que es
+    lo que promete la etiqueta de arriba. Antes, con dos marcados, no pasaba
+    absolutamente nada y la etiqueta seguía diciendo que el filtro estaba
+    puesto.
+  */
+  const todasLasFilas = proveedores.data ?? [];
+  const filas = filters.suppliers.length > 0
+    ? todasLasFilas.filter((fila) => filters.suppliers.includes(fila.supplier_code))
+    : todasLasFilas;
   const total = filas.reduce((suma, fila) => suma + Math.max(Number(fila.net_amount), 0), 0);
   const marcado = soloUno(filters.suppliers);
+  /*
+    Cómo se llama el marcado, aunque se haya caído de la tabla.
+
+    Pasa al cambiar de periodo: el proveedor sigue marcado pero en ese tramo
+    no vendió nada, así que no viene en las filas. Sin esto, el título pasaba
+    a ser el código pelado y el detalle desaparecía sin decir por qué.
+  */
+  const nombreDelMarcado = marcado === null
+    ? null
+    : todasLasFilas.find((fila) => fila.supplier_code === marcado)?.name
+      ?? `Proveedor ${marcado || "sin asignar"}`;
+  const marcadoSinVenta = marcado !== null && !todasLasFilas.some((fila) => fila.supplier_code === marcado);
 
   // Los artículos y la evolución del proveedor marcado, que se abren debajo
   // de su fila. Solo se piden cuando hay uno: son dos consultas más.
@@ -106,9 +130,13 @@ export function SuppliersPage({ ctx }: { ctx: SalesContext }) {
   const spanFrom = period.baseCompare && period.baseCompare.from < period.base.from ? period.baseCompare.from : period.base.from;
   const spanTo = period.baseCompare && period.baseCompare.to > period.base.to ? period.baseCompare.to : period.base.to;
   const meses = useSageQuery<{ month: string; net_amount: number }[]>(
-    marcado !== null ? JSON.stringify(["proveedor-meses", marcado, spanFrom, spanTo, ctx.rpc.p_reps, ctx.rpc.p_companies, reload]) : null,
+    marcado !== null ? JSON.stringify(["proveedor-meses", marcado, spanFrom, spanTo, ctx.rpc.p_reps, ctx.rpc.p_companies, conFamilias, conSubfamilias, reload]) : null,
+    // Con la familia y la subfamilia marcadas, como la fila que tiene encima:
+    // si no, el gráfico enseñaba la venta del proveedor entero debajo de una
+    // fila que decía otra cosa.
     async () => await createClient().rpc("sage_supplier_months", {
       p_supplier: marcado, p_from: spanFrom, p_to: spanTo, ...conSociedades, ...conComerciales,
+      ...conFamilias, ...conSubfamilias,
     }),
   );
 
@@ -170,7 +198,13 @@ export function SuppliersPage({ ctx }: { ctx: SalesContext }) {
   const detalle = marcado === null ? null : (
     <div className="sales-row-detail-inner">
       <p className="sales-row-detail-title">
-        Lo más vendido de {filas.find((row) => row.supplier_code === marcado)?.name ?? marcado}
+        Lo más vendido de {nombreDelMarcado}
+        {/* Sigue marcado pero en este tramo no vendió: sin esto, el detalle
+            salía vacío y parecía que algo no había cargado. */}
+        {marcadoSinVenta ? " · sin venta en este periodo" : ""}
+        {/* El Total de esta tabla no puede llegar al de la fila del proveedor:
+            son los 50 que más venden, no todos. Decirlo donde se lee. */}
+        {(articulos.data ?? []).length >= 50 ? " · los 50 que más venden, así que su Total no llega al de la fila" : ""}
         {" · pulsa otra vez para cerrar"}
       </p>
       {articulos.failed ? <LoadFailed what="los artículos del proveedor" /> : (
@@ -201,7 +235,7 @@ export function SuppliersPage({ ctx }: { ctx: SalesContext }) {
       <section className="sales-board">
         {marcado !== null ? (
           <Panel
-            title={`${filas.find((row) => row.supplier_code === marcado)?.name ?? marcado} mes a mes`}
+            title={`${nombreDelMarcado} mes a mes`}
             subtitle={`${period.baseCompare ? `Con ${period.baseCompareShort} en gris. ` : ""}Pulsa un mes para filtrar`}
             className="panel chart-panel sales-board-full"
           >
@@ -211,7 +245,7 @@ export function SuppliersPage({ ctx }: { ctx: SalesContext }) {
                 ...(period.baseCompare ? [{ key: "anterior", label: period.baseCompareShort ?? "", color: "#cbd5e1" }] : []),
                 { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ]}
-              ariaLabel={`Venta mensual del proveedor ${filas.find((row) => row.supplier_code === marcado)?.name ?? marcado}`}
+              ariaLabel={`Venta mensual del proveedor ${nombreDelMarcado}`}
               valueFormatter={euros}
               onSelect={(indice) => ctx.toggleMonth(monthKeys[indice] ?? null)}
               selectedIndex={mesMarcado >= 0 ? mesMarcado : null}

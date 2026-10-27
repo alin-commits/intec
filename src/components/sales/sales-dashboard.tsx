@@ -87,7 +87,9 @@ function readUrl(): { page: SalesPageKey | null; choice: PeriodChoice | null; co
       families: (params.get("f") ?? "").split(",").filter(Boolean),
       // "familia:subfamilia", que es como se marcan.
       subfamilies: (params.get("sf") ?? "").split(",").filter((item) => item.includes(":")),
-      suppliers: (params.get("pv") ?? "").split(",").filter(Boolean),
+      // El código vacío es «Sin proveedor», y un vacío no sobrevive a la URL:
+      // viaja como «-» para que marcarlo se pueda compartir y recargar.
+      suppliers: (params.get("pv") ?? "").split(",").filter(Boolean).map((item) => (item === "-" ? "" : item)),
     },
   };
 }
@@ -295,7 +297,7 @@ export function SalesDashboard() {
     if (requested.repKeys.length > 0) params.set("r", requested.repKeys.join(","));
     if (requested.families.length > 0) params.set("f", requested.families.join(","));
     if (requested.subfamilies.length > 0) params.set("sf", requested.subfamilies.join(","));
-    if (requested.suppliers.length > 0) params.set("pv", requested.suppliers.join(","));
+    if (requested.suppliers.length > 0) params.set("pv", requested.suppliers.map((item) => item || "-").join(","));
     const query = params.toString();
     const next = `${window.location.pathname}${query ? `?${query}` : ""}`;
     if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, "", next);
@@ -603,7 +605,7 @@ export function SalesDashboard() {
   if (requested.suppliers.length > 0) {
     chips.push({
       key: "suppliers",
-      label: `${requested.suppliers.length === 1 ? "Proveedor" : "Proveedores"}: ${juntar(requested.suppliers)}`,
+      label: `${requested.suppliers.length === 1 ? "Proveedor" : "Proveedores"}: ${juntar(requested.suppliers.map((codigo) => codigo || "Sin proveedor"))}`,
       note: chipNote("supplier", pageInfo.applies, false),
     });
   }

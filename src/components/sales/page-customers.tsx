@@ -6,8 +6,8 @@ import { RepCustomersPanel } from "./rep-customers-panel";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CalendarIcon, ConversionIcon, EuroIcon, HeartIcon, UsuariosIcon } from "@/components/icons";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { familyMargin, trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { delta, discountPercent, euros, hayComercialMarcado, hayMesMarcado, marcado, mesMarcado, monthLabel, monthName, monthWithYear, pairOf, soloUnMes, soloUno, ticketFormatter, variation } from "@/lib/sales-model";
+import { familyMargin, partsOf, sumParts, trustedNewCustomersFrom } from "@/lib/sage-panel";
+import { delta, discountPercent, euros, hayComercialMarcado, hayMesMarcado, marcado, mesMarcado, monthLabel, monthName, monthWithYear, pairOf, signedEuros, soloUnMes, soloUno, ticketFormatter, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
@@ -55,16 +55,18 @@ function SegmentsPanel({ ctx, periodName }: { ctx: SalesContext; periodName: str
   // de pintar una tabla de una sola fila al 100 %.
   const unfilled = rows.length > 0 && rows.every((row) => row.code === "");
 
+  /** La fila de Total: suma de sumandos, y margen y Dto. recalculados sobre ellos. */
+  const totalSegments = (rows: SegmentRow[]) => sumParts(rows, partsOf);
   const columns: Column<SegmentRow>[] = [
     // Sin nombre en las tablas de códigos, un código numérico se dice como tal; uno
     // de texto ya se entiende solo (las formas de pago son "Giro a 60 días"...).
     { key: "nombre", header: label, text: true, render: (row) => (row.code === "" ? <span className="muted">Sin asignar en Sage</span> : row.name || (/^\d+$/.test(row.code) ? `Código ${row.code}` : row.code)), sort: (row) => row.name ?? row.code },
-    { key: "clientes", header: "Clientes", render: (row) => numberFormatter.format(Number(row.customers)), sort: (row) => Number(row.customers) },
-    { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
-    { key: "peso", header: "Peso", optional: true, render: (row) => share(Math.max(Number(row.net_amount), 0), total), sort: (row) => Number(row.net_amount) },
-    { key: "porcliente", header: "Por cliente", optional: true, render: (row) => (Number(row.customers) ? euros(Number(row.net_amount) / Number(row.customers)) : "—"), sort: (row) => (Number(row.customers) ? Number(row.net_amount) / Number(row.customers) : 0) },
-    { key: "margen", header: "Margen %", render: (row) => { const value = familyMargin(row); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => familyMargin(row) ?? -Infinity },
-    { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity },
+    { key: "clientes", header: "Clientes", render: (row) => numberFormatter.format(Number(row.customers)), sort: (row) => Number(row.customers), total: (rows) => numberFormatter.format(totalSegments(rows).customers) },
+    { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(totalSegments(rows).net) },
+    { key: "peso", header: "Peso", optional: true, render: (row) => share(Math.max(Number(row.net_amount), 0), total), sort: (row) => Number(row.net_amount), total: () => share(total, total) },
+    { key: "porcliente", header: "Por cliente", optional: true, render: (row) => (Number(row.customers) ? euros(Number(row.net_amount) / Number(row.customers)) : "—"), sort: (row) => (Number(row.customers) ? Number(row.net_amount) / Number(row.customers) : 0), total: (rows) => { const sum = totalSegments(rows); return sum.customers ? euros(sum.net / sum.customers) : "—"; } },
+    { key: "margen", header: "Margen %", render: (row) => { const value = familyMargin(row); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => familyMargin(row) ?? -Infinity, total: (rows) => { const value = familyMargin(totalSegments(rows)); return value === null ? <span className="muted">—</span> : formatPercent(value); } },
+    { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity, total: (rows) => { const sum = totalSegments(rows); const value = discountPercent(sum.gross_amount, sum.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); } },
   ];
 
   // Con una sola familia marcada se puede decir cuál; con varias, el subtítulo
@@ -171,8 +173,8 @@ function CustomerSearch({ ctx }: { ctx: SalesContext }) {
 
 export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   const { filters, period } = ctx;
-  const counts = useCustomerCounts(ctx);
-  const before = useCustomerCounts(ctx, true);
+  const counts = useCustomerCounts(ctx, false, { conCatalogo: true });
+  const before = useCustomerCounts(ctx, true, { conCatalogo: true });
   const totals = useCustomerTotals(ctx);
   const reload = ctx.reloadKey;
   // Del periodo y de lo que se le pone al lado, para comparar mes a mes.
@@ -191,6 +193,24 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
     const error = rows.error ?? first.error;
     return { data: error ? null : { rows: (rows.data ?? []) as MonthlyRow[], firstDay: ((first.data ?? [])[0] as { day: string } | undefined)?.day ?? null }, error };
   });
+  /*
+    ¿Sabe ya el reparto por cliente de qué subfamilia era cada venta?
+
+    Lo manda el agente de Sage desde la versión «2026-10-26», y los meses
+    leídos antes se quedaron sin ello. Sin esto, filtrar por subfamilia aquí
+    no devuelve a nadie y parecería que esa subfamilia no se la compra
+    ninguno. Una fila basta para saberlo.
+  */
+  const haySubfamilia = useSageQuery<boolean>(
+    filters.subfamilies.length > 0 ? JSON.stringify(["clientes-con-subfamilia", reload]) : null,
+    async () => {
+      const { data, error } = await createClient()
+        .from("sage_customer_families_monthly").select("subfamily_code").neq("subfamily_code", "").limit(1);
+      return { data: error ? null : (data ?? []).length > 0, error };
+    },
+  );
+  const faltaRelectura = filters.subfamilies.length > 0 && haySubfamilia.data === false;
+
   const listArgs = { p_kind: "activos", p_from: period.from, p_to: period.to, ...ctx.rpc };
   const top = useSageQuery<CustomerRow[]>(ctx.detail.customers ? JSON.stringify(["clientes-top", listArgs, reload]) : null, async () =>
     await rpcAllRows<CustomerRow>("sage_customer_list", listArgs, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]));
@@ -245,20 +265,26 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   const open = (kind: CustomerKind, title: string, description: string, days?: number) =>
     ctx.openList({ type: "clientes", kind, days, title, description });
   const card = (data: CustomerCounts | null, field: keyof CustomerCounts) => (data ? numberFormatter.format(data[field]) : "…");
-  const compare = (field: keyof CustomerCounts) =>
-    counts.data && before.data && ctx.comparisonAvailable ? delta(variation(counts.data[field], before.data[field])) : { delta: "Sin comparación", positive: true };
+  /** El porcentaje de la tarjeta y, al lado, cuántos clientes son de diferencia. */
+  const compare = (field: keyof CustomerCounts) => {
+    if (!counts.data || !before.data || !ctx.comparisonAvailable) return { delta: "Sin comparación", positive: true };
+    const diff = counts.data[field] - before.data[field];
+    return delta(variation(counts.data[field], before.data[field]), diff === 0 ? null : `${diff > 0 ? "+" : "-"}${numberFormatter.format(Math.abs(diff))}`);
+  };
 
   type TopRow = CustomerRow;
+  /* El Total de esta tabla es el de los clientes que salen en ella, no el del periodo: por eso dice cuántos son. */
+  const totalTop = (rows: TopRow[]) => sumParts(rows, partsOf);
   const topColumns: Column<TopRow>[] = [
     { key: "cliente", header: "Cliente", text: true, render: (row) => (
       <span className="sales-article">
         <strong>{row.trade_name || row.name}</strong>
         <small>{[row.trade_name ? row.name : null, row.municipality, row.province].filter(Boolean).join(" · ")}</small>
       </span>
-    ), sort: (row) => row.trade_name || row.name },
-    { key: "compra", header: "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount) },
-    { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity },
-    { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents) },
+    ), sort: (row) => row.trade_name || row.name, total: (rows) => `Total · ${numberFormatter.format(rows.length)} clientes` },
+    { key: "compra", header: "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(totalTop(rows).net) },
+    { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity, total: (rows) => { const sum = totalTop(rows); const value = discountPercent(sum.gross_amount, sum.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); } },
+    { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents), total: (rows) => numberFormatter.format(totalTop(rows).documents) },
     { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => (row.rep_code === null ? <span className="muted">—</span> : ctx.repOf(row.company_code, row.rep_code).label), sort: (row) => (row.rep_code === null ? "" : ctx.repOf(row.company_code, row.rep_code).label) },
     { key: "contacto", header: "Contacto", text: true, optional: true, render: (row) => {
       const phone = row.contact_phone || row.phone;
@@ -327,6 +353,18 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         <CustomerSearch ctx={ctx} />
       </section>
 
+      {faltaRelectura ? (
+        <section className="panel panel-padded">
+          <h3>La venta por cliente todavía no sabe de subfamilias</h3>
+          <p className="muted">
+            Lo que hay cargado se leyó de Sage antes de que el agente mandara la subfamilia de cada línea, así que
+            filtrar por subfamilia aquí no devuelve a nadie. Se arregla copiando al servidor de Sage la versión{" "}
+            <code>2026-10-26 subfamilia-y-pasado-a-proveedor</code> del agente —o una posterior— y pidiéndole una lectura del
+            histórico entero. El filtro por familia funciona igual, y Productos también.
+          </p>
+        </section>
+      ) : null}
+
       {!ctx.detail.customers ? (
         <section className="panel sales-warning">
           <div>
@@ -383,7 +421,10 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
               onClick={() => open("recurrentes", `Clientes recurrentes en ${periodName}`, "Compran en el periodo y también compraron en los 12 meses anteriores.")} actionLabel="Ver lista" />
             <KpiCard label="Venta por cliente" value={porCliente !== null ? ticketFormatter.format(porCliente) : "…"} helper="de media en el periodo" icon={<EuroIcon />} tone="amber"
               {...(counts.data && before.data && counts.data.activos && before.data.activos && ctx.comparisonAvailable
-                ? delta(variation(counts.data.neto_activos / counts.data.activos, before.data.neto_activos / before.data.activos))
+                ? delta(
+                  variation(counts.data.neto_activos / counts.data.activos, before.data.neto_activos / before.data.activos),
+                  signedEuros(counts.data.neto_activos / counts.data.activos - before.data.neto_activos / before.data.activos),
+                )
                 : { delta: "Sin comparación", positive: true })} />
           </div>
         ) : null}

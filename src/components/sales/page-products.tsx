@@ -46,8 +46,27 @@ type GroupTableRow = GroupRow & { before: number };
  */
 function juntarTramos(ahora: GroupRow[], antes: GroupRow[]): GroupTableRow[] {
   const llave = (row: GroupRow) => `${row.family_code}|${row.code}`;
-  const deAntes = new Map(antes.map((row) => [llave(row), Number(row.net_amount)]));
-  return ahora.map((row) => ({ ...row, before: deAntes.get(llave(row)) ?? 0 }));
+  const deAntes = new Map(antes.map((row) => [llave(row), row]));
+  const filas = ahora.map((row) => ({ ...row, before: Number(deAntes.get(llave(row))?.net_amount ?? 0) }));
+  /*
+    Y lo que vendió el año pasado y este no.
+
+    Cruzando solo por lo de ahora, una subfamilia que ha caído a cero
+    desaparecía de la tabla: ni fila, ni -100 %, y su importe tampoco entraba
+    en el Total de la columna «antes», que salía corto sin decirlo. Lo que
+    dejó de venderse es justo lo que hay que mirar.
+  */
+  const vistas = new Set(ahora.map(llave));
+  for (const row of antes) {
+    if (vistas.has(llave(row))) continue;
+    filas.push({
+      ...row,
+      net_amount: 0, trusted_net: 0, trusted_cost: 0, trusted_without_cost: 0,
+      gross_amount: 0, gross_net: 0, articles: 0,
+      before: Number(row.net_amount),
+    });
+  }
+  return filas;
 }
 
 type ArticleRow = {
@@ -421,7 +440,16 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
             onRowClick={(row) => ctx.toggleEnLista("families", row.code)}
             expand={(row) => (row.code === familia ? subfamilyDetail : null)}
             initialSort={{ key: "ventas", desc: true }}
-            limit={15}
+            /*
+              Quince, salvo con una familia marcada: entonces salen todas.
+
+              Sus subfamilias se abren desplegadas debajo de su fila, y si la
+              familia no entra en las quince primeras no hay fila donde
+              abrirlas — se marcaba desde el gráfico o desde la etiqueta y la
+              tabla de subfamilias no aparecía por ningún lado. Quien ha
+              marcado una familia no se asusta de ver la lista entera.
+            */
+            limit={familia !== null ? Math.max(familyRows.length, 15) : 15}
             empty={families.data ? "Sin ventas por familia en este periodo." : "Cargando…"}
           />
         </Panel>

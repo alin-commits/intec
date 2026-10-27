@@ -27,9 +27,16 @@ export const salesPages: { key: SalesPageKey; label: string; applies: SalesDimen
   */
   { key: "productos", label: "Productos", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
   { key: "clientes", label: "Clientes", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
-  // El proveedor solo lo aplica su propia página: lo demás del panel se
-  // reparte por cliente o por familia, y ahí no hay proveedor que mirar.
-  { key: "proveedores", label: "Proveedores", applies: ["company", "channel", "rep", "month", "family", "subfamily", "supplier"] },
+  /*
+    El proveedor solo lo aplica su propia página: lo demás del panel se
+    reparte por cliente o por familia, y ahí no hay proveedor que mirar.
+
+    Y el canal no está en esta lista aunque pudiera parecerlo: la venta por
+    artículo, que es de donde sale todo lo de esta página, no trae la serie
+    por ninguna parte. Decir que se aplica pintaba la etiqueta en negro y las
+    cifras salían de todos los canales igual.
+  */
+  { key: "proveedores", label: "Proveedores", applies: ["company", "rep", "month", "family", "subfamily", "supplier"] },
   // El comparador vive de lo marcado: todos los filtros se aplican, porque son
   // justo lo que compara.
   { key: "comparador", label: "Comparador", applies: ["company", "channel", "rep", "month", "family"] },

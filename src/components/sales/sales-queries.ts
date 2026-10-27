@@ -45,9 +45,23 @@ export type CustomerCounts = {
  * de Sage). Con `previous`, las del periodo con el que se compara; si no se
  * compara, no se pregunta nada.
  */
-export function useCustomerCounts(ctx: SalesContext, previous = false) {
+export function useCustomerCounts(ctx: SalesContext, previous = false, opciones: { conCatalogo?: boolean } = {}) {
   const range = previous ? ctx.period.compare : ctx.period;
-  const args = { p_from: range?.from ?? "", p_to: range?.to ?? "", ...(previous ? ctx.rpcCompare : ctx.rpc) };
+  const base = previous ? ctx.rpcCompare : ctx.rpc;
+  /*
+    La familia y la subfamilia solo van donde la página dice que se aplican.
+
+    El Resumen no las aplica —su etiqueta sale en gris— pero este hook mandaba
+    las dos igualmente: con una subfamilia marcada, sus cinco cifras de
+    clientes se iban a cero mientras la etiqueta de arriba decía que ese
+    filtro no se aplicaba ahí. Una cosa o la otra, pero no las dos.
+  */
+  const { p_families, p_subfamilies, ...sinCatalogo } = base;
+  const args = {
+    p_from: range?.from ?? "", p_to: range?.to ?? "",
+    ...(opciones.conCatalogo ? base : sinCatalogo),
+  };
+  void p_families; void p_subfamilies;
   const key = ctx.detail.customers && range ? JSON.stringify([args, ctx.reloadKey]) : null;
   return useSageQuery<CustomerCounts>(key, async () => {
     const { data, error } = await createClient().rpc("sage_customer_counts", args);
