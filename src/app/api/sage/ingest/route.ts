@@ -84,13 +84,28 @@ export async function POST(request: Request) {
     if (payments.error) ({ error, status } = payments);
     else data = { ...(data ?? {}), ...(payments.data ?? {}) };
   }
+  // Un fallo al guardar compras no tira la lectura, pero tiene que quedar
+  // dicho en el resumen del run: es donde mira el comprobador y lo único que
+  // se ve desde fuera del servidor.
+  let falloDeCompras: string | null = null;
   if (!error && hasPurchaseParts(body)) {
     const compras = await saveBlock(admin, toPurchasesPayload(body), "sage_ingest_purchases");
     // Compras es un añadido: si falla, se avisa y se sigue. Nunca puede dar por
     // fallida una lectura cuyo grueso ya está guardado. La primera vez que pasó
     // —una línea repetida— se perdió la lectura entera de la noche por esto.
-    if (compras.error) console.warn(`Sage: no se pudo guardar lo de compras: ${compras.error.message}`);
-    else data = { ...(data ?? {}), ...(compras.data ?? {}) };
+    if (compras.error) {
+      /*
+        Se avisa y se sigue, pero el aviso tiene que llegar a algún sitio donde
+        alguien mire. Un console.warn en una función de Vercel no lo ve nadie:
+        la lectura quedaba como ok, compras sin actualizar, y la pantalla
+        enseñando lo de ayer sin que nada lo dijera.
+
+        El resumen de la lectura sí se mira —es lo que lee el comprobador y lo
+        que sale en el panel—, así que el fallo va ahí.
+      */
+      console.warn(`Sage: no se pudo guardar lo de compras: ${compras.error.message}`);
+      falloDeCompras = compras.error.message.slice(0, 180);
+    } else data = { ...(data ?? {}), ...(compras.data ?? {}) };
   }
   if (error) {
     const message = `No se guardó nada de este envío: ${error.message}`;
@@ -106,7 +121,9 @@ export async function POST(request: Request) {
       finished_at: new Date().toISOString(),
       rows_written: counts.sales ?? 0,
       ok: true,
-      message: describeIngest(body, counts),
+      message: falloDeCompras
+        ? `${describeIngest(body, counts)} AVISO: compras no se guardó: ${falloDeCompras}`.slice(0, 2000)
+        : describeIngest(body, counts),
     }).eq("id", runId);
   }
 

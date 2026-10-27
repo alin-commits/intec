@@ -289,6 +289,18 @@ export function ComprasView() {
         setFalloCarga(fallo.message ?? "No se pudieron leer los pedidos.");
         return;
       }
+      /*
+        Las líneas son las que dicen a qué pedido le falta fecha: con ellas a
+        medias, la pantalla recalcula «sin fecha» y «Confirmados» sobre datos
+        incompletos y enseña como confirmado lo que no lo está. Eso no se
+        puede dejar pasar en silencio, que es desde donde alguien le da al
+        botón de escribir al proveedor.
+      */
+      if (lineasRes.error) {
+        const fallo = lineasRes.error as { message?: string };
+        setFalloCarga(fallo.message ?? "No se pudieron leer las líneas de los pedidos.");
+        return;
+      }
       setPedidos((pedidosRes.data ?? []) as Pedido[]);
       setLineas((lineasRes.data ?? []) as Linea[]);
       setProveedores((proveedoresRes.data ?? []) as Proveedor[]);
@@ -338,7 +350,17 @@ export function ComprasView() {
         });
         continue;
       }
-      const sinFecha = suyas.filter((linea) => !linea.expected_on && !pedido.expected_on).length;
+      /*
+        Una línea sin fecha es una línea sin fecha, tenga o no la cabecera.
+
+        Antes, si la cabecera traía fecha se daban por confirmadas TODAS sus
+        líneas, y el pedido salía en «Confirmados». Pero el aviso automático y
+        el reclamo a mano cuentan solo la fecha de la línea, así que a ese
+        mismo pedido le seguían reclamando: confirmado en la pantalla y
+        reclamable para el robot. Manda la línea, que es como lo confirma el
+        proveedor y como lo cuenta todo lo demás.
+      */
+      const sinFecha = suyas.filter((linea) => !linea.expected_on).length;
       const fechas = suyas.map((linea) => linea.expected_on ?? pedido.expected_on).filter(Boolean) as string[];
       mapa.set(llave, { sinFecha, fecha: fechas.length ? [...fechas].sort().at(-1) ?? null : null, fechas });
     }
@@ -613,12 +635,22 @@ export function ComprasView() {
     const supabase = createClient();
     const ahora = new Date().toISOString();
     const { data: { user } } = await supabase.auth.getUser();
+    /*
+      Apuntar que ha contestado sin decir fecha no borra la fecha que hubiera.
+
+      El modal dice que la fecha es opcional —«la semana que viene te digo»—,
+      pero dejarla en blanco mandaba null a confirmed_on y se llevaba por
+      delante la que ya estuviera apuntada, sin avisar. Quien escribe una nota
+      sobre un pedido que ya tenía fecha no está diciendo que ya no la haya.
+      Para quitarla está el camino de siempre: que Sage traiga la suya.
+    */
+    const laFecha = fecha
+      ? { confirmed_on: fecha, confirmed_source: "a_mano", confirmed_at: ahora }
+      : {};
     const { error } = await supabase.from("purchase_order_tracking").upsert({
       company_code: pedido.company_code, year: pedido.year, series: pedido.series, number: pedido.number,
       state: "contestado", replied_at: ahora, replied_by: user?.id ?? null,
-      confirmed_on: fecha || null,
-      confirmed_source: fecha ? "a_mano" : null,
-      confirmed_at: fecha ? ahora : null,
+      ...laFecha,
       notes: nota.trim() || null,
       updated_at: ahora,
     }, { onConflict: "company_code,year,series,number" });

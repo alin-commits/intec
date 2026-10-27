@@ -80,15 +80,30 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
     en el panel llega hasta hoy y un presupuesto se hace contra el año
     completo.
   */
-  const anteriorQuery = useSageQuery<SummaryRow[]>(
+  const anteriorQuery = useSageQuery<{ year: number; rows: SummaryRow[] }>(
     JSON.stringify(["objetivos-anterior", shownYear, ctx.reloadKey]),
-    async () => await createClient().rpc("sage_sales_summary", {
-      p_from: `${shownYear - 1}-01-01`, p_to: `${shownYear - 1}-12-31`, p_basis: "albaran",
-    }),
+    async () => {
+      const { data, error } = await createClient().rpc("sage_sales_summary", {
+        p_from: `${shownYear - 1}-01-01`, p_to: `${shownYear - 1}-12-31`, p_basis: "albaran",
+      });
+      // El año viaja con las filas: sin él no hay forma de saber si lo que hay
+      // en la mano es de este año o del que se miraba hace dos segundos.
+      return { data: error ? null : { year: shownYear - 1, rows: (data ?? []) as SummaryRow[] }, error };
+    },
   );
+  /*
+    La venta del año anterior, o null mientras no se sepa.
+
+    Null de verdad, no doce ceros: al cambiar de año la consulta sigue
+    enseñando lo del año que se miraba antes hasta que llega la nueva, y
+    buscar en esas filas los meses del año nuevo no encuentra ninguno. Eso
+    daba doce ceros, y con doce ceros «Calcular» vaciaba las doce casillas sin
+    error ninguno — un «Guardar» después borraba los objetivos del año entero.
+  */
   const anterior = useMemo(() => {
-    if (!anteriorQuery.data) return null;
-    const porMes = groupRows(filterRows(anteriorQuery.data, filters, ctx.repOf, ["channel", "month"]), (row) => row.month);
+    const traido = anteriorQuery.data;
+    if (!traido || traido.year !== shownYear - 1) return null;
+    const porMes = groupRows(filterRows(traido.rows, filters, ctx.repOf, ["channel", "month"]), (row) => row.month);
     return Array.from({ length: 12 }, (_, index) => porMes.get(`${shownYear - 1}-${String(index + 1).padStart(2, "0")}`)?.net ?? 0);
   }, [anteriorQuery.data, filters, ctx.repOf, shownYear]);
 
@@ -109,7 +124,10 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   const points = months.map((_, index) => ({
     label: monthNames[index],
     objetivo: Math.round(upTo(months, index)),
-    ventas: index <= lastMonthIndex ? Math.round(upTo(real, index)) : 0,
+    // Null y no cero en los meses que aún no han pasado: con cero, la línea de
+    // acumulado se cae al suelo en diciembre como si se hubiera dejado de
+    // vender, cuando lo que pasa es que todavía no ha llegado.
+    ventas: index <= lastMonthIndex ? Math.round(upTo(real, index)) : null,
   }));
 
   /*
@@ -162,10 +180,21 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
       } catch { errors.push(monthLongNames[index]); }
     }
     setSaving(false);
+    /*
+      Si algo falló, no se recarga.
+
+      Recargar repinta el formulario con lo que hay guardado, y lo que hay
+      guardado en los meses que fallaron es justo lo de antes: se perdía lo
+      que la persona acababa de escribir mientras el mensaje le decía «vuelve
+      a intentarlo», sin nada que reintentar. Con lo escrito delante, darle a
+      Guardar otra vez sí hace algo.
+    */
+    if (errors.length > 0) {
+      setMessage({ tone: "error", text: `No se pudo guardar ${errors.join(", ")}. Lo escrito sigue aquí: vuelve a darle a Guardar.` });
+      return;
+    }
     ctx.reloadTargets();
-    setMessage(errors.length > 0
-      ? { tone: "error", text: `No se pudo guardar ${errors.join(", ")}. Vuelve a intentarlo.` }
-      : { tone: "ok", text: "Objetivos guardados." });
+    setMessage({ tone: "ok", text: "Objetivos guardados." });
   }
 
   function spread() {
@@ -180,7 +209,16 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
       setMessage({ tone: "error", text: "Escribe el objetivo del año entero, por ejemplo 3.000.000." });
       return;
     }
-    setMessage(null);
+    if (!anterior) {
+      // Se reparte igual, pero que nadie crea que lleva la temporalidad del
+      // año pasado cuando lo que ha pasado es que no se ha podido leer.
+      setMessage({ tone: "error", text: anteriorQuery.loading
+        ? `Todavía se está leyendo la venta de ${shownYear - 1}: espera un momento y vuelve a darle.`
+        : `No se ha podido leer la venta de ${shownYear - 1}, así que esto reparte a partes iguales.` });
+      if (anteriorQuery.loading) return;
+    } else {
+      setMessage(null);
+    }
     setDraft(repartirElAno(value, anterior).map(formatInput));
   }
 

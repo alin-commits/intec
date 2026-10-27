@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { isEmailConfigured } from "@/lib/email";
+import { graphConfigurado } from "@/lib/compras/graph";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import { todayKey } from "@/lib/dates";
@@ -25,7 +26,15 @@ const MAXIMO_POR_DIA = 40;
 
 export async function GET(request: Request) {
   if (!isAuthorizedCron(request)) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
-  if (!isEmailConfigured()) return NextResponse.json({ skipped: "El envío de correos no está configurado." });
+  /*
+    Las reclamaciones salen por el buzón de compras (Graph) y, si no lo hay,
+    por Resend. Cortar la pasada entera porque falte Resend deja sin avisos a
+    quien los manda por el buzón, que es el camino normal: lo que importa es
+    que haya ALGUNO de los dos.
+  */
+  if (!isEmailConfigured() && !graphConfigurado()) {
+    return NextResponse.json({ skipped: "No hay por dónde mandar correos: ni buzón de compras ni Resend." });
+  }
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ error: "Falta SUPABASE_SERVICE_ROLE_KEY." }, { status: 503 });
 
@@ -87,5 +96,17 @@ export async function GET(request: Request) {
   }
 
   if (resumen.fallidos > 0) console.error(`Cron reclamar-compras: ${resumen.fallidos} envíos fallaron.`);
+  /*
+    Un proveedor sin correo en Sage no se reclama nunca, y como su escalón no
+    sube, mañana vuelve a tocarle y vuelve a no salir. Eso es un pedido que no
+    se persigue y nadie echa de menos. Queda dicho en el registro con los
+    pedidos concretos, que es lo que permite ir a Sage a ponerle el correo.
+  */
+  if (resumen.sinCorreo > 0) {
+    const sinCorreo = grupos.slice(0, MAXIMO_POR_DIA)
+      .map((grupo) => `${grupo.companyCode}/${grupo.supplierCode}`)
+      .slice(0, 20);
+    console.error(`Cron reclamar-compras: ${resumen.sinCorreo} proveedores sin correo en Sage, no se les ha podido reclamar: ${sinCorreo.join(", ")}`);
+  }
   return NextResponse.json(resumen);
 }

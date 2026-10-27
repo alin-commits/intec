@@ -105,9 +105,15 @@ export function AvisoCompras({ userId }: { userId: string }) {
       ])];
       if (numeros.length === 0) return;
 
-      const [pedidosRes, proveedoresRes] = await Promise.all([
+      const [pedidosRes, proveedoresRes, lineasRes] = await Promise.all([
         supabase.from("sage_purchase_orders").select("company_code, year, series, number, supplier_code, order_date, pending_amount").in("number", numeros.slice(0, 300)).gt("pending_units", 0),
         supabase.from("sage_suppliers").select("company_code, code, name"),
+        // A qué pedidos les falta todavía alguna fecha. Sin esto, el aviso
+        // daba trabajo por hecho: desde que «contestado» es el hecho de haber
+        // contestado y no «contestado y aún sin fecha», aquí entraban también
+        // los que ya tienen su fecha en Sage y no piden nada de nadie.
+        supabase.from("sage_purchase_order_lines").select("company_code, year, series, number")
+          .in("number", numeros.slice(0, 300)).gt("pending_units", 0).is("expected_on", null),
       ]);
       if (!vivo) return;
 
@@ -116,9 +122,11 @@ export function AvisoCompras({ userId }: { userId: string }) {
       const nombres = new Map((proveedoresRes.data ?? []).map((p) => [`${p.company_code}-${p.code}`, p.name as string]));
       const nombreDe = (companyCode: number, code: string | null) => (code ? nombres.get(`${companyCode}-${code}`) ?? code : "Sin proveedor");
 
+      const faltaFecha = new Set((lineasRes.data ?? []).map((l) => llaveDe(l as never)));
+
       // 1. Han contestado y la fecha no está en Sage: lo único que pide trabajo.
       const contestados: Fila[] = seguimientos
-        .filter((s) => s.state === "contestado")
+        .filter((s) => s.state === "contestado" && faltaFecha.has(llaveDe(s as never)))
         .map((s) => {
           const llave = llaveDe(s as never);
           const pedido = pedidos.get(llave);

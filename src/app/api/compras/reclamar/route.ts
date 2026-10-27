@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 
   // Cuántas líneas siguen sin fecha en cada uno: si no queda ninguna, no hay
   // nada que preguntar y el pedido se cae del correo.
-  const { data: lineas } = await admin.from("sage_purchase_order_lines")
+  const { data: lineas, error: errorLineas } = await admin.from("sage_purchase_order_lines")
     .select("company_code, year, series, number, expected_on")
     .eq("company_code", companyCode).gt("pending_units", 0).in("number", numeros);
   const sinFecha = new Map<string, number>();
@@ -81,9 +81,25 @@ export async function POST(request: Request) {
     sinFecha.set(llave, (sinFecha.get(llave) ?? 0) + 1);
   }
 
-  const { data: seguimientos } = await admin.from("purchase_order_tracking")
+  const { data: seguimientos, error: errorSeguimiento } = await admin.from("purchase_order_tracking")
     .select("company_code, year, series, number, state, level, quiet_until")
     .eq("company_code", companyCode).in("number", numeros);
+
+  /*
+    Si una de las dos lecturas falla, aquí no sale ningún correo.
+
+    Sin las líneas no se sabe a qué pedidos les falta fecha, y se le acabaría
+    preguntando por material que ya tiene fecha. Y sin el seguimiento no se
+    sabe cuántas veces se le ha escrito ya: el escalón vuelve a 1 y al
+    proveedor le llega un «te escribimos por primera vez» siendo la tercera.
+    Las dos cosas llegan a una empresa de fuera, así que ante la duda no se
+    manda nada y quien le ha dado al botón se entera.
+  */
+  const falloDeLectura = errorLineas ?? errorSeguimiento;
+  if (falloDeLectura) {
+    console.error("Compras: no se pudo leer el estado de los pedidos a reclamar", falloDeLectura);
+    return NextResponse.json({ error: "No se pudo leer el estado de esos pedidos. Vuelve a intentarlo." }, { status: 500 });
+  }
   const seguimientoDe = new Map<string, Seguimiento>((seguimientos ?? []).map((s) => [
     clavePedido({ companyCode: s.company_code, year: s.year, series: s.series, number: s.number }),
     { state: s.state as string, level: Number(s.level), quietUntil: s.quiet_until as string | null },
