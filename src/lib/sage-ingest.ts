@@ -174,6 +174,8 @@ export const sageIngestSchema = z.object({
     customerCode: code,
     month,
     familyCode: code.default(""),
+    /** La subfamilia. En blanco si esa instalación de Sage no la tiene. */
+    subfamilyCode: code.default(""),
     netAmount: amount,
     costAmount: amount.default(0),
     netWithoutCost: amount.default(0),
@@ -249,6 +251,16 @@ export const sageIngestSchema = z.object({
    * de recepción (la de la cabecera y la de cada línea). Manda la de la línea,
    * porque el proveedor confirma por línea.
    */
+  /**
+   * Que el bloque de pedidos va entero y desde qué día se ha mirado.
+   *
+   * Con las dos cosas, el Hub cierra los pedidos de ese tramo que ya no
+   * vienen: si un pedido deja de tener unidades pendientes, Sage deja de
+   * mandarlo y sin esto su fila se quedaba pendiente para siempre, con el
+   * aviso automático reclamándole al proveedor material ya recibido.
+   */
+  purchaseOrdersReplace: z.boolean().optional(),
+  purchaseOrdersFrom: optionalDay,
   purchaseOrders: z.array(z.object({
     companyCode: z.number().int(),
     year: z.number().int(),
@@ -503,6 +515,8 @@ export function hasPurchaseParts(body: SageIngestBody): boolean {
 export function toPurchasesPayload(body: SageIngestBody): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   if (body.purchaseOrders) {
+    payload.purchase_orders_replace = body.purchaseOrdersReplace === true;
+    payload.purchase_orders_from = body.purchaseOrdersFrom ?? null;
     payload.purchase_orders = body.purchaseOrders.map((row) => ({
       company_code: row.companyCode,
       year: row.year,
@@ -656,6 +670,7 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       customer_code: row.customerCode,
       month: row.month,
       family_code: row.familyCode,
+      subfamily_code: row.subfamilyCode,
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       net_without_cost: row.netWithoutCost,

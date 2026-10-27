@@ -132,7 +132,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-26 subfamilia-y-pasado-a-proveedor"
+$VersionAgente = "2026-10-27 cerrar-recibidos"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -1194,7 +1194,7 @@ function Sql-ComprasPedidos($cfg) {
   # datos seria peor que el problema que esto arregla.
   $pasado = if ($cfg.PasadoAProveedor) {
     $col = "cast(p.[$($cfg.PasadoAProveedor)] as nvarchar(10))"
-    "case when $col in ('1','S','SI','T','TRUE','Y') then 1 when $col in ('0','N','NO','F','FALSE') then 0 else null end"
+    "case when $col in ('1','-1','S','SI','T','TRUE','Y','VERDADERO') then 1 when $col in ('0','N','NO','F','FALSE','FALSO') then 0 else null end"
   } else { "cast(null as int)" }
   # El group by se arma a mano porque solo puede llevar expresiones que miren
   # una columna: SQL Server rechaza las constantes, y cuando una columna no
@@ -2446,6 +2446,21 @@ if (-not $SoloVentas) {
   if ($cfgCompras) {
     Intentar $envio "purchaseOrders" $avisos "pedidos a proveedor" { Filas-ComprasPedidos (Consultar $servidorBueno (Sql-ComprasPedidos $cfgCompras)) }
     Intentar $envio "purchaseOrderLines" $avisos "lineas de pedido a proveedor" { Filas-ComprasLineas (Consultar $servidorBueno (Sql-ComprasLineas $cfgCompras)) }
+    <#
+      El bloque va entero y mirando desde este dia, asi que el Hub puede cerrar
+      los pedidos de ese tramo que ya no vienen: un pedido recibido deja de
+      tener unidades pendientes y Sage deja de mandarlo, y sin esto su fila se
+      quedaba pendiente para siempre con el aviso automatico reclamandole al
+      proveedor material que ya esta en el almacen.
+
+      Solo se dice cuando la consulta de pedidos ha ido bien. Si fallo, el
+      envio no lleva el aviso y el Hub no cierra nada, que es justo lo que
+      evita que un fallo de lectura vacie media pantalla.
+    #>
+    if ($null -ne $envio["purchaseOrders"]) {
+      $envio.purchaseOrdersReplace = $true
+      $envio.purchaseOrdersFrom = (Get-Date).Date.AddDays(-$DiasComprasAtras).ToString("yyyy-MM-dd")
+    }
   }
   if ($null -eq $envio["backlog"]) { $envio.Remove("backlog") }
   if ($clientesListos) { Intentar $envio "dormant" $avisos "clientes dormidos" { Leer-Dormidos } }

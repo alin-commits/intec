@@ -17,8 +17,9 @@ import {
   monthWithYear,
   pairOf,
   parejasDe,
+  signedEuros,
+  sumBuckets,
   type SummaryRow,
-  tenths,
   ticketFormatter,
   UNASSIGNED_KEY,
   variation,
@@ -27,7 +28,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
-import { DataTable, LoadFailed, Panel, useSageQuery, type Column } from "./sales-ui";
+import { DetalleComparado, type Marcado } from "./comparador-detalle";
+import { changeCell, DataTable, LoadFailed, Panel, useSageQuery, type Column } from "./sales-ui";
 
 /*
   El comparador: lo marcado, uno contra otro.
@@ -60,15 +62,6 @@ type Comparado = {
   color: string;
 };
 
-const conSigno = (valor: number) => `${valor >= 0 ? "+" : "-"}${euros(Math.abs(valor))}`;
-
-const cambio = (ahora: number, antes: number) => {
-  const valor = variation(ahora, antes);
-  if (valor === null) return <span className="muted">—</span>;
-  const redondo = tenths(valor);
-  return <span className={redondo >= 0 ? "sales-up" : "sales-down"}>{redondo >= 0 ? "+" : ""}{redondo.toFixed(1).replace(".", ",")} %</span>;
-};
-
 const margenDe = (bucket: Bucket) => {
   const margen = bucketMargin(bucket);
   return margen === null ? <span className="muted">—</span> : formatPercent(margen.percent);
@@ -76,21 +69,23 @@ const margenDe = (bucket: Bucket) => {
 
 /** Las columnas son las mismas para todo lo que se compara. */
 function columnas(total: number, conComparacion: boolean, queEs: string): Column<Comparado>[] {
+  const suma = (filas: Comparado[]) => sumBuckets(filas, (fila) => fila.bucket);
+  const antesDe = (filas: Comparado[]) => filas.reduce((suma, fila) => suma + fila.antes, 0);
   const lista: Column<Comparado>[] = [
     { key: "nombre", header: queEs, text: true, render: (fila) => <strong>{fila.nombre}</strong>, sort: (fila) => fila.nombre },
-    { key: "ventas", header: "Ventas", render: (fila) => euros(fila.bucket.net), sort: (fila) => fila.bucket.net },
-    { key: "peso", header: "% de lo marcado", render: (fila) => (total > 0 ? formatPercent((fila.bucket.net / total) * 100) : "—"), sort: (fila) => fila.bucket.net },
+    { key: "ventas", header: "Ventas", render: (fila) => euros(fila.bucket.net), sort: (fila) => fila.bucket.net, total: (filas) => euros(suma(filas).net) },
+    { key: "peso", header: "% de lo marcado", render: (fila) => (total > 0 ? formatPercent((fila.bucket.net / total) * 100) : "—"), sort: (fila) => fila.bucket.net, total: (filas) => (total > 0 ? formatPercent((suma(filas).net / total) * 100) : "—") },
   ];
   if (conComparacion) {
     lista.push(
-      { key: "antes", header: "Antes", render: (fila) => euros(fila.antes), sort: (fila) => fila.antes },
-      { key: "variacion", header: "Variación", render: (fila) => cambio(fila.bucket.net, fila.antes), sort: (fila) => variation(fila.bucket.net, fila.antes) ?? -Infinity },
+      { key: "antes", header: "Antes", render: (fila) => euros(fila.antes), sort: (fila) => fila.antes, total: (filas) => euros(antesDe(filas)) },
+      { key: "variacion", header: "Variación", render: (fila) => changeCell(fila.bucket.net, fila.antes), sort: (fila) => variation(fila.bucket.net, fila.antes) ?? -Infinity, total: (filas) => changeCell(suma(filas).net, antesDe(filas)) },
     );
   }
   lista.push(
-    { key: "margen", header: "Margen %", render: (fila) => margenDe(fila.bucket), sort: (fila) => bucketMargin(fila.bucket)?.percent ?? -Infinity },
-    { key: "albaranes", header: "Albaranes", render: (fila) => numberFormatter.format(fila.bucket.documents), sort: (fila) => fila.bucket.documents },
-    { key: "ticket", header: "Ticket medio", render: (fila) => (fila.bucket.documents > 0 ? ticketFormatter.format(fila.bucket.net / fila.bucket.documents) : "—"), sort: (fila) => (fila.bucket.documents > 0 ? fila.bucket.net / fila.bucket.documents : -Infinity) },
+    { key: "margen", header: "Margen %", render: (fila) => margenDe(fila.bucket), sort: (fila) => bucketMargin(fila.bucket)?.percent ?? -Infinity, total: (filas) => margenDe(suma(filas)) },
+    { key: "albaranes", header: "Albaranes", render: (fila) => numberFormatter.format(fila.bucket.documents), sort: (fila) => fila.bucket.documents, total: (filas) => numberFormatter.format(suma(filas).documents) },
+    { key: "ticket", header: "Ticket medio", render: (fila) => (fila.bucket.documents > 0 ? ticketFormatter.format(fila.bucket.net / fila.bucket.documents) : "—"), sort: (fila) => (fila.bucket.documents > 0 ? fila.bucket.net / fila.bucket.documents : -Infinity), total: (filas) => { const todo = suma(filas); return todo.documents > 0 ? ticketFormatter.format(todo.net / todo.documents) : "—"; } },
   );
   return lista;
 }
@@ -122,7 +117,7 @@ function SubeYBaja({ filas }: { filas: Comparado[] }) {
                 <span className="sales-diff-half is-down">{diferencia < 0 ? <i style={{ width: ancho }} /> : null}</span>
                 <span className="sales-diff-half is-up">{diferencia > 0 ? <i style={{ width: ancho }} /> : null}</span>
               </span>
-              <strong className={`sales-diff-value ${diferencia >= 0 ? "sales-up" : "sales-down"}`}>{conSigno(diferencia)}</strong>
+              <strong className={`sales-diff-value ${diferencia >= 0 ? "sales-up" : "sales-down"}`}>{signedEuros(diferencia)}</strong>
             </div>
           </li>
         );
@@ -364,6 +359,21 @@ export function ComparadorPage({ ctx }: { ctx: SalesContext }) {
     return { filas, meses, evolucion, lineas };
   };
 
+  /*
+    Las series y las parejas «sociedad:comercial» de uno solo de los marcados.
+
+    Salen de las filas que ya están cargadas en vez de volver a construirlas
+    como hace la carcasa: aquí solo hace falta uno, y lo que no haya vendido
+    ni en el periodo ni en el de al lado tampoco tiene nada que comparar.
+  */
+  const todasLasFilas = [...ctx.rows, ...ctx.previousRows];
+  const seriesDe = (canal: string) =>
+    [...new Set(todasLasFilas.filter((fila) => channelLabel(fila.series) === canal).map((fila) => fila.series))];
+  const paresDe = (clave: string) =>
+    [...new Set(todasLasFilas
+      .filter((fila) => repOf(fila.company_code, fila.rep_code).key === clave)
+      .map((fila) => `${fila.company_code}:${fila.rep_code ?? "sin"}`))];
+
   const nombreDeSociedad = (code: string) => ctx.companies.find((item) => item.code === Number(code))?.name ?? `Sociedad ${code}`;
   const nombreDeComercial = (clave: string) => (clave === UNASSIGNED_KEY ? "Sin comercial asignado" : ctx.repName(clave));
 
@@ -400,17 +410,37 @@ export function ComparadorPage({ ctx }: { ctx: SalesContext }) {
 
       {bloques.map((bloque) => {
         const { filas, meses, evolucion, lineas } = reparto(bloque.dim, bloque.marcados, bloque.nombre);
+        /*
+          Con qué se le pregunta a la base por uno solo de los marcados. Es lo
+          que distingue a este de los demás, y lo demás —los otros filtros del
+          panel— lo pone el propio detalle: comparando dos comerciales con un
+          canal marcado, se comparan dentro de ese canal.
+        */
+        const soloEste = (clave: string) => {
+          if (bloque.dim === "month") return { paraClientes: { p_months: [clave] }, paraFamilias: { p_months: [clave] } };
+          // La sociedad no es parámetro de sage_family_summary: va aparte y se
+          // aplica sobre las filas, que sí la traen.
+          if (bloque.dim === "company") return { paraClientes: { p_companies: [Number(clave)] }, paraFamilias: {}, sociedad: Number(clave) };
+          if (bloque.dim === "channel") return { paraClientes: { p_series: seriesDe(clave) }, paraFamilias: {} };
+          const pares = paresDe(clave);
+          return { paraClientes: { p_reps: pares }, paraFamilias: { p_reps: pares } };
+        };
+        const marcados: Marcado[] = filas.map((fila) => ({
+          clave: fila.clave, nombre: fila.nombre, color: fila.color, ...soloEste(fila.clave),
+        }));
         return (
-          <Bloque
-            key={bloque.dim}
-            titulo={bloque.titulo}
-            queEs={bloque.queEs}
-            filas={filas}
-            meses={meses}
-            evolucion={evolucion}
-            lineas={lineas}
-            conComparacion={period.compare !== null}
-          />
+          <div key={bloque.dim} className="page-stack">
+            <Bloque
+              titulo={bloque.titulo}
+              queEs={bloque.queEs}
+              filas={filas}
+              meses={meses}
+              evolucion={evolucion}
+              lineas={lineas}
+              conComparacion={period.compare !== null}
+            />
+            <DetalleComparado ctx={ctx} marcados={marcados} queEs={bloque.queEs} dim={bloque.dim} />
+          </div>
         );
       })}
 

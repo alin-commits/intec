@@ -587,11 +587,18 @@ export function ComprasView() {
     }
   }
 
+  /*
+    Releer el seguimiento por la misma puerta que la carga inicial.
+
+    Antes tenía su propia lista de columnas, más corta, y cada vez que algo
+    refrescaba —apuntar una respuesta, aceptar una fecha, mandar un correo—
+    la pantalla se quedaba sin la fecha propuesta, sin el resumen de lo que
+    dijo el proveedor y sin el aviso de expedición: desaparecían de la tabla
+    hasta la siguiente recarga entera, sin que nadie hubiera tocado nada.
+  */
   async function recargarSeguimiento() {
-    const supabase = createClient();
-    const { data } = await supabase.from("purchase_order_tracking")
-      .select("company_code, year, series, number, state, level, last_chased_at, replied_at, confirmed_on, notes");
-    setSeguimientos((data ?? []) as Seguimiento[]);
+    const { filas } = await leerSeguimiento(createClient());
+    setSeguimientos(filas);
   }
 
   /**
