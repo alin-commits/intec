@@ -70,6 +70,12 @@ export type OrderKind = "todos" | "pendientes" | "tarde";
 /** Una lista que se abre al pulsar una cifra: quién está detrás de ese número. */
 export type ListRequest =
   | { type: "clientes"; kind: CustomerKind; days?: number; title: string; description: string }
+  /*
+    Los clientes de un municipio. Es una lista de clientes como las demás —se
+    pinta igual y devuelve las mismas columnas—, solo que en vez de un tipo
+    lleva el código del INE del municipio.
+  */
+  | { type: "municipio"; ine: string; title: string; description: string }
   | { type: "ofertas"; kind: OfferKind; title: string; description: string }
   | { type: "pedidos"; kind: OrderKind; title: string; description: string };
 

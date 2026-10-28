@@ -69,24 +69,35 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
     setSearch("");
   }
 
+  /*
+    Un municipio se pinta exactamente como una lista de clientes: mismas
+    columnas, mismo buscador, misma descarga. Lo único que cambia es de dónde
+    salen las filas.
+  */
+  const esDeClientes = request?.type === "clientes" || request?.type === "municipio";
+
   const { period, rpc } = ctx;
   const base = {
     p_from: period.from, p_to: period.to, p_reps: rpc.p_reps, p_series: rpc.p_series,
     ...(rpc.p_companies ? { p_companies: rpc.p_companies } : {}),
     ...(rpc.p_months ? { p_months: rpc.p_months } : {}),
   };
+  const conFamilias = {
+    ...(rpc.p_families ? { p_families: rpc.p_families } : {}),
+    ...(rpc.p_subfamilies ? { p_subfamilies: rpc.p_subfamilies } : {}),
+  };
   const args = request?.type === "clientes"
-    ? {
-      ...base, p_kind: request.kind, p_days: request.days ?? 30,
-      ...(rpc.p_families ? { p_families: rpc.p_families } : {}),
-      ...(rpc.p_subfamilies ? { p_subfamilies: rpc.p_subfamilies } : {}),
-    }
-    : request ? { ...base, p_kind: request.kind } : null;
-  const fn = request?.type === "clientes" ? "sage_customer_list" : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
+    ? { ...base, p_kind: request.kind, p_days: request.days ?? 30, ...conFamilias }
+    : request?.type === "municipio"
+      ? { ...base, p_ine: request.ine, ...conFamilias }
+      : request ? { ...base, p_kind: request.kind } : null;
+  const fn = request?.type === "clientes" ? "sage_customer_list"
+    : request?.type === "municipio" ? "sage_municipality_customers"
+      : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
   const key = request && args ? JSON.stringify([fn, args, ctx.reloadKey]) : null;
   // Las ofertas y los pedidos ya vienen limitados a 500 a propósito; los clientes
   // pueden ser miles y se piden todos, por páginas, para que cuadre con la cifra.
-  const result = useSageQuery<AnyRow[]>(key, async () => fn === "sage_customer_list"
+  const result = useSageQuery<AnyRow[]>(key, async () => esDeClientes
     ? await rpcAllRows<AnyRow>(fn, args ?? {}, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }])
     : await createClient().rpc(fn, args ?? {}));
 
@@ -101,7 +112,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
   const rows = result.loading ? [] : result.data ?? [];
   const query = plain(search.trim());
   const text = (row: AnyRow) => {
-    if (request.type === "clientes") {
+    if (esDeClientes) {
       const customer = row as CustomerRow;
       return [customer.name, customer.trade_name, customer.customer_code, customer.municipality, customer.province, customer.phone, customer.email,
         customer.contact_name, customer.contact_phone, customer.contact_email, rep(customer.company_code, customer.rep_code)].join(" ");
@@ -122,7 +133,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
   let exportacion: { rows: unknown[]; columns: CsvColumn<unknown>[] } | null = null;
   const filename = `${request.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}.csv`;
 
-  if (request.type === "clientes") {
+  if (esDeClientes) {
     const list = visible as CustomerRow[];
     const columns: Column<CustomerRow>[] = [
       { key: "cliente", header: "Cliente", text: true, render: (row) => (
@@ -147,7 +158,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       } },
       { key: "zona", header: "Zona", text: true, optional: true, render: (row) => [row.municipality, row.province].filter(Boolean).join(", ") || "—", sort: (row) => row.province ?? "" },
       { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => rep(row.company_code, row.rep_code), sort: (row) => rep(row.company_code, row.rep_code) },
-      { key: "compra", header: request.kind === "perdidos" ? `En ${lostCustomers(ctx.period).previous}` : request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
+      { key: "compra", header: request.type === "clientes" && request.kind === "perdidos" ? `En ${lostCustomers(ctx.period).previous}` : request.type === "clientes" && request.kind === "sin_compra" ? "Último año" : "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((sum, row) => sum + Number(row.net_amount), 0)) },
       { key: "ultima", header: "Última", render: (row) => (
         <span className="sales-article">
           <strong>{shortDate(row.last_purchase)}</strong>
@@ -243,7 +254,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
     exportacion = { rows: list, columns: columnasPedido as CsvColumn<unknown>[] };
   }
 
-  const noun = request.type === "clientes" ? "clientes" : request.type === "ofertas" ? "ofertas" : "pedidos";
+  const noun = esDeClientes ? "clientes" : request.type === "ofertas" ? "ofertas" : "pedidos";
   const capped = request.type !== "clientes" && rows.length >= 500;
 
   return (
@@ -254,7 +265,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
           type="search"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder={request.type === "clientes" ? "Buscar por nombre, población, teléfono…" : "Buscar por cliente, número o motivo…"}
+          placeholder={esDeClientes ? "Buscar por nombre, población, teléfono…" : "Buscar por cliente, número o motivo…"}
           aria-label="Buscar en la lista"
         />
         <span className="sales-list-count">

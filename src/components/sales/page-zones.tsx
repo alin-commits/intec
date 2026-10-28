@@ -1,12 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatDate, numberFormatter } from "@/lib/format";
+import { numberFormatter } from "@/lib/format";
 import { euros } from "@/lib/sales-model";
 import { NOMBRES_DE_PROVINCIA, PROVINCIAS_CON_MUNICIPIOS, encuadreDe, intensidadDeColor } from "@/lib/zonas-mapa";
 import { MUNICIPIOS_CV_SVG } from "@/lib/zonas-svg-cv";
 import { MAPA_ALTO, MAPA_ANCHO, PROVINCIAS_SVG } from "@/lib/zonas-svg";
-import { Modal } from "@/components/ui/modal";
 import { createClient } from "@/lib/supabase/client";
 import type { SalesContext } from "./sales-context";
 import { DataTable, LoadFailed, Panel, PendingDetail, share, useSageQuery, type Column } from "./sales-ui";
@@ -39,19 +38,6 @@ type ZoneRow = {
 
 /** Qué mide el mapa: cuántos clientes hay o cuánto compran. */
 type Medida = "customers" | "net_amount";
-
-type ClienteDelMunicipio = {
-  company_code: number;
-  customer_code: string;
-  name: string;
-  trade_name: string | null;
-  rep_code: number | null;
-  rep_name: string | null;
-  phone: string | null;
-  net_amount: number;
-  documents: number;
-  last_purchase: string | null;
-};
 
 type MuniRow = {
   ine: string;
@@ -127,7 +113,7 @@ function MapaDeMunicipios({ provincia, filas, medida, marcado, onMarcar }: {
   filas: MuniRow[];
   medida: Medida;
   marcado: string | null;
-  onMarcar: (ine: string | null) => void;
+  onMarcar: (ine: string | null, nombre: string) => void;
 }) {
   const dibujo = useMemo(() => MUNICIPIOS_CV_SVG.filter((m) => m.ine.startsWith(provincia)), [provincia]);
   const encuadre = useMemo(() => encuadreDe(dibujo), [dibujo]);
@@ -151,7 +137,7 @@ function MapaDeMunicipios({ provincia, filas, medida, marcado, onMarcar }: {
             d={d}
             className={activo ? "zonas-municipio activo" : "zonas-municipio"}
             style={{ "--peso": intensidadDeColor(valor, maximo) } as React.CSSProperties}
-            onClick={() => onMarcar(activo ? null : ine)}
+            onClick={() => onMarcar(activo ? null : ine, name)}
           >
             <title>{valor > 0 ? `${name}: ${comoSeLee(valor)}` : `${name}: ningún cliente`}</title>
           </path>
@@ -167,6 +153,25 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
   const [medida, setMedida] = useState<Medida>("customers");
   const [marcada, setMarcada] = useState<string | null>(null);
   const [municipioMarcado, setMunicipioMarcado] = useState<string | null>(null);
+
+  /*
+    Los clientes de un municipio se enseñan con la lista del panel, no con una
+    ventana propia.
+
+    Es la que sabe volver: al abrir la ficha de un cliente, la lista se queda
+    viva detrás y se vuelve a ella con su botón. Con una ventana aparte, al
+    cerrar la ficha se cerraba todo y había que buscar el municipio otra vez
+    en el mapa. De paso hereda el buscador y la descarga a Excel.
+  */
+  const abrirMunicipio = (ine: string, nombre: string) => {
+    setMunicipioMarcado(ine);
+    ctx.openList({
+      type: "municipio",
+      ine,
+      title: nombre,
+      description: `Los clientes de ${nombre} con compras en ${ctx.periodName}, de más a menos venta.`,
+    });
+  };
 
   const conMeses = ctx.rpc.p_months ? { p_months: ctx.rpc.p_months } : {};
   const conSociedades = ctx.rpc.p_companies ? { p_companies: ctx.rpc.p_companies } : {};
@@ -194,15 +199,6 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     async () => await createClient().rpc("sage_customer_municipalities", { p_province: marcada, ...args }),
   );
 
-  /*
-    Y los clientes del municipio que se pulse. Se piden solo entonces: son la
-    lista de un pueblo, no hace falta tenerlos todos cargados por si acaso.
-  */
-  const clientes = useSageQuery<ClienteDelMunicipio[]>(
-    municipioMarcado ? JSON.stringify(["clientes-municipio", municipioMarcado, args, reload]) : null,
-    async () => await createClient().rpc("sage_municipality_customers", { p_ine: municipioMarcado, ...args }),
-  );
-
   const filas = zonas.data ?? [];
   const totalClientes = filas.reduce((suma, fila) => suma + Number(fila.customers), 0);
   const totalVenta = filas.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
@@ -210,10 +206,6 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
   const sinProvincia = filas.find((fila) => fila.province === "Sin provincia");
   const conProvincia = filas.filter((fila) => fila.province !== "Sin provincia");
   const laMarcada = marcada ? filas.find((fila) => fila.province_code === marcada) ?? null : null;
-  const municipioElegido = municipioMarcado
-    ? (municipios.data ?? []).find((fila) => fila.ine === municipioMarcado)
-      ?? { ine: municipioMarcado, name: MUNICIPIOS_CV_SVG.find((m) => m.ine === municipioMarcado)?.name ?? municipioMarcado, customers: 0, net_amount: 0, documents: 0 }
-    : null;
 
   const columnas: Column<ZoneRow>[] = [
     {
@@ -254,37 +246,6 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     },
   ];
 
-  const columnasDeClientes: Column<ClienteDelMunicipio>[] = [
-    {
-      key: "cliente", header: "Cliente", text: true,
-      render: (fila) => (
-        <>
-          <strong>{fila.trade_name || fila.name}</strong>
-          <small>{[fila.trade_name ? fila.name : null, fila.rep_name].filter(Boolean).join(" · ") || "—"}</small>
-        </>
-      ),
-      sort: (fila) => (fila.trade_name || fila.name).toLocaleLowerCase("es"),
-      total: () => <strong>Total</strong>,
-    },
-    {
-      key: "venta", header: "Venta",
-      render: (fila) => euros(Number(fila.net_amount)),
-      sort: (fila) => Number(fila.net_amount),
-      total: (rows) => euros(rows.reduce((suma, fila) => suma + Number(fila.net_amount), 0)),
-    },
-    {
-      key: "albaranes", header: "Albaranes", optional: true,
-      render: (fila) => numberFormatter.format(Number(fila.documents)),
-      sort: (fila) => Number(fila.documents),
-      total: (rows) => numberFormatter.format(rows.reduce((suma, fila) => suma + Number(fila.documents), 0)),
-    },
-    {
-      key: "ultima", header: "Última compra", optional: true,
-      render: (fila) => (fila.last_purchase ? formatDate(fila.last_purchase) : <span className="muted">—</span>),
-      sort: (fila) => fila.last_purchase ?? "",
-    },
-  ];
-
   if (zonas.failed) return <LoadFailed what="las zonas" />;
 
   return (
@@ -317,7 +278,10 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
               : municipios.failed
                 ? <p className="muted">No se pudieron cargar los municipios. ¿Está aplicada la migración 202610280003?</p>
                 : <MapaDeMunicipios provincia={marcada} filas={municipios.data ?? []} medida={medida}
-                                    marcado={municipioMarcado} onMarcar={setMunicipioMarcado} />}
+                                    marcado={municipioMarcado} onMarcar={(ine, nombre) => {
+                                      if (ine === null) { setMunicipioMarcado(null); return; }
+                                      abrirMunicipio(ine, nombre);
+                                    }} />}
           </div>
         ) : null}
 
@@ -387,7 +351,8 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
                           aria-pressed={elegido}
                           onClick={() => {
                             setMarcada(fila.province_code);
-                            setMunicipioMarcado(elegido ? null : municipio.ine);
+                            if (elegido) { setMunicipioMarcado(null); return; }
+                            abrirMunicipio(municipio.ine as string, municipio.name);
                           }}
                         >
                           {contenido}
@@ -403,56 +368,6 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
         />
       </Panel>
 
-      {/*
-        Los clientes de un municipio, en una ventana.
-
-        Da igual si se ha pulsado el municipio en el mapa o en la lista de la
-        tabla: la respuesta sale siempre en el mismo sitio, encima de todo, y
-        no hay que ir a buscarla a otra parte de la página. Y pulsar un
-        cliente abre su ficha de siempre.
-      */}
-      <Modal
-        open={Boolean(municipioMarcado)}
-        title={municipioElegido?.name ?? "Municipio"}
-        eyebrow={marcada ? NOMBRES_DE_PROVINCIA[marcada] ?? "Zona" : "Zona"}
-        scrollInside
-        large
-        onClose={() => setMunicipioMarcado(null)}
-      >
-        {municipioElegido ? (
-          <p className="zonas-elegida">
-            <span>{numberFormatter.format(Number(municipioElegido.customers))} clientes</span>
-            <span>{euros(Number(municipioElegido.net_amount))}</span>
-            <span className="muted">en {ctx.periodName}</span>
-          </p>
-        ) : null}
-        {clientes.failed
-          ? <p className="muted">No se pudieron cargar los clientes. ¿Está aplicada la migración 202610280004?</p>
-          : clientes.loading && !clientes.data
-            ? <PendingDetail what="los clientes" />
-            : (
-              <DataTable
-                rows={clientes.data ?? []}
-                columns={columnasDeClientes}
-                rowKey={(fila) => `${fila.company_code}:${fila.customer_code}`}
-                onRowClick={(fila) => {
-                  /*
-                    Se cierra esta antes de abrir la ficha: dos ventanas una
-                    encima de otra no se entienden, y de la ficha se vuelve al
-                    mapa, que sigue como estaba.
-                  */
-                  setMunicipioMarcado(null);
-                  ctx.openCustomer({
-                    company_code: fila.company_code,
-                    customer_code: fila.customer_code,
-                    name: fila.trade_name || fila.name,
-                  });
-                }}
-                initialSort={{ key: "venta", desc: true }}
-                empty="Ningún cliente con compras aquí en este periodo."
-              />
-            )}
-      </Modal>
     </>
   );
 }
