@@ -4,28 +4,24 @@ CARGA LOS OBJETIVOS DE VENTA POR SOCIEDAD
 =========================================
 
 De dónde salen: el cuadro de dirección «PRESUPUESTO ... CIFRAS VENTAS AGENTE
-VENDEDOR.xlsx», hoja «COMPARATIVA», que lleva mes a mes el presupuesto de 2025
-repartido por comercial y por canal.
-
-Por qué sale de ahí y no de la hoja «6,15»: esa es la de 2026 y sus bloques no
-cuadran con su propio total —suman 6.525.000 contra un total de 6.150.000, y
-TIENDA pone 750.000 mientras sus tres comerciales suman 700.000—. Mientras eso
-no se arregle en el Excel, cargar 2026 sería meter en el panel una cifra que
-nadie ha cerrado. La de 2025 cuadra al céntimo y es la que se carga.
+VENDEDOR.xlsx», que lleva el presupuesto mes a mes repartido por comercial y
+por canal. 2025 está en la hoja «COMPARATIVA» y 2026 en la hoja «6,15».
 
 Cómo se reparte por sociedad, que es como el panel lo lee: el cuadro va por
 comercial y por canal, y de todos sus bloques solo uno es una sociedad
 distinta —JENDER—. Así que el objetivo de Jender es su bloque, y el de
 Suministros Intec es el total del mes menos Jender. Tools Place y CST Ibérica
-no tienen presupuesto de 2025 en ningún sitio del cuadro, así que no se les
-inventa ninguno: se quedan sin objetivo, que es distinto de un objetivo de
-cero.
+no tienen presupuesto en ninguna parte del cuadro, así que no se les inventa
+uno: se quedan sin objetivo, que es distinto de un objetivo de cero.
 
-El total no se calcula sumando los bloques a propósito: se coge la columna
-«TOTAL FACTURADO», que es la oficial —los 6.500.000 del año— y de la que
-cuelga el reparto mensual. Los bloques suman 601 € menos por un redondeo en
-GENERAL, y el objetivo del grupo tiene que ser el que firmó Dirección, no el
-que sale de volver a sumar sus partes.
+El total no sale de sumar los bloques a propósito, sino de la columna del
+total del mes, que es la oficial: la que firmó Dirección y de la que cuelga el
+reparto. En 2025 los bloques suman 601 € menos por un redondeo en GENERAL, y
+en 2026 suman 375.000 € más —TIENDA pone 750.000 mientras sus tres comerciales
+suman 700.000, y COM. EXTERNOS 2.100.000 contra 2.230.000 de los suyos—. Ese
+descuadre es entre bloques de agentes y no toca el reparto por sociedad, que
+solo usa el total y Jender; pero conviene saber que está ahí, porque el día
+que se cierre el reparto de 2026 estas cifras pueden moverse.
 
 Lo escrito queda en sales_targets, que es la tabla que se edita a mano desde
 la página de Objetivos: volver a ejecutarlo pisa lo que haya de ese año para
@@ -35,37 +31,50 @@ Avisa antes y pide confirmación.
 Uso (desde la raíz del proyecto, con .env.local puesto):
     python scripts/ventas/cargar-objetivos.py --excel "C:\\ruta\\al.xlsx" --seco
     python scripts/ventas/cargar-objetivos.py --excel "C:\\ruta\\al.xlsx"
+    python scripts/ventas/cargar-objetivos.py --excel "C:\\ruta\\al.xlsx" --anio 2026
 """
 import argparse
 import json
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
 
 MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
          "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 
-HOJA = "COMPARATIVA "   # el espacio del final es parte del nombre en el Excel
-ANIO = 2025
-
-"""
-Qué columna del Excel es cada cosa.
-
-Van por número y no buscando el texto de la cabecera porque el cuadro reparte
-los títulos en cuatro filas con celdas combinadas: buscarlos por texto acierta
-hoy y falla el día que alguien mueva una columna. El número se comprueba
-contra lo que se espera leer encima, y si no cuadra el cargador para.
-"""
-COLUMNA_TOTAL = 4       # «TOTAL FACTURADO / 2025»
-COLUMNA_JENDER = 14     # el bloque «JENDER / 2025»
-ESPERA_TOTAL = ["TOTAL FACTURADO", "2025"]
-ESPERA_JENDER = ["JENDER", "2025"]
-
-SOCIEDAD_JENDER = 2
 SOCIEDAD_INTEC = 1
-TOTAL_DEL_ANO = 6_500_000   # lo que tiene que sumar el año, para no cargar un Excel a medias
+SOCIEDAD_JENDER = 2
+
+"""
+Qué columna del Excel es cada cosa, y qué año.
+
+Van por número de columna y no buscando el texto de la cabecera porque el
+cuadro reparte los títulos en cuatro o cinco filas con celdas combinadas:
+buscarlos por texto acierta hoy y falla el día que alguien mueva una columna.
+El número se comprueba contra lo que se espera leer encima —el nombre del
+bloque, que vive en una celda combinada a la izquierda, y el año, que está en
+la columna misma— y si no cuadra el cargador para en vez de meter la columna
+de al lado.
+
+«suma» es lo que tiene que dar el año entero. Es la red de seguridad: si
+alguien cambia el presupuesto en el Excel, esto para y hay que venir a mirar,
+en vez de cargar en silencio una cifra que nadie ha cerrado.
+"""
+AÑOS = {
+    2025: {
+        "hoja": "COMPARATIVA ",   # el espacio del final es parte del nombre
+        "total": {"columna": 4, "bloque": "TOTAL FACTURADO", "anio": "2025"},
+        "jender": {"columna": 14, "bloque": "JENDER", "anio": "2025"},
+        "suma": 6_500_000,
+    },
+    2026: {
+        "hoja": "6,15",
+        "total": {"columna": 4, "bloque": "TOTAL OBJETIVO", "anio": "2026"},
+        "jender": {"columna": 21, "bloque": "JENDER", "anio": "PRESUPUESTO 2026"},
+        "suma": 6_150_000,
+    },
+}
 
 
 def variables_de_entorno():
@@ -86,72 +95,78 @@ def euros(valor):
     return f"{valor:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def leer(ruta):
-    """El objetivo de cada mes, por sociedad."""
+def leer(ruta, anio):
+    """El objetivo de cada mes de un año, por sociedad."""
     import openpyxl
 
+    config = AÑOS[anio]
     libro = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
-    if HOJA not in libro.sheetnames:
-        print(f"El Excel no tiene la hoja «{HOJA.strip()}». Tiene: {', '.join(libro.sheetnames)}")
+    if config["hoja"] not in libro.sheetnames:
+        print(f"El Excel no tiene la hoja «{config['hoja'].strip()}». Tiene: {', '.join(libro.sheetnames)}")
         sys.exit(1)
-    filas = list(libro[HOJA].iter_rows(values_only=True))
+    filas = list(libro[config["hoja"]].iter_rows(values_only=True))
     libro.close()
 
     def celda(fila, col):
         return fila[col - 1] if col - 1 < len(fila) else None
 
-    def comprobar_cabecera(col, espera):
-        # El nombre del bloque vive en una celda combinada a la izquierda de su
-        # columna, así que se mira esa y la de al lado, no solo la suya.
-        encima = " ".join(
+    def texto(desde, hasta):
+        return " ".join(
             str(celda(filas[i], c)).strip()
             for i in range(0, min(5, len(filas)))
-            for c in range(max(col - 1, 1), col + 2)
+            for c in range(desde, hasta + 1)
             if celda(filas[i], c) is not None
         ).lower()
-        if all(parte.lower() in encima for parte in espera):
+
+    def comprobar(que):
+        col = que["columna"]
+        # El año se busca en la columna misma; el nombre del bloque, en la
+        # celda combinada que lo encabeza, hasta tres columnas a la izquierda.
+        if que["anio"].lower() not in texto(col, col):
+            print(f"La columna {col} no es de {que['anio']}: encima pone «{texto(col, col)[:70]}».")
+        elif que["bloque"].lower() not in texto(max(col - 3, 1), col + 1):
+            print(f"La columna {col} no cuelga de «{que['bloque']}»: encima pone «{texto(max(col - 3, 1), col + 1)[:70]}».")
+        else:
             return
-        print(f"La columna {col} no es la de «{espera[0]}»: encima pone «{encima[:70]}».")
         print("El Excel ha cambiado de forma. Revisa las columnas antes de cargar nada.")
         sys.exit(1)
 
-    comprobar_cabecera(COLUMNA_TOTAL, ESPERA_TOTAL)
-    comprobar_cabecera(COLUMNA_JENDER, ESPERA_JENDER)
+    comprobar(config["total"])
+    comprobar(config["jender"])
 
     por_mes = {}
     for fila in filas:
         etiqueta = str(celda(fila, 2) or "").strip().upper()
         if etiqueta not in MESES:
             continue
-        mes = MESES.index(etiqueta) + 1
+
         def numero(col):
             valor = celda(fila, col)
             return float(valor) if isinstance(valor, (int, float)) else 0.0
-        por_mes[mes] = (numero(COLUMNA_TOTAL), numero(COLUMNA_JENDER))
+
+        por_mes[MESES.index(etiqueta) + 1] = (numero(config["total"]["columna"]), numero(config["jender"]["columna"]))
 
     if sorted(por_mes) != list(range(1, 13)):
-        print(f"Faltan meses en la hoja: solo se han leído {sorted(por_mes)}.")
+        print(f"Faltan meses en la hoja de {anio}: solo se han leído {sorted(por_mes)}.")
         sys.exit(1)
 
-    total = sum(valor[0] for valor in por_mes.values())
-    if round(total) != TOTAL_DEL_ANO:
-        print(f"El año suma {euros(total)} y tendría que sumar {euros(TOTAL_DEL_ANO)}.")
+    suma = sum(valor[0] for valor in por_mes.values())
+    if round(suma) != config["suma"]:
+        print(f"{anio} suma {euros(suma)} y tendría que sumar {euros(config['suma'])}.")
         print("O el Excel ha cambiado de presupuesto o se está leyendo la columna de al lado.")
         sys.exit(1)
 
-    filas_salida = []
+    salida = []
     for mes, (total_mes, jender) in sorted(por_mes.items()):
-        intec = round(total_mes - jender, 2)
-        for sociedad, importe in ((SOCIEDAD_JENDER, round(jender, 2)), (SOCIEDAD_INTEC, intec)):
+        for sociedad, importe in ((SOCIEDAD_JENDER, round(jender, 2)),
+                                  (SOCIEDAD_INTEC, round(total_mes - jender, 2))):
             # Un mes sin cifra no se carga: sin objetivo no es lo mismo que un
             # objetivo de cero, y el panel los distingue.
             if importe <= 0:
                 continue
-            filas_salida.append({
-                "year": ANIO, "month": mes, "company_code": sociedad,
-                "rep_key": None, "amount": importe,
-            })
-    return filas_salida
+            salida.append({"year": anio, "month": mes, "company_code": sociedad,
+                           "rep_key": None, "amount": importe})
+    return salida
 
 
 def pedir(env, metodo, ruta, cuerpo=None, prefer=None):
@@ -181,6 +196,7 @@ def pedir(env, metodo, ruta, cuerpo=None, prefer=None):
 def main():
     p = argparse.ArgumentParser(description="Carga en el Hub los objetivos de venta por sociedad.")
     p.add_argument("--excel", required=True, help="el cuadro de dirección, en .xlsx")
+    p.add_argument("--anio", default="todos", choices=["2025", "2026", "todos"], help="qué año cargar")
     p.add_argument("--seco", action="store_true", help="leer y enseñar, sin escribir nada")
     p.add_argument("--si", action="store_true", help="no preguntar antes de pisar lo que haya")
     args = p.parse_args()
@@ -189,34 +205,39 @@ def main():
         print(f"No encuentro el Excel:\n  {args.excel}")
         return 1
 
-    filas = leer(args.excel)
-    sociedades = sorted({fila["company_code"] for fila in filas})
+    años = sorted(AÑOS) if args.anio == "todos" else [int(args.anio)]
+    filas = [fila for anio in años for fila in leer(args.excel, anio)]
 
-    print(f"Objetivos de {ANIO}, por sociedad:")
-    for sociedad in sociedades:
-        suyas = [fila for fila in filas if fila["company_code"] == sociedad]
-        print(f"  sociedad {sociedad}: {len(suyas)} meses, {euros(sum(f['amount'] for f in suyas))}")
-    print(f"  --------\n  total:       {euros(sum(fila['amount'] for fila in filas))}")
+    for anio in años:
+        print(f"Objetivos de {anio}, por sociedad:")
+        suyas = [fila for fila in filas if fila["year"] == anio]
+        for sociedad in sorted({fila["company_code"] for fila in suyas}):
+            propias = [fila for fila in suyas if fila["company_code"] == sociedad]
+            print(f"  sociedad {sociedad}: {len(propias)} meses, {euros(sum(f['amount'] for f in propias))}")
+        print(f"  --------\n  total:       {euros(sum(fila['amount'] for fila in suyas))}\n")
 
     if args.seco:
-        print("\n(en seco: no se ha escrito nada)")
+        print("(en seco: no se ha escrito nada)")
         return 0
 
     env = variables_de_entorno()
-    lista = ",".join(str(sociedad) for sociedad in sociedades)
-    filtro = f"year=eq.{ANIO}&company_code=in.({lista})&rep_key=is.null"
-    habia = pedir(env, "GET", f"sales_targets?select=month,company_code,amount&{filtro}") or []
-    if habia:
-        print(f"\nOJO: ya hay {len(habia)} objetivos guardados de {ANIO} para esas sociedades.")
-        print("Se van a borrar y volver a escribir, así que cualquier retoque a mano se pierde.")
-        if not args.si and input("¿Seguir? (escribe «si»): ").strip().lower() not in ("si", "sí"):
-            print("No se ha escrito nada.")
-            return 1
-        pedir(env, "DELETE", f"sales_targets?{filtro}", prefer="return=minimal")
+    for anio in años:
+        suyas = [fila for fila in filas if fila["year"] == anio]
+        lista = ",".join(str(sociedad) for sociedad in sorted({fila["company_code"] for fila in suyas}))
+        filtro = f"year=eq.{anio}&company_code=in.({lista})&rep_key=is.null"
+        habia = pedir(env, "GET", f"sales_targets?select=month,company_code&{filtro}") or []
+        if habia:
+            print(f"OJO: ya hay {len(habia)} objetivos guardados de {anio} para esas sociedades.")
+            print("Se van a borrar y volver a escribir, así que cualquier retoque a mano se pierde.")
+            if not args.si and input("¿Seguir? (escribe «si»): ").strip().lower() not in ("si", "sí"):
+                print(f"{anio} se queda como está.")
+                continue
+            pedir(env, "DELETE", f"sales_targets?{filtro}", prefer="return=minimal")
+        pedir(env, "POST", "sales_targets", suyas, prefer="return=minimal")
+        print(f"{anio}: cargado.")
 
-    pedir(env, "POST", "sales_targets", filas, prefer="return=minimal")
-    print(f"\nCargado. Se ven en Ventas > Objetivos y en la columna «Objetivo» del mes a mes,"
-          f" eligiendo el año {ANIO} en «Periodo».")
+    print("\nSe ven en Ventas > Objetivos y en la columna «Objetivo» del mes a mes,"
+          " eligiendo el año en «Periodo».")
     return 0
 
 
