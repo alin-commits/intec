@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { numberFormatter } from "@/lib/format";
+import { formatDate, numberFormatter } from "@/lib/format";
 import { euros } from "@/lib/sales-model";
 import { NOMBRES_DE_PROVINCIA, PROVINCIAS_CON_MUNICIPIOS, encuadreDe, intensidadDeColor } from "@/lib/zonas-mapa";
 import { MUNICIPIOS_CV_SVG } from "@/lib/zonas-svg-cv";
@@ -38,6 +38,19 @@ type ZoneRow = {
 
 /** Qué mide el mapa: cuántos clientes hay o cuánto compran. */
 type Medida = "customers" | "net_amount";
+
+type ClienteDelMunicipio = {
+  company_code: number;
+  customer_code: string;
+  name: string;
+  trade_name: string | null;
+  rep_code: number | null;
+  rep_name: string | null;
+  phone: string | null;
+  net_amount: number;
+  documents: number;
+  last_purchase: string | null;
+};
 
 type MuniRow = {
   ine: string;
@@ -180,6 +193,15 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     async () => await createClient().rpc("sage_customer_municipalities", { p_province: marcada, ...args }),
   );
 
+  /*
+    Y los clientes del municipio que se pulse. Se piden solo entonces: son la
+    lista de un pueblo, no hace falta tenerlos todos cargados por si acaso.
+  */
+  const clientes = useSageQuery<ClienteDelMunicipio[]>(
+    municipioMarcado ? JSON.stringify(["clientes-municipio", municipioMarcado, args, reload]) : null,
+    async () => await createClient().rpc("sage_municipality_customers", { p_ine: municipioMarcado, ...args }),
+  );
+
   const filas = zonas.data ?? [];
   const totalClientes = filas.reduce((suma, fila) => suma + Number(fila.customers), 0);
   const totalVenta = filas.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
@@ -231,6 +253,37 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     },
   ];
 
+  const columnasDeClientes: Column<ClienteDelMunicipio>[] = [
+    {
+      key: "cliente", header: "Cliente", text: true,
+      render: (fila) => (
+        <>
+          <strong>{fila.trade_name || fila.name}</strong>
+          <small>{[fila.trade_name ? fila.name : null, fila.rep_name].filter(Boolean).join(" · ") || "—"}</small>
+        </>
+      ),
+      sort: (fila) => (fila.trade_name || fila.name).toLocaleLowerCase("es"),
+      total: () => <strong>Total</strong>,
+    },
+    {
+      key: "venta", header: "Venta",
+      render: (fila) => euros(Number(fila.net_amount)),
+      sort: (fila) => Number(fila.net_amount),
+      total: (rows) => euros(rows.reduce((suma, fila) => suma + Number(fila.net_amount), 0)),
+    },
+    {
+      key: "albaranes", header: "Albaranes", optional: true,
+      render: (fila) => numberFormatter.format(Number(fila.documents)),
+      sort: (fila) => Number(fila.documents),
+      total: (rows) => numberFormatter.format(rows.reduce((suma, fila) => suma + Number(fila.documents), 0)),
+    },
+    {
+      key: "ultima", header: "Última compra", optional: true,
+      render: (fila) => (fila.last_purchase ? formatDate(fila.last_purchase) : <span className="muted">—</span>),
+      sort: (fila) => fila.last_purchase ?? "",
+    },
+  ];
+
   if (zonas.failed) return <LoadFailed what="las zonas" />;
 
   return (
@@ -265,11 +318,32 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
                 : <MapaDeMunicipios provincia={marcada} filas={municipios.data ?? []} medida={medida}
                                     marcado={municipioMarcado} onMarcar={setMunicipioMarcado} />}
             {municipioElegido ? (
-              <p className="zonas-elegida">
-                <strong>{municipioElegido.name}</strong>
-                <span>{numberFormatter.format(Number(municipioElegido.customers))} clientes</span>
-                <span>{euros(Number(municipioElegido.net_amount))}</span>
-              </p>
+              <>
+                <p className="zonas-elegida">
+                  <strong>{municipioElegido.name}</strong>
+                  <span>{numberFormatter.format(Number(municipioElegido.customers))} clientes</span>
+                  <span>{euros(Number(municipioElegido.net_amount))}</span>
+                  <button type="button" className="button button-compact button-secondary" onClick={() => setMunicipioMarcado(null)}>Quitar</button>
+                </p>
+                {clientes.failed
+                  ? <p className="muted">No se pudieron cargar los clientes. ¿Está aplicada la migración 202610280004?</p>
+                  : clientes.loading && !clientes.data
+                    ? <PendingDetail what="los clientes" />
+                    : (
+                      <DataTable
+                        rows={clientes.data ?? []}
+                        columns={columnasDeClientes}
+                        rowKey={(fila) => `${fila.company_code}:${fila.customer_code}`}
+                        onRowClick={(fila) => ctx.openCustomer({
+                          company_code: fila.company_code,
+                          customer_code: fila.customer_code,
+                          name: fila.trade_name || fila.name,
+                        })}
+                        initialSort={{ key: "venta", desc: true }}
+                        empty="Ningún cliente con compras aquí en este periodo."
+                      />
+                    )}
+              </>
             ) : null}
           </div>
         ) : null}
