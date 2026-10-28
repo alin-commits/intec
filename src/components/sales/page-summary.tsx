@@ -41,9 +41,46 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     al mes por empresa, y repartirla por familias sería inventársela. Por eso
     el total lo dice en voz alta, para que nadie busque el descuadre.
   */
-  const deFuera = ctx.externalSales.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
-  const deFueraAntes = ctx.previousExternalSales.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
-  const empresasDeFuera = [...new Set(ctx.externalSales.map((fila) => fila.source))];
+  /*
+    Lo de fuera de Sage también obedece al filtro de sociedad.
+
+    Antes se sumaba entero mirases lo que mirases: con Sumifluid marcada, su
+    cifra llevaba dentro lo de Jender. Una empresa que todavía no está en Sage
+    no tiene sociedad, así que cuenta cuando no hay filtro puesto y desaparece
+    en cuanto se mira una sociedad concreta —que es lo mismo que hace la
+    función de la base, y por el mismo motivo: no se puede colgar de una
+    sociedad que no existe—.
+  */
+  const delFiltro = (lista: typeof ctx.externalSales) => (filters.companies.length === 0
+    ? lista
+    : lista.filter((fila) => fila.company_code !== null && filters.companies.includes(fila.company_code)));
+  const externasAhora = delFiltro(ctx.externalSales);
+  const externasAntes = delFiltro(ctx.previousExternalSales);
+  const deFuera = externasAhora.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
+  const deFueraAntes = externasAntes.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
+  const empresasDeFuera = [...new Set(externasAhora.map((fila) => fila.source))];
+
+  /*
+    Y mes a mes, no solo en el total.
+
+    Es lo que hacía falta para Jender: en Sage no tiene nada de enero a
+    septiembre de 2025 —entró el 6 de octubre—, así que la línea del año caía
+    a cero esos nueve meses aunque la cifra grande sí los contara. Cada mes
+    suma lo suyo, y el mes con el que se compara suma lo suyo también, que
+    para eso cada mes sabe con cuál va emparejado.
+  */
+  const porMesDe = (lista: typeof ctx.externalSales) => {
+    const mapa = new Map<string, number>();
+    for (const fila of lista) {
+      const clave = String(fila.month).slice(0, 7);
+      mapa.set(clave, (mapa.get(clave) ?? 0) + Number(fila.net_amount));
+    }
+    return mapa;
+  };
+  const fueraPorMes = porMesDe(externasAhora);
+  const fueraAntesPorMes = porMesDe(externasAntes);
+  const fueraDe = (clave: string | null | undefined) => (clave ? fueraPorMes.get(clave) ?? 0 : 0);
+  const fueraAntesDe = (clave: string | null | undefined) => (clave ? fueraAntesPorMes.get(clave) ?? 0 : 0);
   const ventasConFuera = current.net + deFuera;
   const ventasAntesConFuera = previous.net + deFueraAntes;
   const marginDelta = currentMargin && previousMargin && marginSpansMatch;
@@ -125,7 +162,14 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   */
   const porMes = hayMesMarcado(filters) ? monthly.months.filter((mes) => mesMarcado(filters, mes.key)) : monthly.months;
   const vistos = porMes.map((mes) => monthly.months.indexOf(mes));
-  const puntos = vistos.map((indice) => monthly.points[indice]);
+  const puntos = vistos.map((indice) => {
+    const mes = monthly.months[indice];
+    const punto = monthly.points[indice];
+    const fuera = fueraDe(mes.key);
+    const fueraAntes = fueraAntesDe(mes.pair);
+    if (!fuera && !fueraAntes) return punto;
+    return { ...punto, ventas: punto.ventas + Math.round(fuera), anterior: punto.anterior + Math.round(fueraAntes) };
+  });
   // El acumulado se rehace sobre lo que se ve: si no, empezaría por donde iba
   // el año en el primer mes marcado y parecería que agosto ya venía con cinco
   // millones hechos.
@@ -133,8 +177,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   let sumaAntes = 0;
   let sumaMargen = 0;
   const acumulado = porMes.map((mes) => {
-    sumaVentas += mes.bucket.net;
-    sumaAntes += mes.beforeNet;
+    sumaVentas += mes.bucket.net + fueraDe(mes.key);
+    sumaAntes += mes.beforeNet + fueraAntesDe(mes.pair);
     sumaMargen += mes.margin?.amount ?? 0;
     return { label: mes.label, ventas: Math.round(sumaVentas), anterior: Math.round(sumaAntes), margen: Math.round(sumaMargen) };
   });
@@ -142,7 +186,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
   // dice nada y encima quita sitio a la cifra, así que no se pinta.
   const hayLinea = porMes.length >= 3;
   const chispa = {
-    ventas: hayLinea ? porMes.map((mes) => Math.round(mes.bucket.net)) : undefined,
+    ventas: hayLinea ? porMes.map((mes) => Math.round(mes.bucket.net + fueraDe(mes.key))) : undefined,
     margen: hayLinea ? porMes.map((mes) => Math.round(mes.margin?.amount ?? 0)) : undefined,
     margenPorciento: hayLinea ? porMes.map((mes) => Math.round(mes.margin?.percent ?? 0)) : undefined,
     ticket: hayLinea ? porMes.map((mes) => Math.round(ticket(mes.bucket))) : undefined,
@@ -269,6 +313,14 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
                 {monthly.hasBefore ? `, con ${(hayMesMarcado(filters) ? period.compareShort : period.baseCompareShort) ?? ""} detrás en gris` : ""}
                 {hayMesMarcado(filters) ? ". Pulsa un mes para quitarlo." : ". Pulsa un mes para filtrar."}
               </p>
+              {/* Si la línea lleva algo que no viene de Sage, se dice: cuando
+                  un número no cuadra manda Sage, y eso solo se sostiene
+                  sabiendo qué parte no es suya. */}
+              {deFuera > 0 ? (
+                <p className="panel-subtitle">
+                  Incluye {euros(deFuera)} de {empresasDeFuera.join(" y ")}, repartidos en sus meses: no pasan por Sage.
+                </p>
+              ) : null}
             </div>
             <div className="sales-switch" role="group" aria-label="Cómo se mira la evolución">
               {(["mensual", "acumulado"] as const).map((mode) => (
