@@ -28,6 +28,7 @@ export function SalesFilterBar({
   chosen,
   aplicado,
   yearOptions,
+  aniosDePresupuesto,
   minDate,
   maxDate,
   basis,
@@ -51,6 +52,8 @@ export function SalesFilterBar({
   /** El periodo que se está eligiendo, ya resuelto: de ahí salen las fechas de partida. */
   chosen: SalesPeriod;
   yearOptions: number[];
+  /** Los que se pueden elegir sin tener venta todavía, para poder presupuestarlos. */
+  aniosDePresupuesto: number[];
   /** Entre qué fechas se puede elegir: del primer dato a hoy. */
   minDate: string | null;
   maxDate: string;
@@ -126,7 +129,11 @@ export function SalesFilterBar({
         <label>
           <span>Periodo</span>
           <select value={periodValue} onChange={(event) => pickPeriod(event.target.value)}>
-            {yearOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+            {/* El año que todavía no ha empezado se marca: si no, se elige
+                esperando ver ventas y lo que sale es un panel en blanco. */}
+            {yearOptions.map((value) => (
+              <option key={value} value={value}>{aniosDePresupuesto.includes(value) ? `${value} · presupuesto` : value}</option>
+            ))}
             <option value="last12">Últimos 12 meses</option>
             <option value="all">Todos los años</option>
             <option value="range">Elegir fechas…</option>

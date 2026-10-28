@@ -5,6 +5,8 @@ import {
   addMonths,
   familyMargin,
   invoiceComparisonAvailable,
+  aniosElegibles,
+  aniosSinVenta,
   invoiceYears,
   lastCompleteMonth,
   latestSnapshot,
@@ -164,6 +166,21 @@ test("por fecha de factura no se compara con años sin fechas de factura", () =>
   assert.equal(invoiceComparisonAvailable(2026), false, "2025 solo tiene factura desde octubre");
   assert.equal(invoiceComparisonAvailable(2027), true);
   assert.deepEqual(invoiceYears([2026, 2025, 2024, 2023]), [2026, 2025]);
+});
+
+test("el año que viene se puede elegir aunque no tenga ni una venta", () => {
+  // El presupuesto de un año se cierra antes de que empiece, y Sage solo
+  // devuelve los años en los que ya se ha vendido algo.
+  const noviembre = new Date(2026, 10, 15);
+  assert.deepEqual(aniosElegibles([2026, 2025, 2024], noviembre), [2027, 2026, 2025, 2024]);
+  // Y una vez empieza, no sale dos veces ni se cuela delante.
+  assert.deepEqual(aniosElegibles([2027, 2026], new Date(2027, 0, 8)), [2028, 2027, 2026]);
+  assert.deepEqual(aniosElegibles([2027, 2026], noviembre), [2027, 2026]);
+  // Siempre de más reciente a más antiguo, que es el orden del desplegable.
+  assert.deepEqual(aniosElegibles([2024, 2026, 2025], noviembre), [2027, 2026, 2025, 2024]);
+  // Y se sabe cuál es el que todavía no tiene venta, para avisarlo.
+  assert.deepEqual(aniosSinVenta([2026, 2025], aniosElegibles([2026, 2025], noviembre)), [2027]);
+  assert.deepEqual(aniosSinVenta([2027, 2026], aniosElegibles([2027, 2026], noviembre)), []);
 });
 
 test("los clientes nuevos cuentan desde que hay un año de historia", () => {

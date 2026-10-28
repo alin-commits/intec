@@ -8,6 +8,25 @@
 export const INVOICE_DATES_FROM = "2025-10-16";
 const INVOICE_FIRST_YEAR = Number(INVOICE_DATES_FROM.slice(0, 4));
 
+/**
+ * Los años que se pueden elegir: los que tienen venta en Sage y el siguiente
+ * al que corre.
+ *
+ * El año que viene no tiene ni una venta, así que Sage no lo devuelve y sin
+ * esto no se podía llegar a él. Pero el presupuesto de un año se cierra en
+ * noviembre o diciembre del anterior, y si el año no se puede elegir no hay
+ * dónde escribirlo: aparecía solo cuando ya se había vendido algo, un mes
+ * tarde y con el año empezado.
+ */
+export function aniosElegibles(years: number[], today: Date): number[] {
+  return [...new Set([today.getFullYear() + 1, ...years])].sort((a, b) => b - a);
+}
+
+/** Los años que se pueden elegir pero todavía no tienen ninguna venta. */
+export function aniosSinVenta(years: number[], elegibles: number[]): number[] {
+  return elegibles.filter((year) => !years.includes(year));
+}
+
 /** Los años que tienen algo por fecha de factura. */
 export function invoiceYears(years: number[]): number[] {
   return years.filter((year) => year >= INVOICE_FIRST_YEAR);

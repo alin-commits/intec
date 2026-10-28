@@ -19,8 +19,10 @@ import { repartirElAno, repartirTrimestre, sumaDe, TRIMESTRES, variacionSobreAnt
   Se pone por sociedad, una a una, y el del grupo es lo que suman: así marcar
   Jender arriba compara contra el objetivo de Jender y no contra el total, que
   es la única manera de que el cumplimiento de una sociedad quiera decir algo.
-  Hacia abajo no se reparte solo —de sociedad a comercial lo decide Dirección—,
-  y por eso para cambiar un objetivo hay que dejar marcada su sociedad sola.
+  Hacia abajo no se reparte solo: el objetivo de un comercial se pone a mano,
+  aparte del de su sociedad y sin sustituirlo, y la página enseña si lo
+  repartido entre ellos cuadra con el de la sociedad. Por eso para escribir
+  hace falta una sociedad —y, si es el de alguien, un comercial de ella—.
 */
 
 const parseAmount = (text: string): number | null => {
@@ -52,7 +54,7 @@ function TargetsNeedYear({ ctx }: { ctx: SalesContext }) {
 }
 
 function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: number }) {
-  const { filters, today } = ctx;
+  const { filters, today, reps, repOf } = ctx;
   const months = targetsFor(ctx.targets, shownYear, filters.companies, filters.repKeys);
   const scopeKey = JSON.stringify([shownYear, filters.companies, filters.repKeys, ctx.targets]);
   // Los objetivos se guardan de uno en uno: un importe repartido entre varios
@@ -72,6 +74,26 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   const [draftKey, setDraftKey] = useState(scopeKey);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  /*
+    Los comerciales entre los que elegir.
+
+    Salen de las fichas de Sage y no de la venta del periodo, que es de donde
+    los saca el filtro de arriba: el presupuesto de un año se hace cuando ese
+    año no tiene ni una venta, y de la venta no saldría nadie. Solo personas:
+    los códigos comodín de Sage («GENERAL», «SAT INTEC») facturan de verdad,
+    pero a un comodín no se le pone objetivo.
+  */
+  const comerciales = useMemo(() => {
+    const vistos = new Map<string, string>();
+    for (const rep of reps) {
+      if (!rep.is_person) continue;
+      if (company !== null && rep.company_code !== company) continue;
+      const quien = repOf(rep.company_code, rep.code);
+      if (!vistos.has(quien.key)) vistos.set(quien.key, quien.label);
+    }
+    return [...vistos].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label, "es"));
+  }, [reps, repOf, company]);
+
   const [yearTotal, setYearTotal] = useState("");
   const [growth, setGrowth] = useState("5");
   const [quarters, setQuarters] = useState<string[]>(["", "", "", ""]);
@@ -129,7 +151,12 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   const yearTarget = months.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const yearReal = real.reduce((sum, value) => sum + value, 0);
   const hasTargets = months.some((value) => value !== null);
-  const lastMonthIndex = shownYear === today.getFullYear() ? today.getMonth() : 11;
+  /*
+    Hasta qué mes hay venta que enseñar. En un año que no ha empezado, ninguno:
+    con 11 la línea de ventas se dibujaba a cero los doce meses, como si se
+    hubiera presupuestado un año en el que no se vende nada.
+  */
+  const lastMonthIndex = shownYear > today.getFullYear() ? -1 : shownYear === today.getFullYear() ? today.getMonth() : 11;
 
   const upTo = (list: (number | null)[], index: number) => list.slice(0, index + 1).reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const points = months.map((_, index) => ({
@@ -149,6 +176,19 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   const totalDelAno = sumaDe(draft.map(parseAmount).map((value) => (value === null || Number.isNaN(value) ? null : value)));
   const totalAnterior = anterior ? sumaDe(anterior) : 0;
   const variacionDelAno = anterior && totalDelAno > 0 ? variacionSobreAnterior(totalDelAno, totalAnterior) : null;
+
+  /*
+    Lo que hay repartido entre los comerciales de esta sociedad.
+
+    El objetivo de un comercial no sustituye al de su sociedad: se guarda
+    aparte. Si sustituyera, poner el de tres de dieciséis haría que la
+    sociedad pasara a valer lo que suman esos tres, y nadie entendería por qué
+    su objetivo se ha desplomado. Pero entonces hace falta ver si el reparto
+    está completo, que es lo que no se ve mirando una pantalla por comercial.
+  */
+  const repartido = company === null ? null : ctx.targets
+    .filter((target) => target.year === shownYear && target.company_code === company && target.rep_key !== null)
+    .reduce((suma, target) => suma + Number(target.amount), 0);
 
   const scopeLabel = [
     filters.companies.length === 0 ? "Todo el grupo" : ctx.companyLabel,
@@ -275,8 +315,12 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
       <section className="kpi-grid kpi-grid-sales">
         <KpiCard
           label={monthIndex !== null ? `Cumplimiento de ${monthLongNames[monthIndex]}` : "Cumplimiento a hoy"}
-          value={soFar ? formatPercent((realSoFar / Math.max(soFar.target, 1)) * 100) : "Sin objetivo"}
-          helper={soFar ? `${euros(realSoFar)} de ${euros(soFar.target)}` : "escribe el objetivo abajo"}
+          value={soFar ? formatPercent((realSoFar / Math.max(soFar.target, 1)) * 100) : hasTargets ? "—" : "Sin objetivo"}
+          helper={soFar
+            ? `${euros(realSoFar)} de ${euros(soFar.target)}`
+            // Con objetivo puesto en un año que no ha empezado, decir «sin
+            // objetivo» era mentira: lo que pasa es que no hay nada vendido.
+            : hasTargets ? `${euros(yearTarget)} para un año que no ha empezado` : "escribe el objetivo abajo"}
           icon={<TrophyIcon />}
           tone={soFar ? (realSoFar >= soFar.target ? "emerald" : "rose") : "amber"}
           {...(soFar ? { delta: `${realSoFar >= soFar.target ? "+" : "-"}${euros(Math.abs(realSoFar - soFar.target))}`, positive: realSoFar >= soFar.target } : { delta: "Sin comparación", positive: true })}
@@ -314,12 +358,48 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
         <Panel
           title="Objetivo por mes"
           subtitle={editable
-            ? `De: ${scopeLabel}. Cambia la sociedad o el comercial arriba para poner el suyo`
+            ? `De: ${scopeLabel}`
             : filters.companies.length === 0
-              ? `${scopeLabel}: lo que suman las sociedades. Marca una arriba para poner el suyo`
-              : `De: ${scopeLabel}. Esto es la suma; para cambiar un objetivo, deja marcada su sociedad sola`}
+              ? `${scopeLabel}: lo que suman las sociedades. Elige una abajo para poner el suyo`
+              : `De: ${scopeLabel}. Esto es la suma; para cambiar un objetivo, deja un comercial solo`}
           className="panel panel-padded sales-board-narrow"
         >
+          {/* La sociedad y el comercial, aquí mismo: son el ámbito del
+              objetivo que se escribe debajo, y tenerlos solo en la barra de
+              arriba obligaba a adivinar que el formulario cambiaba con ella. */}
+          <div className="sales-targets-scope">
+            <label>
+              <span>Sociedad</span>
+              <select
+                value={filters.companies.length > 1 ? "varias" : company === null ? "" : String(company)}
+                onChange={(event) => {
+                  const valor = event.target.value;
+                  // El comercial se cae al cambiar de sociedad: pertenece a
+                  // una, y mantenerlo dejaría un ámbito que no existe.
+                  ctx.setFilters({ companies: valor === "" || valor === "varias" ? [] : [Number(valor)], repKeys: [] });
+                }}
+              >
+                <option value="">Todas: la suma de las sociedades</option>
+                {filters.companies.length > 1 ? <option value="varias">{ctx.companyLabel}</option> : null}
+                {ctx.companies.map((sociedad) => <option key={sociedad.code} value={sociedad.code}>{sociedad.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Comercial</span>
+              <select
+                value={filters.repKeys.length > 1 ? "varios" : repKey ?? ""}
+                disabled={company === null}
+                onChange={(event) => {
+                  const valor = event.target.value;
+                  ctx.setFilters({ repKeys: valor === "" || valor === "varios" ? [] : [valor] });
+                }}
+              >
+                <option value="">{company === null ? "Elige antes una sociedad" : "Toda la sociedad"}</option>
+                {filters.repKeys.length > 1 ? <option value="varios">{`${filters.repKeys.length} comerciales`}</option> : null}
+                {comerciales.map((quien) => <option key={quien.key} value={quien.key}>{quien.label}</option>)}
+              </select>
+            </label>
+          </div>
           <div className="sales-targets-actions">
             <label>
               <span>Total del año</span>
@@ -393,9 +473,28 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
             </span>
           </p>
 
+          {/* Si lo repartido entre los comerciales cuadra con la sociedad. */}
+          {repKey === null && repartido !== null && repartido > 0 ? (
+            <p className="sales-targets-reparto">
+              <span className="muted">Repartido entre comerciales</span>
+              <span>
+                <strong>{euros(repartido)}</strong>
+                {hasTargets ? (
+                  <small className={Math.abs(repartido - yearTarget) < 1 ? "sales-up" : "sales-down"}>
+                    {Math.abs(repartido - yearTarget) < 1
+                      ? " cuadra con el objetivo de la sociedad"
+                      : ` ${repartido > yearTarget ? "de más" : "sin repartir"}: ${euros(Math.abs(yearTarget - repartido))} de ${euros(yearTarget)}`}
+                  </small>
+                ) : <small className="muted"> la sociedad no tiene objetivo con el que cuadrarlo</small>}
+              </span>
+            </p>
+          ) : null}
+
           <div className="sales-targets-footer">
             {message ? <span className={message.tone === "ok" ? "sales-up" : "sales-down"} role="status">{message.text}</span>
-              : <span className="muted">{editable ? "Deja vacío un mes para quitarle el objetivo." : "Los objetivos se ponen por sociedad: marca una sola arriba, y un comercial como mucho."}</span>}
+              : <span className="muted">{editable
+                ? "Deja vacío un mes para quitarle el objetivo."
+                : "Los objetivos se ponen de uno en uno: una sociedad y, si es el de alguien, un comercial de ella."}</span>}
             <button type="button" className="button button-primary" onClick={() => void save()} disabled={saving || !editable}>{saving ? "Guardando…" : "Guardar"}</button>
           </div>
         </Panel>

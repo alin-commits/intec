@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { hasAnyRole, LEADS_ROLES, SALES_ROLES } from "@/lib/constants";
-import { INVOICE_DATES_FROM, invoiceYears } from "@/lib/sage-panel";
+import { aniosElegibles, aniosSinVenta, INVOICE_DATES_FROM, invoiceYears } from "@/lib/sage-panel";
 import {
   buildRepIdentities,
   channelLabel,
@@ -175,7 +175,7 @@ export function SalesDashboard() {
         const found = (yearRows.data ?? []).map((row: { year: number }) => row.year);
         const fromUrl = readUrl();
         const wantedBasis = fromUrl.basis ?? "albaran";
-        const allowed = wantedBasis === "factura" ? invoiceYears(found) : found;
+        const allowed = aniosElegibles(wantedBasis === "factura" ? invoiceYears(found) : found, today);
         const wanted = fromUrl.choice ?? { kind: "year", year: new Date().getFullYear() };
         const first = ((firstRows.data ?? [])[0] as { day: string } | undefined)?.day ?? null;
         setYears(found);
@@ -200,7 +200,8 @@ export function SalesDashboard() {
       }
     })();
     return () => { active = false; };
-  }, []);
+    // `today` se fija una vez al montar, así que esto corre una sola vez.
+  }, [today]);
 
   /**
    * Desde cuándo hay datos. Por fecha de factura no hay nada antes del
@@ -481,7 +482,7 @@ export function SalesDashboard() {
   function changeBasis(next: "albaran" | "factura") {
     setBasis(next);
     // Un año sin fechas de factura se quedaría en blanco: se salta al último que sí las tiene.
-    const allowed = next === "factura" ? invoiceYears(years) : years;
+    const allowed = aniosElegibles(next === "factura" ? invoiceYears(years) : years, today);
     if (choice.kind === "year" && allowed.length > 0 && !allowed.includes(choice.year)) choosePeriod({ kind: "year", year: allowed[0] });
   }
 
@@ -565,7 +566,7 @@ export function SalesDashboard() {
   }
 
   const pageInfo = salesPages.find((item) => item.key === page) ?? salesPages[0];
-  const yearOptions = basis === "factura" ? invoiceYears(years) : years;
+  const yearOptions = aniosElegibles(basis === "factura" ? invoiceYears(years) : years, today);
   // Los meses del periodo, del más reciente al más antiguo: con todos los años son cincuenta.
   const monthOptions = [...shownBase.months].reverse().map((month) => ({ value: month, label: monthPhrase(month, shownBase.multiYear || shownChoice.kind !== "year") }));
   const familyOptions = [...familyNames].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, "es"));
@@ -692,6 +693,7 @@ export function SalesDashboard() {
         chosen={requestedBase}
         aplicado={period}
         yearOptions={yearOptions}
+        aniosDePresupuesto={aniosSinVenta(years, yearOptions)}
         minDate={dataFrom}
         maxDate={dateKey(today)}
         basis={basis}
