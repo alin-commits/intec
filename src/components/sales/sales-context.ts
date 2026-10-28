@@ -99,7 +99,13 @@ export type FamilyName = { company_code: number; code: string; name: string };
  * albaranes. Así que suman en el total y en el reparto por mes, pero no se
  * pueden repartir por familia, cliente ni comercial.
  */
-export type ExternalSale = { month: string; source: string; company_code: number | null; net_amount: number };
+/*
+  Una cifra mensual de fuera de Sage. `rep_code` es la ficha de comercial
+  dentro de su sociedad, cuando se sabe de quién es la venta; llega sin ella
+  mientras la migración que la añade no esté puesta, y entonces la cifra
+  simplemente no suma en las pantallas por comercial.
+*/
+export type ExternalSale = { month: string; source: string; company_code: number | null; rep_code: number | null; net_amount: number };
 /** El nombre de una subfamilia. La clave es la pareja, no el código suelto. */
 export type SubfamilyName = { family_code: string; code: string; name: string | null };
 

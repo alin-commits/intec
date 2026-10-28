@@ -956,34 +956,52 @@ export function yearlyView(input: {
    Lo que no pasó por Sage
    ------------------------------------------------------------------------- */
 
-/** Una cifra mensual de una empresa que (todavía) no está en Sage. */
-export type VentaDeFuera = { month: string; company_code: number | null; net_amount: number };
+/**
+ * Una cifra mensual de una empresa que (todavía) no está en Sage.
+ *
+ * `rep_code` es la ficha de comercial dentro de su sociedad: el mismo número
+ * es otra persona en otra sociedad, así que sin `company_code` no identifica a
+ * nadie. Puede llegar sin definir mientras la migración que la añade no esté
+ * puesta, y entonces la cifra no suma en ninguna pantalla por comercial.
+ */
+export type VentaDeFuera = { month: string; company_code: number | null; rep_code?: number | null; net_amount: number };
 
 /**
  * Las de fuera que caen dentro del filtro.
  *
- * De estas cifras solo se sabe el mes y la sociedad: salen de un cuadro de
- * dirección, no de Sage, y detrás no hay ni comercial, ni canal, ni familia,
- * ni proveedor. Así que en cuanto se mira por cualquiera de esas cosas no se
- * suman: los 253.264 € de Blizcool de 2026 aparecían dentro del año de todos
- * los comerciales, regalándole a cada uno una venta que no era suya.
+ * Obedecen a la sociedad y al comercial, que es lo que de estas cifras se
+ * sabe: salen de un cuadro de dirección donde cada bloque tiene su agente.
+ * Una empresa que todavía no está en Sage no tiene sociedad, así que
+ * desaparece en cuanto se mira una concreta —no se la puede colgar de una
+ * sociedad que no existe—, y una cifra sin comercial desaparece en cuanto se
+ * mira a una persona, para no regalarle una venta que no es suya.
  *
- * Con una sociedad marcada cuentan solo las de esa sociedad, y una empresa que
- * todavía no está en Sage no tiene ninguna, así que desaparece: no se la puede
- * colgar de una sociedad que no existe. Es la misma regla que aplica la
- * función de la base, y por el mismo motivo.
+ * Con canal, familia, subfamilia o proveedor marcado no suman ninguna: eso no
+ * existe detrás de una suma al mes por empresa, y repartirlo sería
+ * inventárselo.
  *
  * Los meses no se miran aquí a propósito: quien las usa busca mes a mes, y el
  * mes con el que se compara es otro —la pareja de marzo de 2026 es marzo de
  * 2025—, así que filtrar por los meses marcados aquí dejaría la comparación
  * vacía.
  */
-export function externasDelFiltro<T extends VentaDeFuera>(lista: T[], filters: SalesFilters): T[] {
-  const sinDetalle = filters.repKeys.length === 0 && filters.channels.length === 0
-    && filters.families.length === 0 && filters.subfamilies.length === 0 && filters.suppliers.length === 0;
+export function externasDelFiltro<T extends VentaDeFuera>(
+  lista: T[],
+  filters: SalesFilters,
+  repOf: (companyCode: number, repCode: number | null) => RepIdentity,
+): T[] {
+  const sinDetalle = filters.channels.length === 0 && filters.families.length === 0
+    && filters.subfamilies.length === 0 && filters.suppliers.length === 0;
   if (!sinDetalle) return [];
-  if (filters.companies.length === 0) return lista;
-  return lista.filter((fila) => fila.company_code !== null && filters.companies.includes(fila.company_code));
+  return lista.filter((fila) => {
+    if (filters.companies.length > 0 && (fila.company_code === null || !filters.companies.includes(fila.company_code))) return false;
+    if (filters.repKeys.length === 0) return true;
+    // Sin sociedad no hay forma de saber de quién es la ficha, y sin ficha no
+    // es de nadie: en los dos casos se queda fuera de una vista por comercial.
+    const ficha = fila.rep_code ?? null;
+    if (fila.company_code === null || ficha === null) return false;
+    return filters.repKeys.includes(repOf(fila.company_code, ficha).key);
+  });
 }
 
 /**
@@ -993,9 +1011,13 @@ export function externasDelFiltro<T extends VentaDeFuera>(lista: T[], filters: S
  * empresa todavía no estaba en Sage: Jender no tiene nada de enero a
  * septiembre de 2025 porque entró el 6 de octubre.
  */
-export function externasPorMes(lista: VentaDeFuera[], filters: SalesFilters): Map<string, number> {
+export function externasPorMes(
+  lista: VentaDeFuera[],
+  filters: SalesFilters,
+  repOf: (companyCode: number, repCode: number | null) => RepIdentity,
+): Map<string, number> {
   const mapa = new Map<string, number>();
-  for (const fila of externasDelFiltro(lista, filters)) {
+  for (const fila of externasDelFiltro(lista, filters, repOf)) {
     const clave = String(fila.month).slice(0, 7);
     mapa.set(clave, (mapa.get(clave) ?? 0) + Number(fila.net_amount));
   }

@@ -53,10 +53,10 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     el dinero estuviera facturado. Suma en la venta del mes y en la del año
     con el que se compara, cada una con la suya.
   */
-  const fueraPorMes = externasPorMes(ctx.externalSales, filters);
-  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters);
+  const fueraPorMes = externasPorMes(ctx.externalSales, filters, ctx.repOf);
+  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters, ctx.repOf);
   const hayDeFuera = fueraPorMes.size > 0 || fueraAntesPorMes.size > 0;
-  const empresasDeFuera = [...new Set(externasDelFiltro(ctx.externalSales, filters).map((fila) => fila.source))];
+  const empresasDeFuera = [...new Set(externasDelFiltro(ctx.externalSales, filters, ctx.repOf).map((fila) => fila.source))];
 
   type MonthRow = (typeof model.monthly.months)[number];
   const ventaDelMes = (row: MonthRow) => row.bucket.net + (fueraPorMes.get(row.key) ?? 0);

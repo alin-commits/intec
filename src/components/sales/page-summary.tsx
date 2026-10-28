@@ -36,22 +36,21 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     comparación diría que se ha crecido un 4% cuando lo único que ha pasado es
     que este año sí se cuenta Jender y el anterior no.
 
-    Solo suma aquí y en el reparto por mes. No puede sumar en productos, en
-    clientes ni por comercial: el origen son cuadros de dirección con una cifra
-    al mes por empresa, y repartirla por familias sería inventársela. Por eso
-    el total lo dice en voz alta, para que nadie busque el descuadre.
+    No puede sumar en productos ni en clientes: el origen son cuadros de
+    dirección con una cifra al mes por empresa, y repartirla por familias o por
+    cliente sería inventársela. Por eso el total lo dice en voz alta, para que
+    nadie busque el descuadre.
   */
   /*
-    Lo de fuera de Sage obedece al filtro, y donde no puede, no se suma.
+    Y obedece a los filtros que esas cifras pueden obedecer: la sociedad, el
+    comercial —cada bloque del cuadro tiene su agente— y el mes. Con un canal,
+    una familia o un proveedor marcado no suman ninguna.
 
-    Antes se sumaba entero mirases lo que mirases. Obedece a la sociedad —una
-    empresa que todavía no está en Sage no tiene ninguna, así que desaparece en
-    cuanto se mira una—, obedece al mes, y con un comercial, un canal, una
-    familia o un proveedor marcado no se suma: de estas cifras no se sabe quién
-    las vendió, y los 253.264 € de Blizcool se estaban sumando al año de todos
+    Antes se sumaban mirando solo la sociedad, y el resultado fue que la venta
+    de una empresa sin sociedad aparecía dentro del año de todos y cada uno de
     los comerciales.
   */
-  const externasAhora = externasDelFiltro(ctx.externalSales, filters);
+  const externasAhora = externasDelFiltro(ctx.externalSales, filters, ctx.repOf);
 
   /*
     Y mes a mes, no solo en el total.
@@ -62,8 +61,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     suma lo suyo, y el mes con el que se compara suma lo suyo también, que
     para eso cada mes sabe con cuál va emparejado.
   */
-  const fueraPorMes = externasPorMes(ctx.externalSales, filters);
-  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters);
+  const fueraPorMes = externasPorMes(ctx.externalSales, filters, ctx.repOf);
+  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters, ctx.repOf);
   const fueraDe = (clave: string | null | undefined) => (clave ? fueraPorMes.get(clave) ?? 0 : 0);
   const fueraAntesDe = (clave: string | null | undefined) => (clave ? fueraAntesPorMes.get(clave) ?? 0 : 0);
 

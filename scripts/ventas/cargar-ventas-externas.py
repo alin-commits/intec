@@ -12,7 +12,12 @@ Qué carga, y por qué solo eso:
     de octubre en adelante ya está y volver a sumarlo sería contarlo dos veces.
     Comprobado: octubre a diciembre da 40.838 € en el Excel y 39.782 € en
     Sage — es el mismo dato con sus abonos, no dos cosas distintas.
-  · Blizcool, el año entero: no está en Sage por ninguna parte.
+
+Y nada más. En particular NO carga Blizcool, aunque el Excel tenga su columna:
+lo que ahí se llama Blizcool es en Sage la sociedad Tools Place, y está dentro
+desde febrero de 2026. Se cargó una vez y sumó 253.264 € de más al año 2026
+—los cuatro primeros meses coinciden al céntimo con Sage—, así que si algún día
+hace falta volver a meterlo, primero hay que comprobar qué sociedad lo lleva.
 
 No inventa nada: un mes sin cifra en el Excel no se carga.
 
@@ -46,20 +51,15 @@ BLOQUES = [
     {
         "fuente": "Jender",
         "sociedad": 2,
+        # La ficha de comercial que firma esa venta en Sage de octubre en
+        # adelante, y la que lleva el bloque en el cuadro. Va por código y no
+        # por nombre: este repositorio es público.
+        "comercial": 136,
         "columna": 19,                       # «REAL 2025» del bloque JENDER
         "espera_encima": ["JENDER", "REAL 2025"],
         "anio": 2025,
         "meses": [1, 2, 3, 4, 5, 6, 7, 8, 9],
         "nota": "Cuadro de direccion, hoja 6,15. Jender entro en Sage el 6/10/2025.",
-    },
-    {
-        "fuente": "Blizcool",
-        "sociedad": None,
-        "columna": 12,                       # «REAL 2026 (Blizcool)»
-        "espera_encima": ["Blizcool"],
-        "anio": 2026,
-        "meses": list(range(1, 13)),
-        "nota": "Cuadro de direccion, hoja 6,15. Blizcool no esta en Sage.",
     },
 ]
 
@@ -126,6 +126,7 @@ def leer(ruta):
             salida.append({
                 "source": bloque["fuente"],
                 "company_code": bloque["sociedad"],
+                "rep_code": bloque["comercial"],
                 "month": f"{bloque['anio']}-{mes:02d}-01",
                 "net_amount": round(float(valor), 2),
                 "note": bloque["nota"],
