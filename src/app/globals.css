@@ -2100,6 +2100,26 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .sales-list-count { color: var(--muted); font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
 /* El editor de objetivos. */
+/* La ficha de un mes: cuatro cifras arriba y cuatro bloques debajo. */
+.month-sheet { display: grid; gap: 16px; }
+.month-sheet-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.month-sheet-kpi { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft, var(--surface)); }
+.month-sheet-kpi-label { color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.month-sheet-kpi strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.month-sheet-kpi small { font-size: 12px; }
+.month-sheet-acciones { margin: 0; }
+/* Dos y dos: cada bloque es una tabla con cuatro columnas, y en una sola
+   columna la ficha se hacía larguísima de recorrer. */
+.month-sheet-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.month-sheet-bloque { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.month-sheet-bloque header { display: grid; gap: 1px; }
+.month-sheet-bloque h4 { margin: 0; font-size: 14px; }
+.month-sheet-bloque header p { margin: 0; font-size: 12px; }
+@media (max-width: 900px) {
+  .month-sheet-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .month-sheet-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 .sales-targets-scope { display: grid; gap: 8px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .sales-targets-scope label { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 8px; }
 .sales-targets-scope span { color: var(--muted); font-size: 12px; font-weight: 700; }

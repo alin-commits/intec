@@ -174,8 +174,8 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
           */
           subtitle={<>
             {hayMesMarcado(filters)
-              ? `Salen todos los meses, no solo los marcados, para poder pulsar otro. La columna compara con ${period.baseCompareShort ?? "el periodo anterior"}`
-              : "Pulsa un mes para filtrar todo el panel; pulsa una cabecera para ordenar"}
+              ? `Salen todos los meses, no solo los marcados, para poder abrir otro. La columna compara con ${period.baseCompareShort ?? "el periodo anterior"}`
+              : "Pulsa un mes para ver su ficha —quién vendió, qué familias, qué clientes—; pulsa una cabecera para ordenar"}
             {/* Si la venta de un mes lleva algo que no viene de Sage, se dice:
                 cuando un número no cuadra manda Sage, y eso solo se sostiene
                 sabiendo qué parte no es suya. */}
@@ -190,7 +190,7 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
             columns={monthColumns}
             rowKey={(row) => row.key}
             activeKey={soloUnMes(filters)}
-            onRowClick={(row) => ctx.toggleMonth(row.key)}
+            onRowClick={(row) => ctx.openMonth(row.key)}
           />
         </Panel>
 

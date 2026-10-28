@@ -215,6 +215,8 @@ export type SalesContext = {
   openList: (request: ListRequest) => void;
   /** Abre la ficha de un cliente: su evolución de compra, sus pedidos y ofertas. */
   openCustomer: (customer: CustomerRef) => void;
+  /** Abre la ficha de un mes: quién vendió, por qué canal, qué familias y a quién. */
+  openMonth: (month: string) => void;
   goTo: (page: SalesPageKey) => void;
   canSeeLeads: boolean;
 };

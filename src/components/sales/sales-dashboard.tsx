@@ -42,6 +42,7 @@ import { chipNote, SalesFilterBar, type ActiveChip } from "./sales-filter-bar";
 import { type CustomerRef, type ExternalSale, type FamilyName, type ListRequest, type SageDetail, type SalesContext, type SalesPageKey, salesPages, type SalesRpcArgs, type SubfamilyName } from "./sales-context";
 import { SalesListModal } from "./sales-list-modal";
 import { CustomerSheet } from "./customer-sheet";
+import { MonthSheet } from "./month-sheet";
 import { SummaryPage } from "./page-summary";
 import { SalesMarginPage } from "./page-sales";
 import { CommercialPage } from "./page-commercial";
@@ -136,6 +137,7 @@ export function SalesDashboard() {
   const [listRequest, setListRequest] = useState<ListRequest | null>(null);
   /** El cliente cuya ficha está abierta (encima de la lista de la que salió, si salió de una). */
   const [customer, setCustomer] = useState<CustomerRef | null>(null);
+  const [monthSheet, setMonthSheet] = useState<string | null>(null);
 
   // Quién entra, qué hay en Sage y con qué filtros se llega. Solo una vez.
   useEffect(() => {
@@ -529,6 +531,7 @@ export function SalesDashboard() {
     detail,
     openList: setListRequest,
     openCustomer: setCustomer,
+    openMonth: setMonthSheet,
     goTo: setPage,
     canSeeLeads,
   };
@@ -754,12 +757,15 @@ export function SalesDashboard() {
       </div>
 
       <SalesListModal request={listRequest} ctx={context} onClose={() => setListRequest(null)} hidden={customer !== null} />
+      {/* La de un mes se aparta mientras hay una ficha de cliente encima, y
+          vuelve al cerrarla: se entra a un cliente desde ella. */}
+      <MonthSheet month={monthSheet} ctx={context} onClose={() => setMonthSheet(null)} hidden={customer !== null} />
       {customer ? (
         <CustomerSheet
           customer={customer}
           ctx={context}
-          onClose={() => { setCustomer(null); setListRequest(null); }}
-          onBack={listRequest ? () => setCustomer(null) : undefined}
+          onClose={() => { setCustomer(null); setListRequest(null); setMonthSheet(null); }}
+          onBack={listRequest || monthSheet ? () => setCustomer(null) : undefined}
         />
       ) : null}
     </div>
