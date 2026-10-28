@@ -2614,3 +2614,11 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
 }
 .zonas-municipio:hover { stroke: var(--text); stroke-width: 1.4; }
 .zonas-municipio.activo { stroke: var(--text); stroke-width: 1.8; }
+
+/* Las filas de municipio que se pueden pulsar. Las que no —fuera de donde hay
+   mapeo de códigos postales— se quedan como texto, sin aparentar otra cosa. */
+.zonas-municipio-boton { display: contents; border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: inherit; }
+.zonas-municipios li:has(.zonas-municipio-boton):hover { background: var(--surface-muted); border-radius: 5px; }
+.zonas-municipios li:has(.zonas-municipio-boton):hover .zonas-municipio-nombre { color: var(--primary); }
+.zonas-municipios li.elegido { background: var(--primary-soft); border-radius: 5px; font-weight: 700; }
+.zonas-municipio-boton:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

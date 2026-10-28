@@ -6,6 +6,7 @@ import { euros } from "@/lib/sales-model";
 import { NOMBRES_DE_PROVINCIA, PROVINCIAS_CON_MUNICIPIOS, encuadreDe, intensidadDeColor } from "@/lib/zonas-mapa";
 import { MUNICIPIOS_CV_SVG } from "@/lib/zonas-svg-cv";
 import { MAPA_ALTO, MAPA_ANCHO, PROVINCIAS_SVG } from "@/lib/zonas-svg";
+import { Modal } from "@/components/ui/modal";
 import { createClient } from "@/lib/supabase/client";
 import type { SalesContext } from "./sales-context";
 import { DataTable, LoadFailed, Panel, PendingDetail, share, useSageQuery, type Column } from "./sales-ui";
@@ -33,7 +34,7 @@ type ZoneRow = {
   net_amount: number;
   documents: number;
   mismatched: number;
-  municipalities: { name: string; customers: number; net: number }[] | null;
+  municipalities: { ine: string | null; name: string; customers: number; net: number }[] | null;
 };
 
 /** Qué mide el mapa: cuántos clientes hay o cuánto compran. */
@@ -317,34 +318,6 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
                 ? <p className="muted">No se pudieron cargar los municipios. ¿Está aplicada la migración 202610280003?</p>
                 : <MapaDeMunicipios provincia={marcada} filas={municipios.data ?? []} medida={medida}
                                     marcado={municipioMarcado} onMarcar={setMunicipioMarcado} />}
-            {municipioElegido ? (
-              <>
-                <p className="zonas-elegida">
-                  <strong>{municipioElegido.name}</strong>
-                  <span>{numberFormatter.format(Number(municipioElegido.customers))} clientes</span>
-                  <span>{euros(Number(municipioElegido.net_amount))}</span>
-                  <button type="button" className="button button-compact button-secondary" onClick={() => setMunicipioMarcado(null)}>Quitar</button>
-                </p>
-                {clientes.failed
-                  ? <p className="muted">No se pudieron cargar los clientes. ¿Está aplicada la migración 202610280004?</p>
-                  : clientes.loading && !clientes.data
-                    ? <PendingDetail what="los clientes" />
-                    : (
-                      <DataTable
-                        rows={clientes.data ?? []}
-                        columns={columnasDeClientes}
-                        rowKey={(fila) => `${fila.company_code}:${fila.customer_code}`}
-                        onRowClick={(fila) => ctx.openCustomer({
-                          company_code: fila.company_code,
-                          customer_code: fila.customer_code,
-                          name: fila.trade_name || fila.name,
-                        })}
-                        initialSort={{ key: "venta", desc: true }}
-                        empty="Ningún cliente con compras aquí en este periodo."
-                      />
-                    )}
-              </>
-            ) : null}
           </div>
         ) : null}
 
@@ -388,13 +361,40 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
                   {fila.province}, los {numberFormatter.format(municipios.length)} municipios con clientes
                 </p>
                 <ul className="zonas-municipios">
-                  {municipios.map((municipio) => (
-                    <li key={municipio.name}>
-                      <span className="zonas-municipio-nombre">{municipio.name}</span>
-                      <span className="zonas-municipio-clientes">{numberFormatter.format(Number(municipio.customers))}</span>
-                      <span className="zonas-municipio-venta">{euros(Number(municipio.net))}</span>
-                    </li>
-                  ))}
+                  {municipios.map((municipio) => {
+                    /*
+                      Se puede pulsar si sabemos su código del INE, que es lo
+                      que hace falta para pedir sus clientes. Fuera de donde
+                      hay mapeo de códigos postales no lo hay, y entonces la
+                      fila es solo texto: más vale que no se pueda pulsar a
+                      que se pulse y no pase nada.
+                    */
+                    const contenido = (
+                      <>
+                        <span className="zonas-municipio-nombre">{municipio.name}</span>
+                        <span className="zonas-municipio-clientes">{numberFormatter.format(Number(municipio.customers))}</span>
+                        <span className="zonas-municipio-venta">{euros(Number(municipio.net))}</span>
+                      </>
+                    );
+                    const clave = municipio.ine ?? municipio.name;
+                    if (!municipio.ine) return <li key={clave}>{contenido}</li>;
+                    const elegido = municipioMarcado === municipio.ine;
+                    return (
+                      <li key={clave} className={elegido ? "elegido" : undefined}>
+                        <button
+                          type="button"
+                          className="zonas-municipio-boton"
+                          aria-pressed={elegido}
+                          onClick={() => {
+                            setMarcada(fila.province_code);
+                            setMunicipioMarcado(elegido ? null : municipio.ine);
+                          }}
+                        >
+                          {contenido}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             );
@@ -402,6 +402,57 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
           empty={zonas.loading ? "Cargando…" : "Ningún cliente con compras en este periodo."}
         />
       </Panel>
+
+      {/*
+        Los clientes de un municipio, en una ventana.
+
+        Da igual si se ha pulsado el municipio en el mapa o en la lista de la
+        tabla: la respuesta sale siempre en el mismo sitio, encima de todo, y
+        no hay que ir a buscarla a otra parte de la página. Y pulsar un
+        cliente abre su ficha de siempre.
+      */}
+      <Modal
+        open={Boolean(municipioMarcado)}
+        title={municipioElegido?.name ?? "Municipio"}
+        eyebrow={marcada ? NOMBRES_DE_PROVINCIA[marcada] ?? "Zona" : "Zona"}
+        scrollInside
+        large
+        onClose={() => setMunicipioMarcado(null)}
+      >
+        {municipioElegido ? (
+          <p className="zonas-elegida">
+            <span>{numberFormatter.format(Number(municipioElegido.customers))} clientes</span>
+            <span>{euros(Number(municipioElegido.net_amount))}</span>
+            <span className="muted">en {ctx.periodName}</span>
+          </p>
+        ) : null}
+        {clientes.failed
+          ? <p className="muted">No se pudieron cargar los clientes. ¿Está aplicada la migración 202610280004?</p>
+          : clientes.loading && !clientes.data
+            ? <PendingDetail what="los clientes" />
+            : (
+              <DataTable
+                rows={clientes.data ?? []}
+                columns={columnasDeClientes}
+                rowKey={(fila) => `${fila.company_code}:${fila.customer_code}`}
+                onRowClick={(fila) => {
+                  /*
+                    Se cierra esta antes de abrir la ficha: dos ventanas una
+                    encima de otra no se entienden, y de la ficha se vuelve al
+                    mapa, que sigue como estaba.
+                  */
+                  setMunicipioMarcado(null);
+                  ctx.openCustomer({
+                    company_code: fila.company_code,
+                    customer_code: fila.customer_code,
+                    name: fila.trade_name || fila.name,
+                  });
+                }}
+                initialSort={{ key: "venta", desc: true }}
+                empty="Ningún cliente con compras aquí en este periodo."
+              />
+            )}
+      </Modal>
     </>
   );
 }
