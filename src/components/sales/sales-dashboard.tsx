@@ -47,6 +47,7 @@ import { SalesMarginPage } from "./page-sales";
 import { CommercialPage } from "./page-commercial";
 import { ProductsPage } from "./page-products";
 import { CustomersPage } from "./page-customers";
+import { ZonesPage } from "./page-zones";
 import { SuppliersPage } from "./page-suppliers";
 import { ComparadorPage } from "./page-comparador";
 import { AvisoComparador } from "./aviso-comparador";
@@ -736,6 +737,7 @@ export function SalesDashboard() {
         {page === "comercial" ? <CommercialPage ctx={context} /> : null}
         {page === "productos" ? <ProductsPage ctx={context} /> : null}
         {page === "clientes" ? <CustomersPage ctx={context} /> : null}
+        {page === "zonas" ? <ZonesPage ctx={context} /> : null}
         {page === "proveedores" ? <SuppliersPage ctx={context} /> : null}
         {page === "comparador" ? <ComparadorPage ctx={context} /> : null}
 

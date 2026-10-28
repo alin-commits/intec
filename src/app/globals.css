@@ -2552,3 +2552,36 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
   .catalogos-escribir input { flex-basis: 100%; min-height: 48px; }
   .catalogos-escribir button { width: 100%; }
 }
+
+/* ---------------------------------------------------------------------------
+   Zonas: el mapa de rejilla de España y su tabla de municipios
+   --------------------------------------------------------------------------- */
+/* Una casilla por provincia, colocadas como están en el mapa. Cada una ocupa
+   lo mismo, así que Soria se ve igual que Badajoz: el color dice cuánto hay,
+   no el tamaño de la provincia. */
+.zonas-mapa { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 5px; max-width: 760px; margin: 4px auto 0; }
+.zonas-casilla {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  aspect-ratio: 1; min-width: 0; padding: 2px; border: 1px solid var(--border); border-radius: 7px;
+  /* --peso va de 0 a 1 y lo pone el componente con el dato de cada provincia. */
+  background: color-mix(in srgb, var(--primary) calc(var(--peso, 0) * 100%), white);
+  color: var(--text); font: inherit; cursor: pointer; transition: transform .12s ease, border-color .12s ease;
+}
+/* Sobre fondo oscuro el texto negro no se lee: a partir de la mitad, en blanco. */
+.zonas-casilla { color: color-mix(in srgb, white calc(max(var(--peso, 0) - 0.45, 0) * 200%), var(--text)); }
+.zonas-casilla:hover { transform: scale(1.08); border-color: var(--primary); }
+.zonas-casilla:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.zonas-casilla.activa { border-color: var(--primary); border-width: 2px; transform: scale(1.08); }
+.zonas-sigla { font-size: 11px; font-weight: 750; letter-spacing: .02em; }
+.zonas-cifra { font-size: 9.5px; font-weight: 650; opacity: .85; line-height: 1; }
+.zonas-aviso { margin: 14px 0 0; font-size: 12.5px; }
+.zonas-medida select { min-width: 190px; }
+.zonas-municipios { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.zonas-municipios li { display: grid; grid-template-columns: minmax(0, 1fr) 70px 110px; gap: 10px; font-size: 12px; }
+.zonas-municipios li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zonas-municipios li > strong, .zonas-municipios li > span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .zonas-mapa { gap: 3px; }
+  .zonas-cifra { display: none; }
+  .zonas-sigla { font-size: 9px; }
+}

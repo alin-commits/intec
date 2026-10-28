@@ -6,7 +6,7 @@ import type { PeriodChoice, SalesPeriod } from "@/lib/sales-period";
   datos ya cargados, los filtros y cómo cambiarlos, y cómo abrir una lista.
 */
 
-export type SalesPageKey = "resumen" | "ventas" | "comercial" | "productos" | "clientes" | "proveedores" | "comparador" | "objetivos";
+export type SalesPageKey = "resumen" | "ventas" | "comercial" | "productos" | "clientes" | "zonas" | "proveedores" | "comparador" | "objetivos";
 export type SalesDimension = "company" | "channel" | "rep" | "month" | "family" | "subfamily" | "supplier";
 
 /**
@@ -27,6 +27,11 @@ export const salesPages: { key: SalesPageKey; label: string; applies: SalesDimen
   */
   { key: "productos", label: "Productos", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
   { key: "clientes", label: "Clientes", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
+  /*
+    Zonas aplica lo mismo que Clientes porque es la misma cartera mirada por
+    el mapa: el proveedor no, que ese solo vive en su página.
+  */
+  { key: "zonas", label: "Zonas", applies: ["company", "channel", "rep", "month", "family", "subfamily"] },
   /*
     El proveedor solo lo aplica su propia página: lo demás del panel se
     reparte por cliente o por familia, y ahí no hay proveedor que mirar.
