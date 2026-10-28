@@ -42,8 +42,21 @@
        schtasks /Create /TN "Intec - Sage noche" /SC DAILY /ST 03:00 /RU SYSTEM ^
          /TR "powershell -ExecutionPolicy Bypass -File C:\intec\agente-sage.ps1 -Dias 90"
 
-       schtasks /Create /TN "Intec - Sage hoy" /SC HOURLY /RU SYSTEM ^
+       schtasks /Create /TN "Intec - Sage hoy" /SC DAILY /ST 07:00 /RI 60 /DU 14:00 /RU SYSTEM ^
          /TR "powershell -ExecutionPolicy Bypass -File C:\intec\agente-sage.ps1 -Dias 2"
+
+  Ojo con la de cada hora: antes ponia "/SC HOURLY", que no es lo que dice la
+  frase de arriba — eso la lanza las veinticuatro horas, tambien de madrugada,
+  cuando en Sage no se mueve nada. De 07:00 a 21:00 son catorce lecturas al dia
+  en vez de veinticuatro, y el boton "Actualizar desde Sage" sigue funcionando
+  a cualquier hora porque de eso se encarga la tarea del punto 5. Para
+  cambiarlo en un servidor que ya la tenga puesta, borrarla y volver a crearla:
+
+       schtasks /Delete /TN "Intec - Sage hoy" /F
+
+  Esto importa por el gasto del Hub: cada lectura no es una llamada sino unas
+  once, una por bloque (ventas, familias, articulos, clientes, pendientes...),
+  y lo que se manda cuenta como trafico aunque solo entre.
 
   La tarea de la noche repasa los últimos 90 días (y las ofertas y pedidos del
   último año, que cambian de estado aunque sean viejos). La de cada hora solo
