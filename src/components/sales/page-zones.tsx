@@ -38,8 +38,14 @@ type ZoneRow = {
 /** Qué mide el mapa: cuántos clientes hay o cuánto compran. */
 type Medida = "customers" | "net_amount";
 
-/** Cuántos municipios se enseñan al desplegar una provincia. */
-const MUNICIPIOS_A_LA_VISTA = 12;
+/*
+  Al desplegar una provincia salen TODOS sus municipios.
+
+  Antes salían los doce primeros y una línea con «y N más». Para lo que se
+  usa esto —ver dónde flojea la cartera de un comercial— el municipio que
+  falta es justo el interesante: el que tiene un cliente o ninguno. Alicante
+  tiene 124, así que van en varias columnas y el panel se desplaza.
+*/
 
 function MapaDeEspana({ filas, medida, marcada, onMarcar }: {
   filas: ZoneRow[];
@@ -209,13 +215,13 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
           expand={(fila) => {
             const municipios = fila.municipalities ?? [];
             if (municipios.length === 0) return null;
-            const aLaVista = municipios.slice(0, MUNICIPIOS_A_LA_VISTA);
-            const resto = municipios.length - aLaVista.length;
             return (
               <div className="zonas-detalle">
-                <p className="zonas-detalle-titulo">{fila.province}, municipio a municipio</p>
+                <p className="zonas-detalle-titulo">
+                  {fila.province}, los {numberFormatter.format(municipios.length)} municipios con clientes
+                </p>
                 <ul className="zonas-municipios">
-                  {aLaVista.map((municipio) => (
+                  {municipios.map((municipio) => (
                     <li key={municipio.name}>
                       <span className="zonas-municipio-nombre">{municipio.name}</span>
                       <span className="zonas-municipio-clientes">{numberFormatter.format(Number(municipio.customers))}</span>
@@ -223,11 +229,6 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
                     </li>
                   ))}
                 </ul>
-                {resto > 0 ? (
-                  <p className="muted zonas-detalle-resto">
-                    y {numberFormatter.format(resto)} municipios más, con {euros(municipios.slice(MUNICIPIOS_A_LA_VISTA).reduce((suma, m) => suma + Number(m.net), 0))} entre todos
-                  </p>
-                ) : null}
               </div>
             );
           }}
