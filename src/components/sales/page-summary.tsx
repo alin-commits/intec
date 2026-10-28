@@ -42,20 +42,16 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     el total lo dice en voz alta, para que nadie busque el descuadre.
   */
   /*
-    Lo de fuera de Sage también obedece al filtro de sociedad.
+    Lo de fuera de Sage obedece al filtro, y donde no puede, no se suma.
 
-    Antes se sumaba entero mirases lo que mirases: con Sumifluid marcada, su
-    cifra llevaba dentro lo de Jender. Una empresa que todavía no está en Sage
-    no tiene sociedad, así que cuenta cuando no hay filtro puesto y desaparece
-    en cuanto se mira una sociedad concreta —que es lo mismo que hace la
-    función de la base, y por el mismo motivo: no se puede colgar de una
-    sociedad que no existe—.
+    Antes se sumaba entero mirases lo que mirases. Obedece a la sociedad —una
+    empresa que todavía no está en Sage no tiene ninguna, así que desaparece en
+    cuanto se mira una—, obedece al mes, y con un comercial, un canal, una
+    familia o un proveedor marcado no se suma: de estas cifras no se sabe quién
+    las vendió, y los 253.264 € de Blizcool se estaban sumando al año de todos
+    los comerciales.
   */
-  const externasAhora = externasDelFiltro(ctx.externalSales, filters.companies);
-  const externasAntes = externasDelFiltro(ctx.previousExternalSales, filters.companies);
-  const deFuera = externasAhora.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
-  const deFueraAntes = externasAntes.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
-  const empresasDeFuera = [...new Set(externasAhora.map((fila) => fila.source))];
+  const externasAhora = externasDelFiltro(ctx.externalSales, filters);
 
   /*
     Y mes a mes, no solo en el total.
@@ -66,10 +62,23 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     suma lo suyo, y el mes con el que se compara suma lo suyo también, que
     para eso cada mes sabe con cuál va emparejado.
   */
-  const fueraPorMes = externasPorMes(ctx.externalSales, filters.companies);
-  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters.companies);
+  const fueraPorMes = externasPorMes(ctx.externalSales, filters);
+  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters);
   const fueraDe = (clave: string | null | undefined) => (clave ? fueraPorMes.get(clave) ?? 0 : 0);
   const fueraAntesDe = (clave: string | null | undefined) => (clave ? fueraAntesPorMes.get(clave) ?? 0 : 0);
+
+  /*
+    El total de lo de fuera sale de los meses que se están mirando, no de la
+    lista entera: con marzo marcado, lo de Sage era marzo y lo de fuera el año
+    completo. Y cada mes se compara con su pareja, que es el mismo mes del año
+    anterior, no otra vez él.
+  */
+  const mesesVistos = hayMesMarcado(filters) ? monthly.months.filter((mes) => mesMarcado(filters, mes.key)) : monthly.months;
+  const deFuera = mesesVistos.reduce((suma, mes) => suma + fueraDe(mes.key), 0);
+  const deFueraAntes = mesesVistos.reduce((suma, mes) => suma + fueraAntesDe(mes.pair), 0);
+  const empresasDeFuera = [...new Set(externasAhora
+    .filter((fila) => mesMarcado(filters, String(fila.month).slice(0, 7)))
+    .map((fila) => fila.source))];
   const ventasConFuera = current.net + deFuera;
   const ventasAntesConFuera = previous.net + deFueraAntes;
   const marginDelta = currentMargin && previousMargin && marginSpansMatch;
@@ -149,7 +158,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     Ahora lo dibujado es lo marcado. Para cambiar de mes está el desplegable de
     arriba, que es de donde se marcan; pulsar un punto sigue quitando ese mes.
   */
-  const porMes = hayMesMarcado(filters) ? monthly.months.filter((mes) => mesMarcado(filters, mes.key)) : monthly.months;
+  const porMes = mesesVistos;
   const vistos = porMes.map((mes) => monthly.months.indexOf(mes));
   const puntos = vistos.map((indice) => {
     const mes = monthly.months[indice];

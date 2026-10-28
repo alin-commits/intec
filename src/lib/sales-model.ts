@@ -960,16 +960,30 @@ export function yearlyView(input: {
 export type VentaDeFuera = { month: string; company_code: number | null; net_amount: number };
 
 /**
- * Las de fuera que caen dentro del filtro de sociedad.
+ * Las de fuera que caen dentro del filtro.
  *
- * Una empresa que todavía no está en Sage no tiene sociedad, así que cuenta
- * cuando no hay filtro puesto y desaparece en cuanto se mira una sociedad
- * concreta: no se la puede colgar de una sociedad que no existe. Es la misma
- * regla que aplica la función de la base, y por el mismo motivo.
+ * De estas cifras solo se sabe el mes y la sociedad: salen de un cuadro de
+ * dirección, no de Sage, y detrás no hay ni comercial, ni canal, ni familia,
+ * ni proveedor. Así que en cuanto se mira por cualquiera de esas cosas no se
+ * suman: los 253.264 € de Blizcool de 2026 aparecían dentro del año de todos
+ * los comerciales, regalándole a cada uno una venta que no era suya.
+ *
+ * Con una sociedad marcada cuentan solo las de esa sociedad, y una empresa que
+ * todavía no está en Sage no tiene ninguna, así que desaparece: no se la puede
+ * colgar de una sociedad que no existe. Es la misma regla que aplica la
+ * función de la base, y por el mismo motivo.
+ *
+ * Los meses no se miran aquí a propósito: quien las usa busca mes a mes, y el
+ * mes con el que se compara es otro —la pareja de marzo de 2026 es marzo de
+ * 2025—, así que filtrar por los meses marcados aquí dejaría la comparación
+ * vacía.
  */
-export function externasDelFiltro<T extends VentaDeFuera>(lista: T[], companies: number[]): T[] {
-  if (companies.length === 0) return lista;
-  return lista.filter((fila) => fila.company_code !== null && companies.includes(fila.company_code));
+export function externasDelFiltro<T extends VentaDeFuera>(lista: T[], filters: SalesFilters): T[] {
+  const sinDetalle = filters.repKeys.length === 0 && filters.channels.length === 0
+    && filters.families.length === 0 && filters.subfamilies.length === 0 && filters.suppliers.length === 0;
+  if (!sinDetalle) return [];
+  if (filters.companies.length === 0) return lista;
+  return lista.filter((fila) => fila.company_code !== null && filters.companies.includes(fila.company_code));
 }
 
 /**
@@ -979,9 +993,9 @@ export function externasDelFiltro<T extends VentaDeFuera>(lista: T[], companies:
  * empresa todavía no estaba en Sage: Jender no tiene nada de enero a
  * septiembre de 2025 porque entró el 6 de octubre.
  */
-export function externasPorMes(lista: VentaDeFuera[], companies: number[]): Map<string, number> {
+export function externasPorMes(lista: VentaDeFuera[], filters: SalesFilters): Map<string, number> {
   const mapa = new Map<string, number>();
-  for (const fila of externasDelFiltro(lista, companies)) {
+  for (const fila of externasDelFiltro(lista, filters)) {
     const clave = String(fila.month).slice(0, 7);
     mapa.set(clave, (mapa.get(clave) ?? 0) + Number(fila.net_amount));
   }
