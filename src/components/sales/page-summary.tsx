@@ -6,7 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { ConversionIcon, EuroIcon, UsuariosIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { bucketMargin, delta, emptyBucket, euros, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, signedEuros, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { bucketMargin, delta, emptyBucket, euros, externasDelFiltro, externasPorMes, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, signedEuros, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type SalesContext } from "./sales-context";
@@ -51,11 +51,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     función de la base, y por el mismo motivo: no se puede colgar de una
     sociedad que no existe—.
   */
-  const delFiltro = (lista: typeof ctx.externalSales) => (filters.companies.length === 0
-    ? lista
-    : lista.filter((fila) => fila.company_code !== null && filters.companies.includes(fila.company_code)));
-  const externasAhora = delFiltro(ctx.externalSales);
-  const externasAntes = delFiltro(ctx.previousExternalSales);
+  const externasAhora = externasDelFiltro(ctx.externalSales, filters.companies);
+  const externasAntes = externasDelFiltro(ctx.previousExternalSales, filters.companies);
   const deFuera = externasAhora.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
   const deFueraAntes = externasAntes.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
   const empresasDeFuera = [...new Set(externasAhora.map((fila) => fila.source))];
@@ -69,16 +66,8 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     suma lo suyo, y el mes con el que se compara suma lo suyo también, que
     para eso cada mes sabe con cuál va emparejado.
   */
-  const porMesDe = (lista: typeof ctx.externalSales) => {
-    const mapa = new Map<string, number>();
-    for (const fila of lista) {
-      const clave = String(fila.month).slice(0, 7);
-      mapa.set(clave, (mapa.get(clave) ?? 0) + Number(fila.net_amount));
-    }
-    return mapa;
-  };
-  const fueraPorMes = porMesDe(externasAhora);
-  const fueraAntesPorMes = porMesDe(externasAntes);
+  const fueraPorMes = externasPorMes(ctx.externalSales, filters.companies);
+  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters.companies);
   const fueraDe = (clave: string | null | undefined) => (clave ? fueraPorMes.get(clave) ?? 0 : 0);
   const fueraAntesDe = (clave: string | null | undefined) => (clave ? fueraAntesPorMes.get(clave) ?? 0 : 0);
   const ventasConFuera = current.net + deFuera;

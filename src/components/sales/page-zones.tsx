@@ -60,7 +60,7 @@ function MapaDeEspana({ filas, medida, marcada, onMarcar }: {
   filas: ZoneRow[];
   medida: Medida;
   marcada: string | null;
-  onMarcar: (code: string | null) => void;
+  onMarcar: (code: string | null, nombre: string) => void;
 }) {
   const porCodigo = new Map(filas.map((fila) => [fila.province_code, fila]));
   const maximo = Math.max(0, ...filas.map((fila) => Number(fila[medida])));
@@ -83,7 +83,7 @@ function MapaDeEspana({ filas, medida, marcada, onMarcar }: {
               d={d}
               className={activa ? "zonas-provincia activa" : "zonas-provincia"}
               style={{ "--peso": intensidadDeColor(valor, maximo) } as React.CSSProperties}
-              onClick={() => onMarcar(activa ? null : code)}
+              onClick={() => onMarcar(activa ? null : code, nombre)}
             >
               {/* El título es el que sale al pasar por encima; sin librería de
                   por medio, que un mapa no necesita una. */}
@@ -163,6 +163,24 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     cerrar la ficha se cerraba todo y había que buscar el municipio otra vez
     en el mapa. De paso hereda el buscador y la descarga a Excel.
   */
+  /*
+    Pulsar una provincia la marca y abre sus clientes.
+
+    Marcarla es lo que saca el mapa municipal de la Comunidad Valenciana; la
+    lista es lo que hace que en Madrid o en Sevilla pulsar también sirva para
+    algo, que si no el mapa fuera de esas tres provincias era un adorno.
+  */
+  const abrirProvincia = (code: string, nombre: string) => {
+    setMunicipioMarcado(null);
+    setMarcada(code);
+    ctx.openList({
+      type: "provincia",
+      code,
+      title: nombre,
+      description: `Los clientes de ${nombre} con compras en ${ctx.periodName}, de más a menos venta.`,
+    });
+  };
+
   const abrirMunicipio = (ine: string, nombre: string) => {
     setMunicipioMarcado(ine);
     ctx.openList({
@@ -265,7 +283,10 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
       >
         {zonas.loading && filas.length === 0
           ? <PendingDetail what="el mapa" />
-          : <MapaDeEspana filas={filas} medida={medida} marcada={marcada} onMarcar={(code) => { setMunicipioMarcado(null); setMarcada(code); }} />}
+          : <MapaDeEspana filas={filas} medida={medida} marcada={marcada} onMarcar={(code, nombre) => {
+            if (code === null) { setMunicipioMarcado(null); setMarcada(null); return; }
+            abrirProvincia(code, nombre);
+          }} />}
 
         {conMapaMunicipal && marcada ? (
           <div className="zonas-municipal">
@@ -314,7 +335,10 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
           columns={columnas}
           rowKey={(fila) => fila.province_code}
           activeKey={marcada}
-          onRowClick={(fila) => { setMunicipioMarcado(null); setMarcada(marcada === fila.province_code ? null : fila.province_code); }}
+          onRowClick={(fila) => {
+            if (marcada === fila.province_code) { setMunicipioMarcado(null); setMarcada(null); return; }
+            abrirProvincia(fila.province_code, fila.province);
+          }}
           initialSort={{ key: medida === "customers" ? "clientes" : "venta", desc: true }}
           expand={(fila) => {
             const municipios = fila.municipalities ?? [];

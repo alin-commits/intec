@@ -2,7 +2,7 @@
 
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { type Bucket, bucketDiscount, bucketMargin, channelLabel, euros, filterRows, groupRows, hayMesMarcado, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, sumBuckets, type SummaryRow, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { bucketDiscount, bucketMargin, channelLabel, euros, externasDelFiltro, externasPorMes, filterRows, groupRows, hayMesMarcado, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, sumBuckets, targetsFor, ticketFormatter, type Bucket, type SummaryRow, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -44,7 +44,39 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     .map(([label, bucket]) => ({ label, bucket, before: channelBefore.get(label)?.net ?? 0 }));
   const versusHeader = `vs ${period.compareShort ?? ""}`;
 
+  /*
+    Lo que no pasó por Sage, mes a mes.
+
+    Sin esto, una empresa que entró en Sage a mitad de camino dibuja ceros
+    antes de entrar: Jender no tiene nada de enero a septiembre de 2025
+    —entró el 6 de octubre— y esta tabla enseñaba nueve meses vacíos aunque
+    el dinero estuviera facturado. Suma en la venta del mes y en la del año
+    con el que se compara, cada una con la suya.
+  */
+  const fueraPorMes = externasPorMes(ctx.externalSales, filters.companies);
+  const fueraAntesPorMes = externasPorMes(ctx.previousExternalSales, filters.companies);
+  const hayDeFuera = fueraPorMes.size > 0 || fueraAntesPorMes.size > 0;
+  const empresasDeFuera = [...new Set(externasDelFiltro(ctx.externalSales, filters.companies).map((fila) => fila.source))];
+
   type MonthRow = (typeof model.monthly.months)[number];
+  const ventaDelMes = (row: MonthRow) => row.bucket.net + (fueraPorMes.get(row.key) ?? 0);
+  const ventaAnteriorDelMes = (row: MonthRow) => row.beforeNet + (row.pair ? fueraAntesPorMes.get(row.pair) ?? 0 : 0);
+
+  /*
+    El objetivo del mes y cómo se va respecto a él, en la misma columna.
+
+    Se alimenta a mano desde Objetivos y respeta los filtros de sociedad y
+    comercial, igual que en el resumen: sin nada marcado es el del grupo; con
+    algo marcado, la suma de lo suyo. Un mes sin objetivo puesto se queda en
+    raya, que es distinto de un objetivo de cero.
+  */
+  const objetivosDelAno = period.year !== null ? targetsFor(ctx.targets, period.year, filters.companies, filters.repKeys) : null;
+  const objetivoDelMes = (row: MonthRow) => {
+    if (!objetivosDelAno) return null;
+    const mes = Number(row.key.slice(5, 7));
+    return objetivosDelAno[mes - 1] ?? null;
+  };
+  const hayObjetivos = Boolean(objetivosDelAno?.some((valor) => valor !== null && valor > 0));
   /*
     Los totales de cada tabla se suman de sus propias filas y no del modelo:
     así la fila de Total es exactamente lo que hay encima, incluso cuando la
@@ -54,12 +86,39 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const beforeOf = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
   const monthColumns: Column<MonthRow>[] = [
     { key: "mes", header: "Mes", text: true, render: (row) => <span className="sales-capitalize">{period.multiYear ? monthWithYear(row.key) : monthName(row.key)}</span>, sort: (row) => row.key },
-    { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net, total: (rows) => euros(sumBuckets(rows, (row) => row.bucket).net) },
+    { key: "ventas", header: "Ventas", render: (row) => euros(ventaDelMes(row)), sort: (row) => ventaDelMes(row), total: (rows) => euros(rows.reduce((suma, row) => suma + ventaDelMes(row), 0)) },
     ...(monthCompared ? [
       // Cada fila lleva al lado su pareja: con un año contra el anterior, la columna es ese año.
-      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (row.beforeNet ? euros(row.beforeNet) : <span className="muted">—</span>), sort: (row: MonthRow) => row.beforeNet, total: (rows: MonthRow[]) => euros(beforeOf(rows, (row) => row.beforeNet)) },
-      { key: "var", header: "Variación", render: (row: MonthRow) => changeCell(row.bucket.net, row.beforeNet), sort: (row: MonthRow) => variation(row.bucket.net, row.beforeNet) ?? -Infinity, total: (rows: MonthRow[]) => changeCell(sumBuckets(rows, (row) => row.bucket).net, beforeOf(rows, (row) => row.beforeNet)) },
+      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (ventaAnteriorDelMes(row) ? euros(ventaAnteriorDelMes(row)) : <span className="muted">—</span>), sort: (row: MonthRow) => ventaAnteriorDelMes(row), total: (rows: MonthRow[]) => euros(beforeOf(rows, ventaAnteriorDelMes)) },
+      { key: "var", header: "Variación", render: (row: MonthRow) => changeCell(ventaDelMes(row), ventaAnteriorDelMes(row)), sort: (row: MonthRow) => variation(ventaDelMes(row), ventaAnteriorDelMes(row)) ?? -Infinity, total: (rows: MonthRow[]) => changeCell(beforeOf(rows, ventaDelMes), beforeOf(rows, ventaAnteriorDelMes)) },
     ] : []),
+    /*
+      El objetivo del mes y cómo se va respecto a él, juntos en una columna:
+      la cifra que se puso y debajo lo que falta o lo que sobra. Separados en
+      dos columnas había que ir leyendo de una a otra para saber si un mes
+      iba bien.
+
+      La columna entera no sale si no hay ni un objetivo puesto en el año, en
+      vez de una fila de rayas que no dice nada.
+    */
+    ...(hayObjetivos ? [{
+      key: "objetivo",
+      header: "Objetivo",
+      render: (row: MonthRow) => {
+        const objetivo = objetivoDelMes(row);
+        if (objetivo === null || objetivo === 0) return <span className="muted">—</span>;
+        return <>{euros(objetivo)}{changeCell(ventaDelMes(row), objetivo)}</>;
+      },
+      sort: (row: MonthRow) => {
+        const objetivo = objetivoDelMes(row);
+        return objetivo ? variation(ventaDelMes(row), objetivo) ?? -Infinity : -Infinity;
+      },
+      total: (rows: MonthRow[]) => {
+        const objetivo = rows.reduce((suma, row) => suma + (objetivoDelMes(row) ?? 0), 0);
+        if (objetivo === 0) return <span className="muted">—</span>;
+        return <>{euros(objetivo)}{changeCell(beforeOf(rows, ventaDelMes), objetivo)}</>;
+      },
+    }] : []),
     { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "amount") },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "percent") },
     { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket), total: (rows) => discountCell(sumBuckets(rows, (row) => row.bucket)) },
@@ -113,9 +172,17 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
             fechas del periodo entero y no las de lo marcado, que salen arriba:
             si no se dice, parece que una de las dos está mal.
           */
-          subtitle={hayMesMarcado(filters)
-            ? `Salen todos los meses, no solo los marcados, para poder pulsar otro. La columna compara con ${period.baseCompareShort ?? "el periodo anterior"}`
-            : "Pulsa un mes para filtrar todo el panel; pulsa una cabecera para ordenar"}
+          subtitle={<>
+            {hayMesMarcado(filters)
+              ? `Salen todos los meses, no solo los marcados, para poder pulsar otro. La columna compara con ${period.baseCompareShort ?? "el periodo anterior"}`
+              : "Pulsa un mes para filtrar todo el panel; pulsa una cabecera para ordenar"}
+            {/* Si la venta de un mes lleva algo que no viene de Sage, se dice:
+                cuando un número no cuadra manda Sage, y eso solo se sostiene
+                sabiendo qué parte no es suya. */}
+            {hayDeFuera && empresasDeFuera.length > 0
+              ? `. La venta incluye lo de ${empresasDeFuera.join(" y ")}, que no pasa por Sage; el margen y el descuento son solo de Sage`
+              : ""}
+          </>}
           className="panel table-panel sales-board-full"
         >
           <DataTable

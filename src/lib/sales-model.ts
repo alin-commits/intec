@@ -941,3 +941,39 @@ export function yearlyView(input: {
     series: years.map((year, index) => ({ key: `y${year}`, label: String(year), color: yearColors[(years.length - 1 - index) % yearColors.length] })),
   };
 }
+
+/* -------------------------------------------------------------------------
+   Lo que no pasó por Sage
+   ------------------------------------------------------------------------- */
+
+/** Una cifra mensual de una empresa que (todavía) no está en Sage. */
+export type VentaDeFuera = { month: string; company_code: number | null; net_amount: number };
+
+/**
+ * Las de fuera que caen dentro del filtro de sociedad.
+ *
+ * Una empresa que todavía no está en Sage no tiene sociedad, así que cuenta
+ * cuando no hay filtro puesto y desaparece en cuanto se mira una sociedad
+ * concreta: no se la puede colgar de una sociedad que no existe. Es la misma
+ * regla que aplica la función de la base, y por el mismo motivo.
+ */
+export function externasDelFiltro<T extends VentaDeFuera>(lista: T[], companies: number[]): T[] {
+  if (companies.length === 0) return lista;
+  return lista.filter((fila) => fila.company_code !== null && companies.includes(fila.company_code));
+}
+
+/**
+ * Cuánto hay de fuera en cada mes, por "YYYY-MM".
+ *
+ * Hace falta para que la línea del año no caiga a cero en los meses que una
+ * empresa todavía no estaba en Sage: Jender no tiene nada de enero a
+ * septiembre de 2025 porque entró el 6 de octubre.
+ */
+export function externasPorMes(lista: VentaDeFuera[], companies: number[]): Map<string, number> {
+  const mapa = new Map<string, number>();
+  for (const fila of externasDelFiltro(lista, companies)) {
+    const clave = String(fila.month).slice(0, 7);
+    mapa.set(clave, (mapa.get(clave) ?? 0) + Number(fila.net_amount));
+  }
+  return mapa;
+}

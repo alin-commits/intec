@@ -76,6 +76,12 @@ export type ListRequest =
     lleva el código del INE del municipio.
   */
   | { type: "municipio"; ine: string; title: string; description: string }
+  /*
+    Y los de una provincia entera, que es lo que se abre al pulsarla en el
+    mapa de España: el mapa municipal solo está dibujado para la Comunidad
+    Valenciana, pero pulsar Madrid tiene que hacer algo.
+  */
+  | { type: "provincia"; code: string; title: string; description: string }
   | { type: "ofertas"; kind: OfferKind; title: string; description: string }
   | { type: "pedidos"; kind: OrderKind; title: string; description: string };
 

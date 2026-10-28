@@ -74,7 +74,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
     columnas, mismo buscador, misma descarga. Lo único que cambia es de dónde
     salen las filas.
   */
-  const esDeClientes = request?.type === "clientes" || request?.type === "municipio";
+  const esDeClientes = request?.type === "clientes" || request?.type === "municipio" || request?.type === "provincia";
 
   const { period, rpc } = ctx;
   const base = {
@@ -90,10 +90,13 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
     ? { ...base, p_kind: request.kind, p_days: request.days ?? 30, ...conFamilias }
     : request?.type === "municipio"
       ? { ...base, p_ine: request.ine, ...conFamilias }
-      : request ? { ...base, p_kind: request.kind } : null;
+      : request?.type === "provincia"
+        ? { ...base, p_province: request.code, ...conFamilias }
+        : request ? { ...base, p_kind: request.kind } : null;
   const fn = request?.type === "clientes" ? "sage_customer_list"
     : request?.type === "municipio" ? "sage_municipality_customers"
-      : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
+      : request?.type === "provincia" ? "sage_province_customers"
+        : request?.type === "ofertas" ? "sage_offer_list" : "sage_order_list";
   const key = request && args ? JSON.stringify([fn, args, ctx.reloadKey]) : null;
   // Las ofertas y los pedidos ya vienen limitados a 500 a propósito; los clientes
   // pueden ser miles y se piden todos, por páginas, para que cuadre con la cifra.
