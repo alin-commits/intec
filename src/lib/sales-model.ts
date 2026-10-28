@@ -486,22 +486,32 @@ export type SalesTarget = { id: string; year: number; month: number; company_cod
 
 /**
  * Los objetivos de un ámbito exacto, mes a mes (índice 0 = enero; null = sin
- * objetivo). El ámbito es la sociedad y el comercial elegidos: el objetivo del
- * grupo no se reparte solo entre sociedades, porque eso lo decide Dirección.
+ * objetivo).
+ *
+ * El objetivo se pone por sociedad, y sin ninguna marcada es lo que suman:
+ * así el del grupo sale de los de cada una, sin escribirlo dos veces y sin
+ * que haya dos sitios donde cambiarlo. Con una marcada es solo el suyo, que
+ * es lo que hace que mirar Jender compare contra lo de Jender y no contra el
+ * total del grupo.
  */
 export function targetsFor(targets: SalesTarget[], year: number, companies: number[], repKeys: string[]): (number | null)[] {
+  // Sin comerciales marcados, el objetivo del ámbito entero; con varios, la
+  // suma de los suyos, para que el cumplimiento siga queriendo decir lo mismo.
+  const delAmbito = targets.filter((target) => target.year === year && (repKeys.length === 0
+    ? target.rep_key === null
+    : target.rep_key !== null && repKeys.includes(target.rep_key)));
+  const porSociedad = delAmbito.filter((target) => target.company_code !== null);
+  const suyos = companies.length > 0
+    ? porSociedad.filter((target) => companies.includes(target.company_code as number))
+    /*
+      Sin sociedad marcada, lo que suman todas. Y solo si no hay ni una puesta
+      por sociedad, la fila sin sociedad: es el objetivo del grupo escrito a
+      mano, de cuando se guardaba así, y contar las dos cosas a la vez sumaría
+      dos veces el mismo dinero.
+    */
+    : porSociedad.length > 0 ? porSociedad : delAmbito.filter((target) => target.company_code === null);
   const months: (number | null)[] = Array.from({ length: 12 }, () => null);
-  for (const target of targets) {
-    // Sin sociedades marcadas, el objetivo del grupo; con varias, la suma de
-    // las suyas, igual que con los comerciales.
-    const deSuSociedad = companies.length === 0 ? target.company_code === null : target.company_code !== null && companies.includes(target.company_code);
-    if (target.year !== year || !deSuSociedad) continue;
-    // Sin comerciales marcados, el objetivo del ámbito entero; con varios, la
-    // suma de los suyos, para que el cumplimiento siga queriendo decir lo mismo.
-    const suyo = repKeys.length === 0
-      ? target.rep_key === null
-      : target.rep_key !== null && repKeys.includes(target.rep_key);
-    if (!suyo) continue;
+  for (const target of suyos) {
     months[target.month - 1] = (months[target.month - 1] ?? 0) + Number(target.amount);
   }
   return months;

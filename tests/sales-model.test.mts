@@ -243,9 +243,8 @@ test("año contra año: la variación solo cuenta los meses cerrados que tienen 
 
 test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los días", () => {
   const targets: SalesTarget[] = [
-    { id: "a", year: 2026, month: 8, company_code: null, rep_key: null, amount: 1000 },
-    { id: "b", year: 2026, month: 9, company_code: null, rep_key: null, amount: 3000 },
-    { id: "c", year: 2026, month: 9, company_code: 1, rep_key: null, amount: 999 },
+    { id: "a", year: 2026, month: 8, company_code: 1, rep_key: null, amount: 1000 },
+    { id: "b", year: 2026, month: 9, company_code: 1, rep_key: null, amount: 3000 },
   ];
   const months = targetsFor(targets, 2026, [], []);
   assert.equal(months[7], 1000);
@@ -257,7 +256,35 @@ test("targetsFor y targetToDate: el mes en curso cuenta en proporción a los dí
   assert.equal(soFar?.target, 1000 + 3000 * (15 / 30));
   assert.deepEqual(targetToDate(months, 2026, today, 7)?.months, ["2026-08"]);
   assert.equal(targetToDate(months, 2026, today, 0), null);
-  assert.equal(targetsFor(targets, 2026, [1], [])[8], 999);
+});
+
+test("targetsFor: sin sociedad marcada suma las sociedades; con una, solo la suya", () => {
+  const targets: SalesTarget[] = [
+    { id: "a", year: 2026, month: 3, company_code: 1, rep_key: null, amount: 5_800_000 },
+    { id: "b", year: 2026, month: 3, company_code: 2, rep_key: null, amount: 350_000 },
+    { id: "c", year: 2026, month: 4, company_code: 1, rep_key: null, amount: 100 },
+  ];
+  // El objetivo del grupo sale de los de cada sociedad, sin escribirlo aparte.
+  assert.equal(targetsFor(targets, 2026, [], [])[2], 6_150_000);
+  // Y marcar una sociedad compara contra la suya, no contra el total: es justo
+  // lo que hacía que el cumplimiento de Jender saliera ridículo.
+  assert.equal(targetsFor(targets, 2026, [2], [])[2], 350_000);
+  assert.equal(targetsFor(targets, 2026, [1], [])[2], 5_800_000);
+  assert.equal(targetsFor(targets, 2026, [1, 2], [])[2], 6_150_000);
+  // Un mes con el objetivo de una sola sociedad sale con el suyo.
+  assert.equal(targetsFor(targets, 2026, [], [])[3], 100);
+  assert.equal(targetsFor(targets, 2026, [2], [])[3], null);
+  // Y una sociedad sin objetivo puesto no hereda el del grupo.
+  assert.equal(targetsFor(targets, 2026, [3], [])[2], null);
+});
+
+test("targetsFor: la fila sin sociedad solo cuenta mientras no haya ninguna por sociedad", () => {
+  const delGrupo: SalesTarget[] = [{ id: "g", year: 2026, month: 3, company_code: null, rep_key: null, amount: 9000 }];
+  assert.equal(targetsFor(delGrupo, 2026, [], [])[2], 9000);
+  // En cuanto hay una por sociedad manda esa: contar las dos sumaría dos veces
+  // el mismo dinero.
+  const conSociedad: SalesTarget[] = [...delGrupo, { id: "s", year: 2026, month: 3, company_code: 1, rep_key: null, amount: 1000 }];
+  assert.equal(targetsFor(conSociedad, 2026, [], [])[2], 1000);
 });
 
 test("targetsFor con varios comerciales marcados suma los objetivos de cada uno", () => {

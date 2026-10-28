@@ -14,10 +14,13 @@ import { repartirElAno, repartirTrimestre, sumaDe, TRIMESTRES, variacionSobreAnt
 
 /*
   Objetivos: el presupuesto de ventas, que no está en Sage y se pone aquí, y
-  cómo se va contra él. El objetivo es del ámbito elegido arriba: sin sociedad
-  ni comercial es el del grupo; con sociedad, el de esa sociedad; con
-  comercial, el de esa persona. No se reparte solo de uno a otro: eso lo decide
-  Dirección.
+  cómo se va contra él.
+
+  Se pone por sociedad, una a una, y el del grupo es lo que suman: así marcar
+  Jender arriba compara contra el objetivo de Jender y no contra el total, que
+  es la única manera de que el cumplimiento de una sociedad quiera decir algo.
+  Hacia abajo no se reparte solo —de sociedad a comercial lo decide Dirección—,
+  y por eso para cambiar un objetivo hay que dejar marcada su sociedad sola.
 */
 
 const parseAmount = (text: string): number | null => {
@@ -56,7 +59,15 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
   // comerciales habría que decidir cómo se parte, y eso lo dice Dirección.
   const repKey = soloUnComercial(filters);
   const company = soloUno(filters.companies);
-  const editable = filters.repKeys.length <= 1 && filters.companies.length <= 1;
+  /*
+    Y siempre con una sociedad marcada.
+
+    Sin ninguna, lo que se ve es la suma de las sociedades: escribir ahí
+    guardaría un objetivo del grupo aparte que dejaría de leerse en cuanto
+    alguien ponga el de una sociedad, y nadie entendería por qué la cifra que
+    acaba de escribir no aparece en ningún sitio.
+  */
+  const editable = company !== null && filters.repKeys.length <= 1;
   const [draft, setDraft] = useState<string[]>(() => months.map(formatInput));
   const [draftKey, setDraftKey] = useState(scopeKey);
   const [saving, setSaving] = useState(false);
@@ -304,7 +315,9 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
           title="Objetivo por mes"
           subtitle={editable
             ? `De: ${scopeLabel}. Cambia la sociedad o el comercial arriba para poner el suyo`
-            : `De: ${scopeLabel}. Arriba se ve la suma de los objetivos; para cambiar uno, déjalo marcado a él solo`}
+            : filters.companies.length === 0
+              ? `${scopeLabel}: lo que suman las sociedades. Marca una arriba para poner el suyo`
+              : `De: ${scopeLabel}. Esto es la suma; para cambiar un objetivo, deja marcada su sociedad sola`}
           className="panel panel-padded sales-board-narrow"
         >
           <div className="sales-targets-actions">
@@ -382,7 +395,7 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
 
           <div className="sales-targets-footer">
             {message ? <span className={message.tone === "ok" ? "sales-up" : "sales-down"} role="status">{message.text}</span>
-              : <span className="muted">{editable ? "Deja vacío un mes para quitarle el objetivo." : "Los objetivos se ponen de uno en uno: una sociedad y un comercial."}</span>}
+              : <span className="muted">{editable ? "Deja vacío un mes para quitarle el objetivo." : "Los objetivos se ponen por sociedad: marca una sola arriba, y un comercial como mucho."}</span>}
             <button type="button" className="button button-primary" onClick={() => void save()} disabled={saving || !editable}>{saving ? "Guardando…" : "Guardar"}</button>
           </div>
         </Panel>
