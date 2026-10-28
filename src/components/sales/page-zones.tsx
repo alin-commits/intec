@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { numberFormatter } from "@/lib/format";
 import { euros } from "@/lib/sales-model";
-import { CUADRICULA_DE_ESPANA, intensidadDeColor } from "@/lib/zonas-mapa";
+import { NOMBRES_DE_PROVINCIA, intensidadDeColor } from "@/lib/zonas-mapa";
+import { MAPA_ALTO, MAPA_ANCHO, PROVINCIAS_SVG } from "@/lib/zonas-svg";
 import { createClient } from "@/lib/supabase/client";
 import type { SalesContext } from "./sales-context";
 import { DataTable, LoadFailed, Panel, PendingDetail, share, useSageQuery, type Column } from "./sales-ui";
@@ -15,11 +16,12 @@ import { DataTable, LoadFailed, Panel, PendingDetail, share, useSageQuery, type 
   decidir a qué zona mandar a alguien. Con un comercial marcado arriba, todo
   lo de esta página es suyo.
 
-  La provincia no sale del campo «provincia» de Sage, que viene escrito a mano
-  y con 57 grafías distintas para 52 provincias —y que a veces contradice al
-  código postal—, sino de los dos primeros dígitos del CP, que son la
-  provincia por definición. Lo hace la base; aquí solo se pinta. El detalle y
-  los números de por qué están en la migración 202610280001.
+  Ni la provincia ni el municipio salen tal cual vienen de Sage: los escribe
+  quien da de alta la ficha y llegan con 57 grafías para 52 provincias, y con
+  el mismo pueblo escrito de tres maneras. La provincia se saca del código
+  postal y los municipios se unifican por mayúsculas, tildes y la barra
+  bilingüe. Lo hace la base; el porqué y los números están en las migraciones
+  202610280001 y 202610280002.
 */
 
 type ZoneRow = {
@@ -33,12 +35,13 @@ type ZoneRow = {
   municipalities: { name: string; customers: number; net: number }[] | null;
 };
 
-/** Qué mide el mapa: la cantidad de clientes o lo que compran. */
+/** Qué mide el mapa: cuántos clientes hay o cuánto compran. */
 type Medida = "customers" | "net_amount";
 
+/** Cuántos municipios se enseñan al desplegar una provincia. */
+const MUNICIPIOS_A_LA_VISTA = 12;
 
-
-function MapaDeProvincias({ filas, medida, marcada, onMarcar }: {
+function MapaDeEspana({ filas, medida, marcada, onMarcar }: {
   filas: ZoneRow[];
   medida: Medida;
   marcada: string | null;
@@ -46,33 +49,39 @@ function MapaDeProvincias({ filas, medida, marcada, onMarcar }: {
 }) {
   const porCodigo = new Map(filas.map((fila) => [fila.province_code, fila]));
   const maximo = Math.max(0, ...filas.map((fila) => Number(fila[medida])));
-  const comoSeLee = (valor: number) => (medida === "customers" ? `${numberFormatter.format(valor)} clientes` : euros(valor));
+  const comoSeLee = (valor: number) => (medida === "customers"
+    ? `${numberFormatter.format(valor)} ${valor === 1 ? "cliente" : "clientes"}`
+    : euros(valor));
 
   return (
-    <div className="zonas-mapa" role="group" aria-label="Mapa de provincias">
-      {CUADRICULA_DE_ESPANA.map(({ code, corto, col, fila }) => {
-        const dato = porCodigo.get(code);
-        const valor = dato ? Number(dato[medida]) : 0;
-        const peso = intensidadDeColor(valor, maximo);
-        const activa = marcada === code;
-        return (
-          <button
-            key={code}
-            type="button"
-            className={activa ? "zonas-casilla activa" : "zonas-casilla"}
-            style={{ gridColumn: col, gridRow: fila, "--peso": peso } as React.CSSProperties}
-            // El título lleva el nombre entero: las siglas de las matrículas
-            // las lee cualquiera de aquí, pero no todo el mundo sabe que SG es
-            // Segovia.
-            title={dato ? `${dato.province}: ${comoSeLee(valor)}` : "Sin clientes en este periodo"}
-            aria-pressed={activa}
-            onClick={() => onMarcar(activa ? null : code)}
-          >
-            <span className="zonas-sigla">{corto}</span>
-            {valor > 0 ? <span className="zonas-cifra">{medida === "customers" ? numberFormatter.format(valor) : euros(valor)}</span> : null}
-          </button>
-        );
-      })}
+    <div className="zonas-mapa">
+      <svg viewBox={`0 0 ${MAPA_ANCHO} ${MAPA_ALTO}`} className="zonas-svg" role="img"
+           aria-label="Mapa de España con los clientes de cada provincia">
+        {PROVINCIAS_SVG.map(({ code, d }) => {
+          const dato = porCodigo.get(code);
+          const valor = dato ? Number(dato[medida]) : 0;
+          const nombre = NOMBRES_DE_PROVINCIA[code] ?? code;
+          const activa = marcada === code;
+          return (
+            <path
+              key={code}
+              d={d}
+              className={activa ? "zonas-provincia activa" : "zonas-provincia"}
+              style={{ "--peso": intensidadDeColor(valor, maximo) } as React.CSSProperties}
+              onClick={() => onMarcar(activa ? null : code)}
+            >
+              {/* El título es el que sale al pasar por encima; sin librería de
+                  por medio, que un mapa no necesita una. */}
+              <title>{valor > 0 ? `${nombre}: ${comoSeLee(valor)}` : `${nombre}: sin clientes en este periodo`}</title>
+            </path>
+          );
+        })}
+      </svg>
+      <div className="zonas-leyenda">
+        <span className="muted">{medida === "customers" ? "Menos clientes" : "Menos venta"}</span>
+        <span className="zonas-escala" aria-hidden="true" />
+        <span className="muted">{maximo > 0 ? comoSeLee(maximo) : "—"}</span>
+      </div>
     </div>
   );
 }
@@ -103,6 +112,8 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
   const totalVenta = filas.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
   const descuadradas = filas.reduce((suma, fila) => suma + Number(fila.mismatched), 0);
   const sinProvincia = filas.find((fila) => fila.province === "Sin provincia");
+  const conProvincia = filas.filter((fila) => fila.province !== "Sin provincia");
+  const laMarcada = marcada ? filas.find((fila) => fila.province_code === marcada) ?? null : null;
 
   const columnas: Column<ZoneRow>[] = [
     {
@@ -130,6 +141,8 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
       total: () => "100 %",
     },
     {
+      // Distingue «tengo 40 clientes pequeños» de «tengo 4 que valen oro»,
+      // que no es lo mismo a la hora de reforzar una zona.
       key: "media", header: "Media por cliente", optional: true,
       render: (fila) => (Number(fila.customers) > 0 ? euros(Number(fila.net_amount) / Number(fila.customers)) : <span className="muted">—</span>),
       sort: (fila) => (Number(fila.customers) > 0 ? Number(fila.net_amount) / Number(fila.customers) : 0),
@@ -147,7 +160,7 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     <>
       <Panel
         title="Dónde están los clientes"
-        subtitle={`${numberFormatter.format(totalClientes)} clientes con compras en ${ctx.periodName}, repartidos por la provincia de su código postal`}
+        subtitle={`${numberFormatter.format(totalClientes)} clientes con compras en ${ctx.periodName}, repartidos en ${numberFormatter.format(conProvincia.length)} provincias`}
         trailing={
           <label className="zonas-medida">
             <span className="sr-only">Qué pinta el mapa</span>
@@ -160,21 +173,32 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
       >
         {zonas.loading && filas.length === 0
           ? <PendingDetail what="el mapa" />
-          : <MapaDeProvincias filas={filas} medida={medida} marcada={marcada} onMarcar={setMarcada} />}
+          : <MapaDeEspana filas={filas} medida={medida} marcada={marcada} onMarcar={setMarcada} />}
+
+        {laMarcada ? (
+          <p className="zonas-elegida">
+            <strong>{laMarcada.province}</strong>
+            <span>{numberFormatter.format(Number(laMarcada.customers))} clientes</span>
+            <span>{euros(Number(laMarcada.net_amount))}</span>
+            <span className="muted">{share(Number(laMarcada.net_amount), totalVenta)} de la venta</span>
+            <button type="button" className="button button-compact button-secondary" onClick={() => setMarcada(null)}>Quitar</button>
+          </p>
+        ) : null}
+
         {/*
-          Lo que no cuadra se dice, no se esconde: son fichas que se pueden
-          arreglar en Sage, y mientras no se arreglen el mapa las coloca donde
+          Lo que no cuadra se dice, no se esconde: son fichas que se arreglan
+          en Sage, y hasta que se arreglen el mapa coloca cada cliente donde
           dice su código postal.
         */}
-        {descuadradas > 0 || sinProvincia ? (
+        {sinProvincia || descuadradas > 0 ? (
           <p className="muted zonas-aviso">
-            {sinProvincia ? `${numberFormatter.format(Number(sinProvincia.customers))} clientes sin código postal ni provincia, así que no salen en el mapa. ` : ""}
-            {descuadradas > 0 ? `En ${numberFormatter.format(descuadradas)} fichas la provincia escrita no coincide con el código postal; manda el código postal.` : ""}
+            {sinProvincia ? `${numberFormatter.format(Number(sinProvincia.customers))} clientes sin código postal ni provincia: no salen en el mapa, pero sí en la tabla. ` : ""}
+            {descuadradas > 0 ? `En ${numberFormatter.format(descuadradas)} fichas la provincia escrita no coincide con su código postal; manda el código postal.` : ""}
           </p>
         ) : null}
       </Panel>
 
-      <Panel title="Provincias" subtitle="Pulsa una para ver sus municipios">
+      <Panel title="Provincias" subtitle="Pulsa una fila para ver sus municipios">
         <DataTable
           rows={filas}
           columns={columnas}
@@ -185,18 +209,25 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
           expand={(fila) => {
             const municipios = fila.municipalities ?? [];
             if (municipios.length === 0) return null;
+            const aLaVista = municipios.slice(0, MUNICIPIOS_A_LA_VISTA);
+            const resto = municipios.length - aLaVista.length;
             return (
-              <div className="sales-row-detail-inner">
-                <p className="sales-row-detail-title">{fila.province}, municipio a municipio</p>
-                <ol className="zonas-municipios">
-                  {municipios.map((municipio) => (
+              <div className="zonas-detalle">
+                <p className="zonas-detalle-titulo">{fila.province}, municipio a municipio</p>
+                <ul className="zonas-municipios">
+                  {aLaVista.map((municipio) => (
                     <li key={municipio.name}>
-                      <span>{municipio.name}</span>
-                      <strong>{numberFormatter.format(Number(municipio.customers))}</strong>
-                      <span className="muted">{euros(Number(municipio.net))}</span>
+                      <span className="zonas-municipio-nombre">{municipio.name}</span>
+                      <span className="zonas-municipio-clientes">{numberFormatter.format(Number(municipio.customers))}</span>
+                      <span className="zonas-municipio-venta">{euros(Number(municipio.net))}</span>
                     </li>
                   ))}
-                </ol>
+                </ul>
+                {resto > 0 ? (
+                  <p className="muted zonas-detalle-resto">
+                    y {numberFormatter.format(resto)} municipios más, con {euros(municipios.slice(MUNICIPIOS_A_LA_VISTA).reduce((suma, m) => suma + Number(m.net), 0))} entre todos
+                  </p>
+                ) : null}
               </div>
             );
           }}
