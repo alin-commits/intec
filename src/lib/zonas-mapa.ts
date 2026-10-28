@@ -36,3 +36,29 @@ export function intensidadDeColor(valor: number, maximo: number): number {
   if (valor <= 0 || maximo <= 0) return 0;
   return Math.min(1, Math.sqrt(valor / maximo));
 }
+
+/** Las provincias con mapa municipal dibujado: la Comunidad Valenciana. */
+export const PROVINCIAS_CON_MUNICIPIOS = ["03", "12", "46"];
+
+/**
+ * El encuadre que contiene unos trazados, con un margen.
+ *
+ * El mapa municipal viene dibujado con toda la Comunidad Valenciana en el
+ * mismo lienzo. Para enseñar una provincia sola se recorta a lo suyo en vez
+ * de generar un fichero por provincia: los números ya están en los trazados,
+ * solo hay que leerlos.
+ */
+export function encuadreDe(trazados: { d: string }[], margen = 0.04): { x: number; y: number; w: number; h: number } | null {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const t of trazados) {
+    for (const par of t.d.matchAll(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g)) {
+      const x = Number(par[1]), y = Number(par[2]);
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX) || maxX <= minX || maxY <= minY) return null;
+  const ancho = maxX - minX, alto = maxY - minY;
+  const hueco = Math.max(ancho, alto) * margen;
+  return { x: minX - hueco, y: minY - hueco, w: ancho + hueco * 2, h: alto + hueco * 2 };
+}

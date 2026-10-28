@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { numberFormatter } from "@/lib/format";
 import { euros } from "@/lib/sales-model";
-import { NOMBRES_DE_PROVINCIA, intensidadDeColor } from "@/lib/zonas-mapa";
+import { NOMBRES_DE_PROVINCIA, PROVINCIAS_CON_MUNICIPIOS, encuadreDe, intensidadDeColor } from "@/lib/zonas-mapa";
+import { MUNICIPIOS_CV_SVG } from "@/lib/zonas-svg-cv";
 import { MAPA_ALTO, MAPA_ANCHO, PROVINCIAS_SVG } from "@/lib/zonas-svg";
 import { createClient } from "@/lib/supabase/client";
 import type { SalesContext } from "./sales-context";
@@ -37,6 +38,14 @@ type ZoneRow = {
 
 /** Qué mide el mapa: cuántos clientes hay o cuánto compran. */
 type Medida = "customers" | "net_amount";
+
+type MuniRow = {
+  ine: string;
+  name: string;
+  customers: number;
+  net_amount: number;
+  documents: number;
+};
 
 /*
   Al desplegar una provincia salen TODOS sus municipios.
@@ -92,11 +101,58 @@ function MapaDeEspana({ filas, medida, marcada, onMarcar }: {
   );
 }
 
+/*
+  El mapa de una provincia, municipio a municipio.
+
+  Aquí el blanco es la información: un municipio sin clientes rodeado de
+  vecinos azules es exactamente el hueco que se viene a buscar. Por eso se
+  dibujan los 141 de Alicante y no solo aquellos donde hay cartera.
+*/
+function MapaDeMunicipios({ provincia, filas, medida, marcado, onMarcar }: {
+  provincia: string;
+  filas: MuniRow[];
+  medida: Medida;
+  marcado: string | null;
+  onMarcar: (ine: string | null) => void;
+}) {
+  const dibujo = useMemo(() => MUNICIPIOS_CV_SVG.filter((m) => m.ine.startsWith(provincia)), [provincia]);
+  const encuadre = useMemo(() => encuadreDe(dibujo), [dibujo]);
+  const porIne = new Map(filas.map((fila) => [fila.ine, fila]));
+  const maximo = Math.max(0, ...filas.map((fila) => Number(fila[medida])));
+  const comoSeLee = (valor: number) => (medida === "customers"
+    ? `${numberFormatter.format(valor)} ${valor === 1 ? "cliente" : "clientes"}`
+    : euros(valor));
+  if (!encuadre) return null;
+
+  return (
+    <svg viewBox={`${encuadre.x} ${encuadre.y} ${encuadre.w} ${encuadre.h}`} className="zonas-svg zonas-svg-municipios"
+         role="img" aria-label={`Municipios de ${NOMBRES_DE_PROVINCIA[provincia] ?? provincia}`}>
+      {dibujo.map(({ ine, name, d }) => {
+        const dato = porIne.get(ine);
+        const valor = dato ? Number(dato[medida]) : 0;
+        const activo = marcado === ine;
+        return (
+          <path
+            key={ine}
+            d={d}
+            className={activo ? "zonas-municipio activo" : "zonas-municipio"}
+            style={{ "--peso": intensidadDeColor(valor, maximo) } as React.CSSProperties}
+            onClick={() => onMarcar(activo ? null : ine)}
+          >
+            <title>{valor > 0 ? `${name}: ${comoSeLee(valor)}` : `${name}: ningún cliente`}</title>
+          </path>
+        );
+      })}
+    </svg>
+  );
+}
+
 export function ZonesPage({ ctx }: { ctx: SalesContext }) {
   const { period } = ctx;
   const reload = ctx.reloadKey;
   const [medida, setMedida] = useState<Medida>("customers");
   const [marcada, setMarcada] = useState<string | null>(null);
+  const [municipioMarcado, setMunicipioMarcado] = useState<string | null>(null);
 
   const conMeses = ctx.rpc.p_months ? { p_months: ctx.rpc.p_months } : {};
   const conSociedades = ctx.rpc.p_companies ? { p_companies: ctx.rpc.p_companies } : {};
@@ -113,6 +169,17 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
     async () => await createClient().rpc("sage_customer_zones", args),
   );
 
+  /*
+    Los municipios solo se piden cuando se está mirando una provincia que
+    tiene mapa dibujado: no tiene sentido traerse los de Madrid para no poder
+    pintarlos.
+  */
+  const conMapaMunicipal = marcada !== null && PROVINCIAS_CON_MUNICIPIOS.includes(marcada);
+  const municipios = useSageQuery<MuniRow[]>(
+    conMapaMunicipal ? JSON.stringify(["municipios", marcada, args, reload]) : null,
+    async () => await createClient().rpc("sage_customer_municipalities", { p_province: marcada, ...args }),
+  );
+
   const filas = zonas.data ?? [];
   const totalClientes = filas.reduce((suma, fila) => suma + Number(fila.customers), 0);
   const totalVenta = filas.reduce((suma, fila) => suma + Number(fila.net_amount), 0);
@@ -120,6 +187,10 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
   const sinProvincia = filas.find((fila) => fila.province === "Sin provincia");
   const conProvincia = filas.filter((fila) => fila.province !== "Sin provincia");
   const laMarcada = marcada ? filas.find((fila) => fila.province_code === marcada) ?? null : null;
+  const municipioElegido = municipioMarcado
+    ? (municipios.data ?? []).find((fila) => fila.ine === municipioMarcado)
+      ?? { ine: municipioMarcado, name: MUNICIPIOS_CV_SVG.find((m) => m.ine === municipioMarcado)?.name ?? municipioMarcado, customers: 0, net_amount: 0, documents: 0 }
+    : null;
 
   const columnas: Column<ZoneRow>[] = [
     {
@@ -179,7 +250,29 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
       >
         {zonas.loading && filas.length === 0
           ? <PendingDetail what="el mapa" />
-          : <MapaDeEspana filas={filas} medida={medida} marcada={marcada} onMarcar={setMarcada} />}
+          : <MapaDeEspana filas={filas} medida={medida} marcada={marcada} onMarcar={(code) => { setMunicipioMarcado(null); setMarcada(code); }} />}
+
+        {conMapaMunicipal && marcada ? (
+          <div className="zonas-municipal">
+            <p className="zonas-municipal-titulo">
+              <strong>{NOMBRES_DE_PROVINCIA[marcada] ?? marcada}, municipio a municipio</strong>
+              <span className="muted">En blanco, los municipios donde no hay ni un cliente</span>
+            </p>
+            {municipios.loading && !municipios.data
+              ? <PendingDetail what="los municipios" />
+              : municipios.failed
+                ? <p className="muted">No se pudieron cargar los municipios. ¿Está aplicada la migración 202610280003?</p>
+                : <MapaDeMunicipios provincia={marcada} filas={municipios.data ?? []} medida={medida}
+                                    marcado={municipioMarcado} onMarcar={setMunicipioMarcado} />}
+            {municipioElegido ? (
+              <p className="zonas-elegida">
+                <strong>{municipioElegido.name}</strong>
+                <span>{numberFormatter.format(Number(municipioElegido.customers))} clientes</span>
+                <span>{euros(Number(municipioElegido.net_amount))}</span>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {laMarcada ? (
           <p className="zonas-elegida">
@@ -210,7 +303,7 @@ export function ZonesPage({ ctx }: { ctx: SalesContext }) {
           columns={columnas}
           rowKey={(fila) => fila.province_code}
           activeKey={marcada}
-          onRowClick={(fila) => setMarcada(marcada === fila.province_code ? null : fila.province_code)}
+          onRowClick={(fila) => { setMunicipioMarcado(null); setMarcada(marcada === fila.province_code ? null : fila.province_code); }}
           initialSort={{ key: medida === "customers" ? "clientes" : "venta", desc: true }}
           expand={(fila) => {
             const municipios = fila.municipalities ?? [];

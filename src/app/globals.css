@@ -2599,3 +2599,18 @@ button.text-link { border: 0; background: none; padding: 0; font: inherit; color
   .zonas-detalle { padding-left: 10px; }
   .zonas-municipios { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* El mapa de una provincia, municipio a municipio. */
+.zonas-municipal { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.zonas-municipal-titulo { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 10px; font-size: 13px; }
+.zonas-municipal-titulo .muted { font-size: 12px; }
+.zonas-svg-municipios { max-width: 440px; }
+/* El borde más fino que en provincias: aquí hay 141 piezas en el mismo hueco
+   y con el trazo de antes el mapa se vuelve una rejilla blanca. */
+.zonas-municipio {
+  fill: color-mix(in srgb, var(--primary) calc(var(--peso, 0) * 100%), white);
+  stroke: var(--border); stroke-width: 0.6; stroke-linejoin: round; cursor: pointer;
+  transition: fill .15s ease, stroke .15s ease;
+}
+.zonas-municipio:hover { stroke: var(--text); stroke-width: 1.4; }
+.zonas-municipio.activo { stroke: var(--text); stroke-width: 1.8; }
