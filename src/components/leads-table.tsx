@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { DateField } from "@/components/ui/date-field";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { LEADS_ROLES, LEAD_ASSIGN_ROLES, hasAnyRole, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
+import { LEADS_ROLES, LEAD_ASSIGN_ROLES, hasAnyRole, leadLossReasonOrder, leadStatusLabels, leadTypeLabels, type LeadTypeValue } from "@/lib/constants";
 import { downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, campaigns as demoCampaigns, demoLeads } from "@/lib/demo-data";
 import { writeRows } from "@/lib/supabase/write";
@@ -14,7 +14,7 @@ import { exportLeadReportPdf } from "@/lib/lead-report-pdf";
 import { dateKeyInMadrid, inDateKeyRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { AppRole, BusinessUnit, Lead, LeadStatus, LossReason } from "@/lib/types";
+import type { AppRole, BusinessUnit, Lead, LeadStatus, LossReason, LossReasonSource } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -29,7 +29,8 @@ import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon, SearchI
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER } from "@/lib/leads/atencion";
-import { MotivoDePerdidaCampos, motivoEnTexto } from "@/components/motivo-de-perdida";
+import { MotivoDePerdidaCampos, motivoDeLoGuardado, motivoEnTexto } from "@/components/motivo-de-perdida";
+import { PorQueSePierden } from "@/components/por-que-se-pierden";
 import { faltaEnElMotivo, MOTIVO_VACIO, motivoParaGuardar, type MotivoEscrito } from "@/lib/por-cerrar";
 
 const STORAGE_KEY = "intec-demo-leads";
@@ -403,7 +404,7 @@ export function LeadsTable() {
       fetchAllPages<{ lead_id: string; profile_id: string }>((from, to) => supabase.from("lead_assignees").select("lead_id, profile_id").order("lead_id").order("profile_id").range(from, to)),
       // El motivo de pérdida, aparte por lo mismo: sin su migración, la lista
       // de leads se carga igual y solo falta el motivo.
-      fetchAllPages<{ id: string; lost_reason: LossReason; lost_detail: string | null }>((from, to) => supabase.from("leads").select("id, lost_reason, lost_detail").not("lost_reason", "is", null).order("id").range(from, to)),
+      fetchAllPages<{ id: string; lost_reason: LossReason; lost_detail: string | null; lost_reason_source: LossReasonSource | null }>((from, to) => supabase.from("leads").select("id, lost_reason, lost_detail, lost_reason_source").not("lost_reason", "is", null).order("id").range(from, to)),
     ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar los datos."));
@@ -426,7 +427,7 @@ export function LeadsTable() {
     setRows((leadData ?? []).map((row) => {
       const lead = mapLeadRow(row as Record<string, unknown>, asignados);
       const motivo = motivos.get(lead.id);
-      return motivo ? { ...lead, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail } : lead;
+      return motivo ? { ...lead, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail, lostReasonSource: motivo.lost_reason_source } : lead;
     }));
     // El gasto es un extra: si falla, la lista de leads se enseña igual.
     const { rows: gasto } = await loadAdsSpendByMonth(supabase);
@@ -486,7 +487,7 @@ export function LeadsTable() {
       statusHistory: lead.statusHistory,
     });
     setEstadoAlAbrir(lead.status);
-    setMotivoFicha({ reason: lead.lostReason ?? "", detail: lead.lostDetail ?? "" });
+    setMotivoFicha(motivoDeLoGuardado(lead.lostReason, lead.lostDetail, lead.lostReasonSource));
     setEditorOpen(true);
     setMessage(null);
   }
@@ -607,7 +608,7 @@ export function LeadsTable() {
   function askStatusChange(lead: Lead, status: LeadStatus) {
     setPendingStatus({ lead, status });
     setPendingValue(lead.saleValue === null ? "" : String(lead.saleValue));
-    setPendingMotivo({ reason: lead.lostReason ?? "", detail: lead.lostDetail ?? "" });
+    setPendingMotivo(motivoDeLoGuardado(lead.lostReason, lead.lostDetail, lead.lostReasonSource));
   }
 
   async function confirmStatusChange() {
@@ -633,6 +634,7 @@ export function LeadsTable() {
           saleValue,
           lostReason: motivo.lost_reason,
           lostDetail: motivo.lost_detail,
+          lostReasonSource: motivo.lost_reason_source,
           updatedAt: new Date().toISOString(),
           statusHistory: [{ id: `H-${Date.now()}`, previousStatus: lead.status, newStatus: pendingStatus.status, changedAt: new Date().toISOString(), changedByName: "Alín" }, ...(lead.statusHistory ?? [])],
         } : lead);
@@ -858,6 +860,15 @@ export function LeadsTable() {
         <TablePagination page={paginaLeads} pageCount={paginasLeads} total={sortedRows.length} label="leads" onChange={setPagina} />
       </section>
 
+      {/* Por qué se pierden los leads, de lo que se está mirando: mismos
+          filtros que la lista. Las consultas tienen el suyo, aparte. */}
+      <PorQueSePierden
+        titulo="Por qué se pierden los leads"
+        nota="De los leads perdidos que hay en la lista, con los filtros de arriba."
+        perdidos={visibleRows.filter((lead) => lead.status === "lost").map((lead) => ({ reason: lead.lostReason, source: lead.lostReasonSource, value: lead.saleValue }))}
+        orden={leadLossReasonOrder}
+      />
+
       <ConfirmationDialog
         open={Boolean(pendingStatus)}
         title="¿Quieres cambiar el estado del lead?"
@@ -882,7 +893,7 @@ export function LeadsTable() {
         ) : pendingStatus && consultasNote(pendingStatus.lead.status, pendingStatus.status) ? (
           <p className="muted">{consultasNote(pendingStatus.lead.status, pendingStatus.status)}</p>
         ) : null}
-        {pendingStatus?.status === "lost" ? <MotivoDePerdidaCampos value={pendingMotivo} onChange={setPendingMotivo} disabled={busy} /> : null}
+        {pendingStatus?.status === "lost" ? <MotivoDePerdidaCampos tipo="lead" value={pendingMotivo} onChange={setPendingMotivo} disabled={busy} interes={pendingStatus.lead.productInterest} /> : null}
       </ConfirmationDialog>
 
       <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" scrollInside onClose={() => setEditorOpen(false)}>
@@ -899,7 +910,7 @@ export function LeadsTable() {
             <label><span>Estado *</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             {draft.status === "lost" ? (
               <div className="form-field-wide">
-                <MotivoDePerdidaCampos value={motivoFicha} onChange={setMotivoFicha} disabled={!canEdit} obligatorio={estadoAlAbrir !== "lost"} />
+                <MotivoDePerdidaCampos tipo="lead" value={motivoFicha} onChange={setMotivoFicha} disabled={!canEdit} obligatorio={estadoAlAbrir !== "lost"} interes={draft.productInterest} />
               </div>
             ) : null}
 

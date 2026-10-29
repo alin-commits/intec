@@ -828,6 +828,26 @@ td.recent-inquiries-actions > * + * { margin-left: 8px; }
 .por-cerrar-delay { background: #fef3c7; color: #92400e; }
 .por-cerrar-mas { padding: 6px 12px; border: 0; background: none; font-size: 12.5px; }
 /* El motivo de pérdida, debajo del estado en la fila. */
+/* Por qué se pierden: una fila por motivo, con su barra, su cifra y lo que valía. */
+.motivos-reparto { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.motivos-reparto li { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(80px, 2fr) auto auto; align-items: center; gap: 12px; font-size: 13.5px; }
+.motivo-nombre { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.motivo-barra { height: 8px; border-radius: 999px; background: var(--surface-muted); overflow: hidden; }
+.motivo-barra span { display: block; height: 100%; border-radius: 999px; background: #dc2626; }
+.motivo-cifra, .motivo-valor { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.motivo-valor { color: var(--muted); min-width: 90px; }
+.motivos-pie { margin: 12px 0 0; font-size: 12.5px; }
+@media (max-width: 640px) {
+  .motivos-reparto li { grid-template-columns: minmax(0, 1fr) auto; }
+  .motivo-barra { grid-column: 1 / -1; order: 3; }
+}
+/* La IA junto al motivo: el botón, lo que propone y la marca de que lo eligió ella. */
+.motivo-ia { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.motivo-ia-aviso { font-size: 12.5px; line-height: 1.35; }
+.motivo-ia-aviso.is-ok { color: #166534; }
+.motivo-ia-aviso.is-duda { color: #92400e; }
+.motivo-ia-aviso.is-error { color: #b91c1c; }
+.motivo-por-ia { color: #6d28d9; font-style: normal; font-weight: 600; }
 .motivo-perdida-fila { display: block; margin-top: 3px; color: #b91c1c; font-size: 11.5px; line-height: 1.25; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* La línea de apoyo de una tarjeta (el gasto y el coste por lead en Leads) */

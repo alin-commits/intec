@@ -222,12 +222,20 @@ export const contactStatusBadges: Record<InquiryStatus, string> = {
 };
 
 /*
-  Los motivos de pérdida, en el orden en que se ofrecen: primero los que
-  dependen de nosotros —precio, plazo, stock, condiciones—, que son los que se
-  pueden arreglar, y después los del cliente. «Otro» al final, y pide escribir
-  cuál, porque un «otro» sin explicar no le dice nada a nadie.
+  Los motivos de pérdida, una lista para leads y otra para consultas, y en el
+  orden en que se ofrecen: primero los que dependen de nosotros —precio,
+  plazo, stock, condiciones—, que son los que se pueden arreglar, y después
+  los del cliente. «Otro» al final, y pide escribir cuál, porque un «otro» sin
+  explicar no le dice nada a nadie.
+
+  Separadas porque se pierden por cosas distintas. Un lead llega de un
+  anuncio: muchas veces solo quería saber un precio, o deja de contestar, y
+  ahí no hay stock ni condiciones de pago de los que hablar. Una consulta es
+  alguien que ya pidió algo concreto, y se pierde por precio, por plazo o
+  porque no lo tenemos. La base admite en cada tabla solo los suyos.
 */
-export const lossReasonOrder: LossReason[] = ["precio", "plazo", "competencia", "sin_stock", "condiciones", "sin_presupuesto", "no_encaja", "no_contesta", "otro"];
+export const leadLossReasonOrder: LossReason[] = ["precio", "plazo", "competencia", "no_encaja", "sin_presupuesto", "solo_informacion", "no_contesta", "otro"];
+export const inquiryLossReasonOrder: LossReason[] = ["precio", "plazo", "competencia", "sin_stock", "condiciones", "sin_presupuesto", "no_encaja", "no_contesta", "otro"];
 
 export const lossReasonLabels: Record<LossReason, string> = {
   precio: "Precio",
@@ -237,6 +245,7 @@ export const lossReasonLabels: Record<LossReason, string> = {
   condiciones: "Condiciones de pago",
   sin_presupuesto: "Sin presupuesto o lo aplaza",
   no_encaja: "No es lo que necesitaba",
+  solo_informacion: "Solo quería información",
   no_contesta: "Dejó de contestar",
   otro: "Otro motivo",
 };

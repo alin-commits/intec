@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
-import { MotivoDePerdidaCampos, motivoEnTexto } from "@/components/motivo-de-perdida";
-import { faltaEnElMotivo, MOTIVO_VACIO, motivoParaGuardar, type MotivoEscrito } from "@/lib/por-cerrar";
+import { MotivoDePerdidaCampos, motivoDeLoGuardado, motivoEnTexto } from "@/components/motivo-de-perdida";
+import { PorQueSePierden } from "@/components/por-que-se-pierden";
+import { faltaEnElMotivo, MOTIVO_VACIO, motivoParaGuardar, type MotivoEscrito, type MotivoGuardado } from "@/lib/por-cerrar";
 import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
@@ -15,7 +16,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { ReportExportButtons } from "@/components/ui/report-export-buttons";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
-import { CONSULTAS_EDIT_ROLES, CONSULTAS_ROLES, contactStatusBadges, contactStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, inquiryStatusOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
+import { CONSULTAS_EDIT_ROLES, CONSULTAS_ROLES, contactStatusBadges, contactStatusLabels, hasAnyRole, inquiryChannelColors, inquiryChannelLabels, inquiryChannelOrder, inquiryLossReasonOrder, inquiryStatusOrder, saleTypeLabels, saleTypeOrder } from "@/lib/constants";
 import { hayFiltrosPuestos, listaDeConsultas, type OrdenConsultas } from "@/lib/consultas-lista";
 import { downloadCsv, downloadCsvReport, type CsvSummaryItem } from "@/lib/csv-export";
 import { businessUnits as demoBusinessUnits, demoInquiries, demoSalesEntries } from "@/lib/demo-data";
@@ -26,7 +27,7 @@ import { currencyFormatter, displayName, formatDate, formatDateTime, formatPerce
 import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { AppRole, BusinessUnit, InquiryRecord, InquiryStatus, InquiryType, LossReason, SaleType, SalesEntry } from "@/lib/types";
+import type { AppRole, BusinessUnit, InquiryRecord, InquiryStatus, InquiryType, LossReason, LossReasonSource, SaleType, SalesEntry } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { TablePagination } from "@/components/ui/table-pagination";
 
@@ -362,7 +363,7 @@ export function InquiryRegister() {
         supabase.auth.getUser(),
         // El motivo de pérdida, en consulta aparte: sin su migración la lista
         // se carga igual y solo falta el motivo.
-        fetchAllPages<{ id: string; lost_reason: LossReason; lost_detail: string | null }>((from, to) => supabase.from("inquiries").select("id, lost_reason, lost_detail").not("lost_reason", "is", null).gte("created_at", fetchStart).lt("created_at", fetchEnd).order("id").range(from, to)),
+        fetchAllPages<{ id: string; lost_reason: LossReason; lost_detail: string | null; lost_reason_source: LossReasonSource | null }>((from, to) => supabase.from("inquiries").select("id, lost_reason, lost_detail, lost_reason_source").not("lost_reason", "is", null).gte("created_at", fetchStart).lt("created_at", fetchEnd).order("id").range(from, to)),
       ]);
       if (!active) return;
       if (unitError || inquiryError || salesError) {
@@ -376,7 +377,7 @@ export function InquiryRegister() {
       setRecords((inquiryData ?? []).map((row) => {
         const consulta = mapInquiry(row as Record<string, unknown>);
         const motivo = motivos.get(consulta.id);
-        return motivo ? { ...consulta, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail } : consulta;
+        return motivo ? { ...consulta, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail, lostReasonSource: motivo.lost_reason_source } : consulta;
       }));
       setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
@@ -676,6 +677,7 @@ export function InquiryRegister() {
           saleValue,
           lostReason: motivoDeAlta.lost_reason,
           lostDetail: motivoDeAlta.lost_detail,
+          lostReasonSource: motivoDeAlta.lost_reason_source,
         };
       } else {
         const { data, error } = await createClient().from("inquiries").insert({
@@ -692,7 +694,7 @@ export function InquiryRegister() {
           ...(nacePerdida ? motivoDeAlta : {}),
         }).select(COLUMNAS_CONSULTA).single();
         if (error) throw error;
-        newRecord = { ...mapInquiry(data as Record<string, unknown>), lostReason: motivoDeAlta.lost_reason, lostDetail: motivoDeAlta.lost_detail };
+        newRecord = { ...mapInquiry(data as Record<string, unknown>), lostReason: motivoDeAlta.lost_reason, lostDetail: motivoDeAlta.lost_detail, lostReasonSource: motivoDeAlta.lost_reason_source };
       }
       setRecords((current) => [newRecord, ...current]);
 
@@ -771,7 +773,7 @@ export function InquiryRegister() {
     if (!ESTADOS_CON_IMPORTE.includes(status)) { void cambiarEstadoConsulta(record, status, null); return; }
     setPendingStatus({ record, status });
     setPendingStatusValue(record.saleValue === null || record.saleValue === undefined ? "" : String(record.saleValue));
-    setMotivoLista({ reason: record.lostReason ?? "", detail: record.lostDetail ?? "" });
+    setMotivoLista(motivoDeLoGuardado(record.lostReason, record.lostDetail, record.lostReasonSource));
     setMessage(null);
   }
 
@@ -795,12 +797,12 @@ export function InquiryRegister() {
     record: InquiryRecord,
     status: InquiryStatus,
     saleValue: number | null,
-    motivo: { lost_reason: LossReason | null; lost_detail: string | null } = { lost_reason: null, lost_detail: null },
+    motivo: MotivoGuardado = { lost_reason: null, lost_detail: null, lost_reason_source: null },
   ) {
     const anterior = record.status ?? "contactado";
     const valorAnterior = record.saleValue ?? null;
-    const motivoAnterior = { lostReason: record.lostReason ?? null, lostDetail: record.lostDetail ?? null };
-    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status, saleValue, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail } : item));
+    const motivoAnterior = { lostReason: record.lostReason ?? null, lostDetail: record.lostDetail ?? null, lostReasonSource: record.lostReasonSource ?? null };
+    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status, saleValue, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail, lostReasonSource: motivo.lost_reason_source } : item));
     if (!configured) {
       // En la vista de demo no hay disparador: el apunte se simula aquí.
       const saleType = VENTA_DEL_ESTADO[status];
@@ -857,7 +859,7 @@ export function InquiryRegister() {
       notes: record.notes ?? "",
     });
     setEstadoAlAbrirEdicion(record.status ?? "contactado");
-    setMotivoEdicion({ reason: record.lostReason ?? "", detail: record.lostDetail ?? "" });
+    setMotivoEdicion(motivoDeLoGuardado(record.lostReason, record.lostDetail, record.lostReasonSource));
     setMessage(null);
     cargarHistorial(record.id);
   }
@@ -1013,6 +1015,7 @@ export function InquiryRegister() {
             notes: editDraft.notes.trim() || null,
             lostReason: motivoEditado.lost_reason,
             lostDetail: motivoEditado.lost_detail,
+            lostReasonSource: motivoEditado.lost_reason_source,
           }),
         }
         : item));
@@ -1158,7 +1161,7 @@ export function InquiryRegister() {
           "id",
         );
       }
-      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: quickSaleStatus, saleValue: value, lostReason: motivoRapidoGuardado.lost_reason, lostDetail: motivoRapidoGuardado.lost_detail } : item));
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: quickSaleStatus, saleValue: value, lostReason: motivoRapidoGuardado.lost_reason, lostDetail: motivoRapidoGuardado.lost_detail, lostReasonSource: motivoRapidoGuardado.lost_reason_source } : item));
       if (configured) {
         const { data: apunte } = await createClient()
           .from("sales_entries")
@@ -1666,6 +1669,15 @@ export function InquiryRegister() {
           <TablePagination page={paginaConsultasActual} pageCount={paginasConsultas} total={recentInquiries.length} label="consultas" onChange={setPaginaConsultas} />
         </section>
 
+        {/* Por qué se pierden las consultas, del periodo y la marca que se
+            miran. Los leads tienen el suyo, aparte: se pierden por otras cosas. */}
+        <PorQueSePierden
+          titulo="Por qué se pierden las consultas"
+          nota="De las consultas perdidas del periodo, con la marca y el canal elegidos."
+          perdidos={filtered.filter((record) => record.entryMode !== "weekly" && record.status === "perdido").map((record) => ({ reason: record.lostReason, source: record.lostReasonSource, value: record.saleValue }))}
+          orden={inquiryLossReasonOrder}
+        />
+
         <section className="panel table-panel recent-inquiries">
           <div className="panel-heading">
             <div><span className="eyebrow">Control</span><h2>Ventas recientes del periodo</h2></div>
@@ -1906,7 +1918,7 @@ export function InquiryRegister() {
                     : "Se apunta abajo en «Ventas comerciales» con el estado que elijas."}
               </p>
             </div>
-            {pendingStatus.status === "perdido" ? <MotivoDePerdidaCampos value={motivoLista} onChange={setMotivoLista} disabled={busy} /> : null}
+            {pendingStatus.status === "perdido" ? <MotivoDePerdidaCampos tipo="consulta" value={motivoLista} onChange={setMotivoLista} disabled={busy} interes={pendingStatus.record.productInterest} /> : null}
           </>
         ) : null}
       </ConfirmationDialog>
@@ -1938,7 +1950,7 @@ export function InquiryRegister() {
               ) : null}
               {fichaNueva.status === "perdido" ? (
                 <div className="form-field-wide">
-                  <MotivoDePerdidaCampos value={motivoNueva} onChange={setMotivoNueva} />
+                  <MotivoDePerdidaCampos tipo="consulta" value={motivoNueva} onChange={setMotivoNueva} interes={fichaNueva.productInterest} />
                 </div>
               ) : null}
               <label><span>Contacto</span><input value={fichaNueva.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setFichaNueva((actual) => ({ ...actual, contactName: event.target.value }))} /></label>
@@ -1995,7 +2007,7 @@ export function InquiryRegister() {
               ) : null}
               {editDraft.status === "perdido" ? (
                 <div className="form-field-wide">
-                  <MotivoDePerdidaCampos value={motivoEdicion} onChange={setMotivoEdicion} obligatorio={estadoAlAbrirEdicion !== "perdido"} />
+                  <MotivoDePerdidaCampos tipo="consulta" value={motivoEdicion} onChange={setMotivoEdicion} obligatorio={estadoAlAbrirEdicion !== "perdido"} interes={editDraft.productInterest} />
                 </div>
               ) : null}
               <label><span>Contacto</span><input value={editDraft.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setEditDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
@@ -2173,7 +2185,7 @@ export function InquiryRegister() {
                 <input type="number" min="0" step="0.01" placeholder="0,00" value={quickSaleValue} onChange={(event) => setQuickSaleValue(event.target.value)} />
               </label>
             </div>
-            {quickSaleStatus === "perdido" ? <MotivoDePerdidaCampos value={motivoRapido} onChange={setMotivoRapido} disabled={busy} /> : null}
+            {quickSaleStatus === "perdido" ? <MotivoDePerdidaCampos tipo="consulta" value={motivoRapido} onChange={setMotivoRapido} disabled={busy} interes={records.find((item) => item.id === quickSaleInquiryId)?.productInterest ?? null} /> : null}
             {quickSaleUnitRecords.length === 0 ? <p className="muted">No hay consultas recientes registradas para esta unidad.</p> : null}
             <div className="modal-actions">
               <button type="button" className="button button-secondary" onClick={() => setSaleChooserMode("menu")}>Atrás</button>
