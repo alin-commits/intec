@@ -177,6 +177,8 @@ export async function enviarReclamacion(
   let enviado = false;
   let enHilo = false;
   let detalle: string | null = null;
+  /** La conversación en la que ha salido, para reconocer la respuesta. */
+  let conversacion: string | null = null;
   if (salida.via === "graph") {
     const resultado = salida.hilo
       ? await responderEnHilo(salida.hilo, preparado.html, destinatarios)
@@ -184,6 +186,7 @@ export async function enviarReclamacion(
     enviado = resultado.ok;
     enHilo = resultado.enHilo;
     detalle = resultado.error ?? null;
+    conversacion = resultado.conversationId ?? null;
   } else {
     enviado = await sendEmail({ to: destinatarios, subject: preparado.asunto, html: preparado.html, from: REMITENTE_COMPRAS });
     if (!enviado) detalle = "Resend no aceptó el envío.";
@@ -197,8 +200,11 @@ export async function enviarReclamacion(
       ? (salida.redirigido ? `Prueba: desviado a ${salida.redirigido}, el proveedor no lo ha recibido.` : null)
       : (detalle ?? "El envío falló.").slice(0, 2000),
   };
+  // Un correo nuevo no tenía conversación al reservar el turno: se apunta ahora,
+  // que es lo que permite reconocer la respuesta y dejar de reclamar.
   const apuntado = await admin.from("purchase_order_chases")
-    .update({ ...cierre, via: salida.via, in_thread: enHilo }).eq("id", registro.id);
+    .update({ ...cierre, via: salida.via, in_thread: enHilo, ...(conversacion && !salida.hilo ? { conversation_id: conversacion } : {}) })
+    .eq("id", registro.id);
   if (apuntado.error?.code === "42703") {
     await admin.from("purchase_order_chases").update(cierre).eq("id", registro.id);
   } else if (apuntado.error) {

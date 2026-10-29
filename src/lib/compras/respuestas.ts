@@ -63,6 +63,20 @@ export function pareceAutomatico(correo: { subject: string }, cabeceras: Record<
 }
 
 /**
+ * Las conversaciones que hay que mirar: las de las reclamaciones de los
+ * últimos días, sin repetir. Un proveedor puede contestar una semana después,
+ * o contestar primero «lo miro» y la fecha más tarde, así que no basta con lo
+ * de ayer. Lo más viejo ya no se mira: a esas alturas se sigue a mano.
+ */
+export function hilosALeer(reclamaciones: { conversationId: string | null; sentAt: string }[], desdeIso: string): string[] {
+  const hilos = new Set<string>();
+  for (const reclamacion of reclamaciones) {
+    if (reclamacion.conversationId && reclamacion.sentAt >= desdeIso) hilos.add(reclamacion.conversationId);
+  }
+  return [...hilos];
+}
+
+/**
  * Empareja los correos recibidos con las reclamaciones que mandamos.
  *
  * Se empareja por el hilo, que es exacto: la reclamación salió sobre el correo
@@ -102,7 +116,16 @@ export function reconocerRespuestas(input: {
     se descarta entero.
   */
   const nuestroDominio = nuestro.includes("@") ? nuestro.slice(nuestro.indexOf("@")) : "";
-  const deCasa = (quien: string) => quien === nuestro || (nuestroDominio !== "" && quien.endsWith(nuestroDominio));
+  /*
+    Y un remitente sin @ tampoco. Es la dirección interna de Exchange
+    («/O=EXCHANGELABS/…»), con la que aparecen en el hilo nuestros propios
+    correos: la primera vez que se leyeron los hilos enteros, 17 reclamaciones
+    nuestras pasaron por respuestas del proveedor y dejaron sus pedidos como
+    contestados sin que nadie hubiera contestado. Un proveedor siempre escribe
+    desde una dirección con @.
+  */
+  const deCasa = (quien: string) =>
+    !quien.includes("@") || quien === nuestro || (nuestroDominio !== "" && quien.endsWith(nuestroDominio));
   const reconocidas: RespuestaReconocida[] = [];
 
   for (const correo of input.correos) {
@@ -134,7 +157,43 @@ export function reconocerRespuestas(input: {
     reconocidas.push({ correo, companyCode: ultima.companyCode, supplierCode: ultima.supplierCode, orders });
   }
 
-  return reconocidas;
+  // De la más vieja a la más nueva: si en un hilo hay dos, lo último que se
+  // apunta es lo último que dijo el proveedor.
+  return reconocidas.sort((a, b) => a.correo.receivedAt.localeCompare(b.correo.receivedAt));
+}
+
+/** Lo que ya hay apuntado de un pedido, para no pisarlo con algo más viejo. */
+export type SeguimientoApuntado = {
+  year: number;
+  series: string;
+  number: number;
+  confirmed_at: string | null;
+  replied_at: string | null;
+};
+
+/**
+ * A qué pedidos de una respuesta se les apunta lo que ha dicho el proveedor.
+ *
+ * Leyendo los hilos de varias semanas pueden aparecer correos viejos que no se
+ * vieron en su día. Uno así no puede deshacer lo que vino después: si alguien
+ * confirmó la fecha cuando ese correo ya había llegado, o si ya hay apuntada
+ * una respuesta más nueva, ese pedido se deja como está. El correo se guarda
+ * igual, para que se vea; solo no cambia el pedido.
+ */
+export function pedidosQueCambia<P extends { year: number; series: string; number: number }>(
+  pedidos: P[],
+  apuntado: SeguimientoApuntado[],
+  recibido: string,
+): P[] {
+  const llave = (p: { year: number; series: string; number: number }) => `${p.year}-${p.series}-${p.number}`;
+  const porPedido = new Map(apuntado.map((fila) => [llave(fila), fila]));
+  const instante = (iso: string | null) => (iso ? Date.parse(iso) : Number.NEGATIVE_INFINITY);
+  const llegada = Date.parse(recibido);
+  return pedidos.filter((pedido) => {
+    const fila = porPedido.get(llave(pedido));
+    if (!fila) return true;
+    return instante(fila.confirmed_at) <= llegada && instante(fila.replied_at) <= llegada;
+  });
 }
 
 /**

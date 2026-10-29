@@ -160,7 +160,14 @@ type RespuestaRecibida = {
   summary: string | null;
   proposed_on: string | null;
   proposed_sure: boolean | null;
-  orders: { year: number; series: string; number: number }[];
+  /**
+   * Los pedidos del correo. Desde que la IA lee pedido a pedido, cada uno trae
+   * lo que se dijo de él; las respuestas de antes solo traen el número.
+   */
+  orders: {
+    year: number; series: string; number: number;
+    answered?: boolean; proposed_on?: string | null; proposed_sure?: boolean; summary?: string | null;
+  }[];
 };
 
 /** Qué periodo se está mirando. "todo" existe porque el atasco es de hace meses. */
@@ -1101,13 +1108,20 @@ function FichaDelPedido({ fila, lineas, envios, respuestas, hoy }: {
   }
 
   for (const recibida of respuestas) {
-    const fecha = recibida.proposed_on
-      ? `propone el ${recibida.proposed_on}${recibida.proposed_sure ? "" : " (sin confirmar del todo)"}`
-      : null;
+    // Si el correo era de varios pedidos, lo que dijo de este; si no, lo del correo.
+    const suyo = recibida.orders.find((pedido) =>
+      pedido.year === fila.pedido.year && pedido.series === fila.pedido.series && pedido.number === fila.pedido.number);
+    const porPedido = recibida.orders.length > 1 && suyo?.answered !== undefined;
+    const propuesta = porPedido ? suyo?.proposed_on : recibida.proposed_on;
+    const segura = porPedido ? suyo?.proposed_sure : recibida.proposed_sure;
+    const fecha = propuesta ? `propone el ${propuesta}${segura ? "" : " (sin confirmar del todo)"}` : null;
+    const dicho = porPedido
+      ? (suyo?.answered ? suyo.summary || recibida.summary : "De este pedido no dice nada")
+      : recibida.summary;
     hitos.push({
       cuando: recibida.received_at,
       titulo: NOMBRE_DEL_TIPO[recibida.kind] ?? "Correo recibido",
-      detalle: [recibida.summary, fecha, recibida.from_email ? `de ${recibida.from_email}` : null].filter(Boolean).join(" · ") || recibida.subject,
+      detalle: [dicho, fecha, recibida.from_email ? `de ${recibida.from_email}` : null].filter(Boolean).join(" · ") || recibida.subject,
       tono: recibida.kind === "respuesta" ? "entrada" : "aviso",
     });
   }

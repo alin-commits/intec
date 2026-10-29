@@ -151,7 +151,14 @@ export async function buscarCorreoDelPedido(companyCode: number, numero: number)
   return elegirCorreoDelPedido(correos, asunto);
 }
 
-export type ResultadoGraph = { ok: boolean; enHilo: boolean; destinatario: string | null; error?: string };
+export type ResultadoGraph = {
+  ok: boolean;
+  enHilo: boolean;
+  destinatario: string | null;
+  error?: string;
+  /** La conversación en la que ha salido: es por donde se reconocerá la respuesta. */
+  conversationId?: string | null;
+};
 
 /**
  * Responde sobre el hilo del pedido.
@@ -184,7 +191,7 @@ export async function responderEnHilo(correo: CorreoDelPedido, html: string, des
   const enviado = await pedir(`/users/${buzon}/messages/${borrador.id}/send`, { method: "POST" });
   if (!enviado) return { ok: false, enHilo: false, destinatario, error: "Sin acceso a Graph." };
   if (!enviado.ok) return { ok: false, enHilo: false, destinatario, error: (await enviado.text()).slice(0, 300) };
-  return { ok: true, enHilo: true, destinatario };
+  return { ok: true, enHilo: true, destinatario, conversationId: correo.conversationId ?? null };
 }
 
 /** El hilo del último correo enviado con ese asunto, para los que salen sueltos. */
@@ -198,28 +205,40 @@ export async function hiloDelUltimoEnviado(asunto: string): Promise<string | nul
 }
 
 /** Un correo nuevo desde el buzón, cuando no se encuentra el del pedido. */
+/*
+  Un correo nuevo desde el buzón, el de varios pedidos o el que no encuentra el
+  correo original de Sage.
+
+  Se crea como borrador y luego se envía, en vez de mandarlo de una vez: el
+  borrador ya trae su conversación, y es esa conversación la que permite
+  reconocer después la respuesta del proveedor. Mandándolo de una vez no se
+  sabía, y si el proveedor contestaba con fecha nadie se enteraba: el pedido
+  seguía «reclamado» y le llegaba el segundo aviso igualmente.
+*/
 export async function mandarDesdeElBuzon(destinatarios: string[], asunto: string, html: string): Promise<ResultadoGraph> {
   const buzon = encodeURIComponent(buzonDeCompras());
   const destinatario = destinatarios.join(", ");
   if (destinatarios.length === 0) return { ok: false, enHilo: false, destinatario: null, error: "Sin destinatario." };
-  const respuesta = await pedir(`/users/${buzon}/sendMail`, {
+  const creado = await pedir(`/users/${buzon}/messages`, {
     method: "POST",
     body: JSON.stringify({
-      message: {
-        subject: asunto,
-        body: { contentType: "HTML", content: html },
-        toRecipients: destinatarios.map((address) => ({ emailAddress: { address } })),
-      },
-      saveToSentItems: true,
+      subject: asunto,
+      body: { contentType: "HTML", content: html },
+      toRecipients: destinatarios.map((address) => ({ emailAddress: { address } })),
     }),
   });
-  if (!respuesta) return { ok: false, enHilo: false, destinatario, error: "Sin acceso a Graph." };
-  if (!respuesta.ok) return { ok: false, enHilo: false, destinatario, error: (await respuesta.text()).slice(0, 300) };
-  return { ok: true, enHilo: false, destinatario };
+  if (!creado) return { ok: false, enHilo: false, destinatario, error: "Sin acceso a Graph." };
+  if (!creado.ok) return { ok: false, enHilo: false, destinatario, error: (await creado.text()).slice(0, 300) };
+  const borrador = (await creado.json()) as { id: string; conversationId?: string };
+
+  const enviado = await pedir(`/users/${buzon}/messages/${borrador.id}/send`, { method: "POST" });
+  if (!enviado) return { ok: false, enHilo: false, destinatario, error: "Sin acceso a Graph." };
+  if (!enviado.ok) return { ok: false, enHilo: false, destinatario, error: (await enviado.text()).slice(0, 300) };
+  return { ok: true, enHilo: false, destinatario, conversationId: borrador.conversationId ?? null };
 }
 
 /*
-  Leer la bandeja de entrada.
+  Un correo de una conversación nuestra.
 
   Solo lo imprescindible para emparejar: quién escribe, en qué hilo y cuándo.
   El cuerpo se pide después y únicamente de los correos que resultan ser
@@ -234,23 +253,52 @@ export type CorreoEntrante = {
   receivedAt: string;
 };
 
-export async function leerEntrada(desdeIso: string, tope = 200): Promise<CorreoEntrante[]> {
-  const buzon = encodeURIComponent(buzonDeCompras());
-  const filtro = encodeURIComponent(`receivedDateTime ge ${desdeIso}`);
-  const correos: CorreoEntrante[] = [];
-  let ruta: string | null = `/users/${buzon}/mailFolders/inbox/messages?$filter=${filtro}&$select=id,conversationId,from,subject,receivedDateTime&$orderby=receivedDateTime desc&$top=50`;
+/*
+  Los correos de unas conversaciones concretas: las de nuestras reclamaciones.
 
-  while (ruta && correos.length < tope) {
-    const respuesta: Response | null = await pedir(ruta);
+  Antes se miraban los últimos correos de la bandeja —200 de los últimos tres
+  días— y se buscaban ahí las respuestas. En un buzón con tanto movimiento,
+  una respuesta de hace dos días podía quedar más allá de esos 200 y no verse
+  nunca. Preguntando por cada conversación da igual cuánto correo entre, y se
+  mira en todas las carpetas: si una regla mueve la respuesta, se encuentra
+  igual.
+
+  Todas menos Enviados y Borradores, que es lo nuestro. Ahí nuestros correos
+  pueden venir con la dirección interna de Exchange en vez de la de siempre,
+  y así pasaron una vez por respuestas del proveedor.
+*/
+export async function leerHilos(conversaciones: string[], desdeIso: string): Promise<CorreoEntrante[]> {
+  const buzon = encodeURIComponent(buzonDeCompras());
+  const correos: CorreoEntrante[] = [];
+  const nuestras = new Set<string>();
+  for (const carpeta of ["sentitems", "drafts"]) {
+    const respuesta = await pedir(`/users/${buzon}/mailFolders/${carpeta}?$select=id`);
+    if (respuesta?.ok) nuestras.add(((await respuesta.json()) as { id: string }).id);
+  }
+  const unHilo = async (conversacion: string) => {
+    const filtro = encodeURIComponent(`conversationId eq '${conversacion.replace(/'/g, "''")}'`);
+    const ruta = `/users/${buzon}/messages?$filter=${filtro}&$select=id,conversationId,from,subject,receivedDateTime,parentFolderId,isDraft&$top=50`;
+    let respuesta = await pedir(ruta);
+    // Si Microsoft pide esperar, se espera lo que diga y se vuelve a intentar:
+    // un hilo sin leer es una respuesta que no se ve y un pedido que se reclama.
+    for (let intento = 0; respuesta?.status === 429 && intento < 3; intento++) {
+      const segundos = Math.min(Number(respuesta.headers.get("retry-after")) || 2, 10);
+      await new Promise((listo) => setTimeout(listo, segundos * 1000));
+      respuesta = await pedir(ruta);
+    }
     if (!respuesta?.ok) {
-      if (respuesta) console.error("Graph: no se pudo leer la entrada", (await respuesta.text()).slice(0, 300));
-      break;
+      if (respuesta) console.error("Graph: no se pudo leer un hilo", (await respuesta.text()).slice(0, 300));
+      return;
     }
     const datos = (await respuesta.json()) as {
-      value?: { id: string; conversationId?: string; subject?: string; receivedDateTime?: string; from?: { emailAddress?: { address?: string } } }[];
-      "@odata.nextLink"?: string;
+      value?: {
+        id: string; conversationId?: string; subject?: string; receivedDateTime?: string;
+        parentFolderId?: string; isDraft?: boolean; from?: { emailAddress?: { address?: string } };
+      }[];
     };
     for (const mensaje of datos.value ?? []) {
+      if ((mensaje.receivedDateTime ?? "") < desdeIso) continue;
+      if (mensaje.isDraft || (mensaje.parentFolderId && nuestras.has(mensaje.parentFolderId))) continue;
       correos.push({
         id: mensaje.id,
         conversationId: mensaje.conversationId ?? null,
@@ -259,11 +307,11 @@ export async function leerEntrada(desdeIso: string, tope = 200): Promise<CorreoE
         receivedAt: mensaje.receivedDateTime ?? "",
       });
     }
-    // El enlace de la página siguiente viene entero; se recorta a la parte que espera `pedir`.
-    const siguiente = datos["@odata.nextLink"];
-    ruta = siguiente ? siguiente.replace("https://graph.microsoft.com/v1.0", "") : null;
-  }
-  return correos.slice(0, tope);
+  };
+  // De tres en tres: Microsoft no deja más de cuatro peticiones a la vez al
+  // mismo buzón, y con seis cortaba uno de cada cinco hilos.
+  for (let i = 0; i < conversaciones.length; i += 3) await Promise.all(conversaciones.slice(i, i + 3).map(unHilo));
+  return correos;
 }
 
 /** El texto de un correo y sus cabeceras, que son las que delatan a los contestadores. */

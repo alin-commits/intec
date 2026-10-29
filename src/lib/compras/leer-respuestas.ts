@@ -1,10 +1,14 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import { todayKey } from "@/lib/dates";
-import { adjuntosPdf, buzonDeCompras, cuerpoDelCorreo, graphConfigurado, leerEntrada } from "@/lib/compras/graph";
-import { pareceAutomatico, reconocerRespuestas, type CorreoRecibido, type ReclamacionMandada } from "@/lib/compras/respuestas";
+import { dateKeyInMadrid } from "@/lib/dates";
+import { adjuntosPdf, buzonDeCompras, cuerpoDelCorreo, graphConfigurado, leerHilos } from "@/lib/compras/graph";
+import {
+  hilosALeer, pareceAutomatico, pedidosQueCambia, reconocerRespuestas,
+  type CorreoRecibido, type ReclamacionMandada, type SeguimientoApuntado,
+} from "@/lib/compras/respuestas";
 import { iaConfigurada, leerRespuesta } from "@/lib/compras/leer-respuesta";
+import { loQueDiceDeCadaPedido, sinFechasPasadas } from "@/lib/compras/leer-respuesta-prompt";
 
 /*
   Lee lo que contestan los proveedores.
@@ -16,9 +20,10 @@ import { iaConfigurada, leerRespuesta } from "@/lib/compras/leer-respuesta";
 
   Lo que hace, por orden:
 
-   1. Pide los correos recientes de la bandeja de compras.
-   2. Se queda con los que llegan en un hilo donde nosotros reclamamos —eso es
-      exacto, no una suposición— y que no hemos leído ya.
+   1. Pide los correos de las conversaciones en las que hemos reclamado en
+      las últimas semanas, en todas las carpetas del buzón.
+   2. Se queda con los que no son nuestros, llegaron después de reclamar y no
+      hemos leído ya. Va por la conversación, que es exacto, no una suposición.
    3. Pide el cuerpo SOLO de esos. En ese buzón hay casi cuarenta mil correos
       de todo tipo y los demás no se tocan.
    4. Descarta los contestadores automáticos: un "estoy fuera de la oficina"
@@ -33,8 +38,11 @@ import { iaConfigurada, leerRespuesta } from "@/lib/compras/leer-respuesta";
   dejar una respuesta sin detectar.
 */
 
-/** Cuántos días atrás se mira. Tres dan margen a un fin de semana o un festivo. */
-const DIAS_ATRAS = 3;
+/**
+ * Las reclamaciones de cuántos días atrás se siguen mirando. Un proveedor puede
+ * tardar en contestar, o mandar la fecha en un segundo correo días después.
+ */
+const DIAS_DE_HILOS = 45;
 /** Tope de correos a los que se les pide el cuerpo, por si un día llega una avalancha. */
 const MAXIMO_A_LEER = 40;
 
@@ -62,15 +70,15 @@ export function buzonListo(): boolean {
 export async function leerRespuestasDeProveedores(
   admin: SupabaseClient,
 ): Promise<ResumenDeLectura | FalloDeLectura> {
-  const desde = new Date(Date.now() - DIAS_ATRAS * 86400000).toISOString();
+  const desde = new Date(Date.now() - DIAS_DE_HILOS * 86400000).toISOString();
 
-  const [correosDelBuzon, { data: reclamaciones, error: errorReclamaciones }, { data: leidos }] = await Promise.all([
-    leerEntrada(desde),
+  const [{ data: reclamaciones, error: errorReclamaciones }, { data: leidos }] = await Promise.all([
     fetchAllPages<{ conversation_id: string | null; company_code: number; supplier_code: string; sent_at: string; orders: unknown }>(
       (from, to) => admin.from("purchase_order_chases")
         .select("conversation_id, company_code, supplier_code, sent_at, orders")
         .not("conversation_id", "is", null).eq("ok", true).order("sent_at").range(from, to)),
-    admin.from("purchase_order_replies").select("message_id").gte("received_at", desde),
+    fetchAllPages<{ message_id: string }>(
+      (from, to) => admin.from("purchase_order_replies").select("message_id").gte("received_at", desde).order("message_id").range(from, to)),
   ]);
   if (errorReclamaciones) {
     console.error("Leer respuestas: no se pudieron leer las reclamaciones", errorReclamaciones);
@@ -84,6 +92,7 @@ export async function leerRespuestasDeProveedores(
     sentAt: fila.sent_at,
     orders: Array.isArray(fila.orders) ? (fila.orders as ReclamacionMandada["orders"]) : [],
   }));
+  const correosDelBuzon = await leerHilos(hilosALeer(mandadas, desde), desde);
 
   const reconocidas = reconocerRespuestas({
     correos: correosDelBuzon as CorreoRecibido[],
@@ -96,7 +105,6 @@ export async function leerRespuestasDeProveedores(
     mirados: correosDelBuzon.length, reconocidos: reconocidas.length, leidos: 0,
     respuestas: 0, expediciones: 0, automaticos: 0, conFecha: 0, conPdf: 0, sinIa: 0,
   };
-  const hoy = todayKey();
 
   for (const respuesta of reconocidas.slice(0, MAXIMO_A_LEER)) {
     const contenido = await cuerpoDelCorreo(respuesta.correo.id);
@@ -110,14 +118,21 @@ export async function leerRespuestasDeProveedores(
       adjuntos de todo sería tan caro como inútil.
     */
     const adjuntos = automatico ? [] : await adjuntosPdf(respuesta.correo.id);
-    const lectura = automatico ? null : await leerRespuesta({
+    /*
+      El día en que escribieron, no el de hoy. «Se envía hoy», «mañana» o «el
+      lunes» se cuentan desde ahí: un correo del lunes leído el jueves daba el
+      jueves como fecha de envío.
+    */
+    const diaDelCorreo = dateKeyInMadrid(respuesta.correo.receivedAt);
+    const leida = automatico ? null : await leerRespuesta({
       proveedor: respuesta.supplierCode,
       pedidos: respuesta.orders.map((pedido) => `${pedido.series}${pedido.number}`),
       asunto: respuesta.correo.subject,
       cuerpo: contenido.texto,
       adjuntos,
-      hoy,
+      hoy: diaDelCorreo,
     });
+    const lectura = sinFechasPasadas(leida, diaDelCorreo);
     // Si la IA estaba disponible y aun así no contestó —se satura y devuelve
     // 503—, este correo no se da por leído: el pedido se marca igual como
     // contestado, pero la próxima pasada vuelve a intentar el resumen. Si se
@@ -139,6 +154,8 @@ export async function leerRespuestasDeProveedores(
     */
     const propuesta = lectura?.fechaPrevista ?? null;
     const enFirme = Boolean(lectura?.fechaSegura && lectura.fechaPrevista);
+    // Y pedido a pedido, que es lo que se apunta en cada uno.
+    const porPedido = loQueDiceDeCadaPedido(respuesta.orders, lectura);
 
     if (!iaFallo) await admin.from("purchase_order_replies").upsert({
       message_id: respuesta.correo.id,
@@ -153,10 +170,25 @@ export async function leerRespuestasDeProveedores(
       summary: lectura?.resumen?.slice(0, 500) ?? null,
       proposed_on: propuesta,
       proposed_sure: enFirme,
-      orders: respuesta.orders,
+      // Con lo que dijo de cada uno, para enseñarlo en la ficha de cada pedido.
+      orders: porPedido.map((pedido) => ({
+        year: pedido.year, series: pedido.series, number: pedido.number,
+        answered: pedido.contesta, proposed_on: pedido.fechaPrevista, proposed_sure: pedido.fechaSegura, summary: pedido.resumen,
+      })),
     }, { onConflict: "message_id" });
 
     if (!iaFallo) resumen.leidos++;
+
+    // Lo que ya hay apuntado de esos pedidos: un correo viejo no pisa una
+    // confirmación ni una respuesta posteriores.
+    const { data: apuntado } = await admin.from("purchase_order_tracking")
+      .select("year, series, number, confirmed_at, replied_at")
+      .eq("company_code", respuesta.companyCode)
+      .in("number", respuesta.orders.map((pedido) => pedido.number));
+    // Y de los de ese correo, solo aquellos de los que dice algo: si contesta
+    // por dos de cuatro, a los otros dos se les sigue reclamando.
+    const pedidos = pedidosQueCambia(porPedido, (apuntado ?? []) as SeguimientoApuntado[], respuesta.correo.receivedAt)
+      .filter((pedido) => pedido.contesta);
 
     // Un aviso de expedición se guarda y se enseña, pero no es una respuesta:
     // el proveedor sigue sin decir cuándo llega, así que se le sigue reclamando.
@@ -165,16 +197,13 @@ export async function leerRespuestasDeProveedores(
       // Si el aviso trae fecha clara —un preaviso de llegada, por ejemplo—, esa
       // es la mejor fecha que va a dar este pedido: se propone igual que la de
       // una respuesta escrita. Sigue haciendo falta que alguien la acepte.
-      await admin.from("purchase_order_tracking").upsert(
-        respuesta.orders.map((pedido) => ({
-          company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
-          shipping_notice: lectura?.resumen?.slice(0, 500) ?? "Aviso de expedición",
-          shipping_notice_at: respuesta.correo.receivedAt,
-          ...(propuesta ? { proposed_on: propuesta, proposed_sure: enFirme } : {}),
-          updated_at: new Date().toISOString(),
-        })),
-        { onConflict: "company_code,year,series,number" },
-      );
+      await apuntarSeguimiento(admin, pedidos.map((pedido) => ({
+        company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
+        shipping_notice: pedido.resumen?.slice(0, 500) ?? "Aviso de expedición",
+        shipping_notice_at: respuesta.correo.receivedAt,
+        ...(pedido.fechaPrevista ? { proposed_on: pedido.fechaPrevista, proposed_sure: pedido.fechaSegura } : {}),
+        updated_at: new Date().toISOString(),
+      })));
       if (enFirme) resumen.conFecha++;
       continue;
     }
@@ -185,18 +214,34 @@ export async function leerRespuestasDeProveedores(
     // El pedido pasa a contestado. La fecha se queda en propuesta: confirmed_on
     // no se toca aquí, lo hace una persona desde la pantalla.
     const ahora = new Date().toISOString();
-    const { error } = await admin.from("purchase_order_tracking").upsert(
-      respuesta.orders.map((pedido) => ({
-        company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
-        state: "contestado", replied_at: respuesta.correo.receivedAt,
-        proposed_on: propuesta, proposed_sure: enFirme,
-        reply_summary: lectura?.resumen?.slice(0, 500) ?? null,
-        updated_at: ahora,
-      })),
-      { onConflict: "company_code,year,series,number" },
-    );
-    if (error) console.error("Leer respuestas: no se pudo apuntar el seguimiento", error);
+    await apuntarSeguimiento(admin, pedidos.map((pedido) => ({
+      company_code: respuesta.companyCode, year: pedido.year, series: pedido.series, number: pedido.number,
+      state: "contestado", replied_at: respuesta.correo.receivedAt,
+      // Un «gracias» o un «adjunto albarán» después de dar la fecha no la
+      // borra: sin fecha nueva se queda la que ya había.
+      ...(pedido.fechaPrevista ? { proposed_on: pedido.fechaPrevista, proposed_sure: pedido.fechaSegura } : {}),
+      reply_summary: pedido.resumen?.slice(0, 500) ?? null,
+      updated_at: ahora,
+    })));
   }
 
   return resumen;
+}
+
+/*
+  Apunta el seguimiento de los pedidos de un correo, en dos tandas: los que
+  traen fecha y los que no.
+
+  En una sola, PostgREST pone a null en todas las filas las columnas que falten
+  en alguna. Un pedido sin fecha nueva perdía así la que ya tenía, o la tanda
+  entera fallaba —proposed_sure no admite null— y no se apuntaba ninguno: le
+  pasó a un correo de cuatro pedidos en cuanto la fecha empezó a ir por pedido.
+*/
+async function apuntarSeguimiento(admin: SupabaseClient, filas: Record<string, unknown>[]) {
+  const tandas = [filas.filter((fila) => "proposed_on" in fila), filas.filter((fila) => !("proposed_on" in fila))];
+  for (const tanda of tandas) {
+    if (tanda.length === 0) continue;
+    const { error } = await admin.from("purchase_order_tracking").upsert(tanda, { onConflict: "company_code,year,series,number" });
+    if (error) console.error("Leer respuestas: no se pudo apuntar el seguimiento", error);
+  }
 }

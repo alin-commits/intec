@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fechaEnDisputa, pareceAutomatico, reconocerRespuestas, type CorreoRecibido, type ReclamacionMandada } from "../src/lib/compras/respuestas.ts";
+import {
+  fechaEnDisputa, hilosALeer, pareceAutomatico, pedidosQueCambia, reconocerRespuestas,
+  type CorreoRecibido, type ReclamacionMandada,
+} from "../src/lib/compras/respuestas.ts";
 
 const BUZON = "compras@suministrointec.com";
 
@@ -54,6 +57,16 @@ test("lo que escribe cualquiera de la casa tampoco es una respuesta", () => {
   // entero, no que el texto acabe pareciéndose.
   const proveedor = reconocer([correo({ from: "ventas@nosuministrointec.com" })], [reclamacion()]);
   assert.equal(proveedor.length, 1);
+});
+
+test("nuestros propios correos, con la dirección interna de Exchange o sin remitente, no son respuestas", () => {
+  // Así aparecen en el hilo las reclamaciones que salen como correo nuevo.
+  const salen = reconocer([
+    correo({ from: "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=COMPRAS" }),
+    correo({ id: "c2", from: null }),
+    correo({ id: "c3", from: "" }),
+  ], [reclamacion()]);
+  assert.equal(salen.length, 0);
 });
 
 test("un correo anterior a la reclamación no está contestándola", () => {
@@ -131,4 +144,52 @@ test("sin fecha dicha, o con el pedido aún sin confirmar, no se avisa de nada",
 
 test("una fecha con hora se compara por el día", () => {
   assert.equal(fechaEnDisputa({ dicha: "2026-10-27T00:00:00Z", enSage: ["2026-10-27"], sinFecha: 0 }), null);
+});
+
+test("se miran los hilos de las reclamaciones recientes, sin repetir y sin las que no tienen hilo", () => {
+  const hilos = hilosALeer([
+    { conversationId: "h1", sentAt: "2026-10-26T09:00:00Z" },
+    { conversationId: "h1", sentAt: "2026-10-29T09:00:00Z" },
+    { conversationId: null, sentAt: "2026-10-28T09:00:00Z" },
+    { conversationId: "h2", sentAt: "2026-10-28T09:00:00Z" },
+    // De hace más de lo que se mira: ya se sigue a mano.
+    { conversationId: "h0", sentAt: "2026-08-01T09:00:00Z" },
+  ], "2026-09-14T00:00:00Z");
+  assert.deepEqual(hilos.sort(), ["h1", "h2"]);
+});
+
+test("un correo viejo no pisa una fecha confirmada después ni una respuesta más nueva", () => {
+  const pedidos = [
+    { year: 2026, series: "PC", number: 1 },
+    { year: 2026, series: "PC", number: 2 },
+    { year: 2026, series: "PC", number: 3 },
+    { year: 2026, series: "PC", number: 4 },
+  ];
+  const apuntado = [
+    // Confirmado por una persona cuando el correo ya había llegado.
+    { year: 2026, series: "PC", number: 1, confirmed_at: "2026-10-27T10:00:00Z", replied_at: null },
+    // Ya tiene una respuesta más nueva.
+    { year: 2026, series: "PC", number: 2, confirmed_at: null, replied_at: "2026-10-28T10:00:00Z" },
+    // Confirmado antes de que llegara: el proveedor dice algo nuevo y cuenta.
+    { year: 2026, series: "PC", number: 3, confirmed_at: "2026-10-20T10:00:00Z", replied_at: "2026-10-20T09:00:00Z" },
+    // El 4 no tiene nada apuntado.
+  ];
+  const cambian = pedidosQueCambia(pedidos, apuntado, "2026-10-26T12:00:00Z").map((p) => p.number);
+  assert.deepEqual(cambian, [3, 4]);
+});
+
+test("las respuestas salen de la más vieja a la más nueva, para que mande la última", () => {
+  const reclamacion: ReclamacionMandada = {
+    conversationId: "h1", companyCode: 1, supplierCode: "P1", sentAt: "2026-10-20T08:00:00Z",
+    orders: [{ year: 2026, series: "PC", number: 1 }],
+  };
+  const correo = (id: string, receivedAt: string): CorreoRecibido =>
+    ({ id, conversationId: "h1", from: "ventas@proveedor.example", subject: "RE: pedido", receivedAt });
+  const reconocidas = reconocerRespuestas({
+    correos: [correo("nuevo", "2026-10-25T10:00:00Z"), correo("viejo", "2026-10-21T10:00:00Z")],
+    reclamaciones: [reclamacion],
+    yaLeidos: new Set(),
+    buzonPropio: "compras@nuestra.example",
+  });
+  assert.deepEqual(reconocidas.map((r) => r.correo.id), ["viejo", "nuevo"]);
 });
