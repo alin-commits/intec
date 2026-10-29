@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { CampanasIcon, ComprasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, SearchIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
+import { CampanasIcon, ComprasIcon, ConsultasIcon, ConversionIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, SearchIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
 import { AvisoExtension } from "@/components/aviso-extension";
@@ -14,7 +14,7 @@ import { CampanaComercial } from "@/components/campana-comercial";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
-import { CAMPAIGNS_ROLES, CARDS_ROLES, CATALOGOS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CONTRASENAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
+import { AGENCIA_ROLES, CAMPAIGNS_ROLES, CARDS_ROLES, CATALOGOS_ROLES, COMPRAS_ROLES, CONSULTAS_ROLES, CONTRASENAS_ROLES, CRM_ROLES, DASHBOARD_ROLES, LEADS_ROLES, PAYMENTS_ROLES, SALES_ROLES, UNITS_ROLES, hasAnyRole, leTocaElAvisoDeCompras, roleLabels } from "@/lib/constants";
 import { TICKET_VIEW_ROLES } from "@/lib/tickets/constants";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { forgetCurrentProfile, loadCurrentProfile } from "@/lib/supabase/current-profile";
@@ -100,6 +100,8 @@ const departamentos: { id: string; label: string; entradas: Entrada[] }[] = [
     // Campañas, redes sociales, publicidad, mailing y gastos: una entrada con pestañas.
     { href: "/marketing", label: "Marketing", icon: CampanasIcon, roles: CAMPAIGNS_ROLES },
     { href: "/tarjetas", label: "Tarjetas", icon: TarjetasIcon, roles: CARDS_ROLES },
+    // Lo que se invierte en la agencia frente a lo que venden las consultas.
+    { href: "/agencia", label: "Agencia", icon: ConversionIcon, roles: AGENCIA_ROLES },
   ] },
   { id: "informatica", label: "Informática", entradas: [
     { href: "/tickets", label: "Tickets", icon: TicketsIcon, roles: TICKET_VIEW_ROLES },
@@ -128,6 +130,7 @@ const pageTitles: Record<string, string> = {
   "/unidades": "Unidades de negocio",
   "/tickets": "Tickets informáticos",
   "/tarjetas": "Tarjetas de visita",
+  "/agencia": "Agencia",
   "/contrasenas/salud": "Salud del gestor",
   "/contrasenas/accesos": "Accesos al gestor",
   "/contrasenas/auditoria": "Auditoría del gestor",

@@ -111,6 +111,13 @@ export const PAYMENTS_ROLES: AppRole[] = ["admin", "owner", "accounting"];
  */
 export const SAGE_REFRESH_ROLES: AppRole[] = ["admin", "direction", "accounting", "purchasing"];
 export const EXPENSES_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
+/**
+ * Agencia: lo que se invierte en ella frente a lo que venden las consultas.
+ * Tiene que cuadrar con las políticas de agency_budget_lines y con
+ * agency_inquiry_summary en la base de datos.
+ */
+export const AGENCIA_ROLES: AppRole[] = ["admin", "marketing", "direction"];
+export const AGENCIA_EDIT_ROLES: AppRole[] = ["admin", "marketing"];
 /** Manages the password vault: permissions and audit log (not access to personal entries). */
 export const VAULT_ADMIN_ROLES: AppRole[] = ["vault_admin"];
 /** Everyone except the employee role, whose only page is Contraseñas. */
