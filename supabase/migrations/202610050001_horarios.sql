@@ -31,7 +31,7 @@ create table if not exists public.staff_departments (
 create table if not exists public.staff_members (
   id uuid primary key default gen_random_uuid(),
   department_id uuid not null references public.staff_departments(id) on delete restrict,
-  -- El nombre que sale en el cuadrante, que es el corto: "JUAN CARLOS", no el
+  -- El nombre que sale en el cuadrante, que es el corto: "Ana Soler", no el
   -- nombre completo del contrato.
   display_name text not null,
   -- Si además tiene cuenta en la aplicación, se ata; la mayoría de la plantilla

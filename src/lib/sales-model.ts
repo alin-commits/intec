@@ -327,8 +327,8 @@ export const signedEuros = (value: number) => `${value >= 0 ? "+" : "-"}${euros(
 
 /**
  * En Sage la misma persona está dada de alta varias veces: un código por
- * sociedad y, a veces, el nombre a medias. "SERGIO ALMODOVAR", "Sergio
- * Almodovar" y "Sergio Almodóvar Alcaraz" son uno solo, y salían en tres
+ * sociedad y, a veces, el nombre a medias. Con nombres inventados: "PABLO
+ * SOLIS", "Pablo Solis" y "Pablo Solís Ibarra" son uno solo, y salían en tres
  * filas distintas.
  *
  * Se juntan los que se escriben igual salvo tildes y mayúsculas, y también
@@ -336,9 +336,9 @@ export const signedEuros = (value: number) => `${value >= 0 ? "+" : "-"}${euros(
  * del nombre sin apellido. Se queda el más completo.
  *
  * Lo de las palabras enteras evita juntar a quien comparte el nombre de pila:
- * "Juan López" y "Juan Antonio López Toral" siguen siendo dos personas. Lo
+ * "Ana Beltrán" y "Ana María Beltrán Roca" siguen siendo dos personas. Lo
  * que la regla no distingue es un apellido añadido de verdad: si algún día
- * hay un "Juan López Martínez" que no sea Juan López, se juntarían.
+ * hay un "Ana Beltrán Roca" que no sea Ana Beltrán, se juntarían.
  */
 export function buildRepIdentities(reps: Rep[]): Map<string, { key: string; label: string }> {
   const plain = (name: string) =>

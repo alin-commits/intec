@@ -29,8 +29,8 @@ import {
 } from "../src/lib/sales-model.ts";
 
 const reps: Rep[] = [
-  { company_code: 1, code: 5, name: "SERGIO ALMODOVAR", is_person: true },
-  { company_code: 2, code: 9, name: "Sergio Almodóvar Alcaraz", is_person: true },
+  { company_code: 1, code: 5, name: "PABLO SOLIS", is_person: true },
+  { company_code: 2, code: 9, name: "Pablo Solís Ibarra", is_person: true },
   { company_code: 1, code: 7, name: "Ana Ruiz", is_person: true },
 ];
 const identities = buildRepIdentities(reps);
@@ -178,7 +178,7 @@ test("el panel señala al comercial que más rebaja y la subida del descuento", 
   assert.ok((model.currentDiscount?.percent ?? 0) > 17);
   assert.equal(model.hasCommissions, false, "sin comisiones en Sage no se enseña la columna");
   const texts = model.findings.map((finding) => finding.text);
-  assert.ok(texts.some((text) => text.startsWith("Sergio Almodóvar Alcaraz rebaja un 30,0 %")), texts.join(" | "));
+  assert.ok(texts.some((text) => text.startsWith("Pablo Solís Ibarra rebaja un 30,0 %")), texts.join(" | "));
   assert.ok(texts.some((text) => text.startsWith("El descuento medio sube")), texts.join(" | "));
   assert.ok(texts.some((text) => text.includes("del mismo tramo de 2025")), texts.join(" | "));
   assert.equal(texts.some((text) => text.startsWith("Ana Ruiz rebaja")), false, "Ana está en la media");
@@ -201,7 +201,7 @@ test("comparar con otras fechas: cada mes con su pareja y qué explica la difere
   assert.equal(model.monthly.months[0].beforeNet, 2000);
   assert.equal(model.monthly.currentMonth, null, "un periodo cerrado no tiene mes en curso");
   // Sergio baja 1.000 y Ana sube 2.500: la lista va de lo que más sube a lo que más baja.
-  assert.deepEqual(model.differences?.rep.map((item) => [item.label, item.change]), [["Ana Ruiz", 2500], ["Sergio Almodóvar Alcaraz", -1000]]);
+  assert.deepEqual(model.differences?.rep.map((item) => [item.label, item.change]), [["Ana Ruiz", 2500], ["Pablo Solís Ibarra", -1000]]);
   assert.deepEqual(model.differences?.channel.map((item) => item.key), ["Crédito", "Tienda"]);
   // Con un mes marcado se compara con el de justo antes, que está en las filas
   // de lo que se mira y no en las del periodo de al lado: marzo vendió 1.000.

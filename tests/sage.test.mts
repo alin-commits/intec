@@ -21,7 +21,7 @@ const oldAgentBody = {
   coveredFrom: "2026-09-26",
   coveredTo: "2026-09-28",
   companies: [{ code: 1, name: "SUMINISTROS INTEC, S.L.", isActive: true }],
-  reps: [{ companyCode: 1, code: 5, name: "Sergio Almodóvar", isPerson: true }],
+  reps: [{ companyCode: 1, code: 5, name: "Pablo Solís", isPerson: true }],
   sales: [
     { companyCode: 1, basis: "albaran", day: "2026-09-28", series: "CRE", repCode: 5, documents: 3, netAmount: 1500.25, costAmount: 1000, vatAmount: 315.05, netWithoutCost: 0 },
     { companyCode: 1, basis: "albaran", day: "2026-09-28", series: "TK", repCode: null, documents: 1, netAmount: -20, costAmount: -12, vatAmount: -4.2 },
