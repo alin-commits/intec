@@ -34,19 +34,35 @@ export type Cuenta = { documentos: number; neto: number };
 
 export type Destino = Cuenta & { key: string; label: string };
 
-/** Lo que hace un comercial y para quién cuenta. */
+/**
+ * Un comercial, por las dos caras: lo que hace y lo que entra en su
+ * facturación. No coinciden porque muchos clientes ya tienen comercial: un
+ * albarán que hace uno para un cliente de otro cuenta en la facturación del
+ * otro.
+ */
 export type FilaDeComercial = {
   key: string;
   label: string;
+  /** Los albaranes que hace él. */
   hechos: Cuenta;
-  /** Se le apuntan a él mismo. */
+  /** De los que hace, los que van a su facturación. */
   propios: Cuenta;
-  /** Se le apuntan a otro comercial. Es lo que se quiere ver. */
+  /** De los que hace, los que se facturan a otro comercial. Es lo que se quiere ver. */
   paraOtros: Cuenta;
-  /** El cliente no tiene comercial, o tiene uno de los códigos comodín de Sage. */
+  /** De los que hace, los de clientes sin comercial o con un código comodín de Sage. */
   sinComercial: Cuenta;
   /** A qué otros comerciales, de más a menos albaranes. */
   aQuien: Destino[];
+  /** Todo lo que entra en su facturación, lo haya hecho quien sea. */
+  enSuFacturacion: Cuenta;
+  /**
+   * De lo que entra en su facturación, lo que hizo otro: otro comercial u
+   * oficina. Lo de usuarios sin decir quiénes son no cuenta aquí: no se sabe
+   * si fue él.
+   */
+  hechosPorOtros: Cuenta;
+  /** Quién le hizo esos, de más a menos. */
+  deQuien: Destino[];
 };
 
 export type AutorSinDecir = Cuenta & { author: string; nombre: string };
@@ -66,6 +82,8 @@ export type RepartoDeAutores = {
 export type AutorVisto = Cuenta & { author: string; nombre: string };
 
 const SIN_AUTOR = "desconocido";
+/** La clave de la oficina entre los que hacen albaranes para un comercial. */
+const OFICINA = "oficina";
 
 const vacia = (): Cuenta => ({ documentos: 0, neto: 0 });
 
@@ -74,7 +92,7 @@ function sumar(cuenta: Cuenta, fila: FilaDeAutor) {
   cuenta.neto += Number(fila.net_amount);
 }
 
-function sumarA(destinos: Map<string, Destino>, quien: RepIdentity, fila: FilaDeAutor) {
+function sumarA(destinos: Map<string, Destino>, quien: { key: string; label: string }, fila: FilaDeAutor) {
   const destino = destinos.get(quien.key) ?? { key: quien.key, label: quien.label, ...vacia() };
   sumar(destino, fila);
   destinos.set(quien.key, destino);
@@ -84,11 +102,15 @@ const deMasAMenos = (destinos: Map<string, Destino>) =>
   [...destinos.values()].sort((a, b) => b.documentos - a.documentos || b.neto - a.neto);
 
 /**
- * Reparte los albaranes por quién los hizo.
+ * Reparte los albaranes por quién los hizo y a quién se le facturan.
  *
  * Un albarán es «para otro» cuando se le apunta a otro comercial de verdad.
  * Los que van sin comercial, o a un código comodín ("GENERAL", "SAT INTEC"),
  * van aparte: no son de nadie, así que tampoco se le quitan a nadie.
+ *
+ * Sale una fila por cada comercial que hace albaranes o que los tiene en su
+ * facturación: uno que no hace ninguno pero al que se los hacen otros también
+ * tiene que verse.
  */
 export function repartirAutores(
   filas: FilaDeAutor[],
@@ -97,7 +119,18 @@ export function repartirAutores(
   nombreDe: (key: string) => string,
 ): RepartoDeAutores {
   const asignados = new Map(quienEs.map((fila) => [fila.author, fila]));
-  const comerciales = new Map<string, FilaDeComercial & { destinos: Map<string, Destino> }>();
+  type Acumulada = FilaDeComercial & { destinos: Map<string, Destino>; origenes: Map<string, Destino> };
+  const comerciales = new Map<string, Acumulada>();
+  const filaDe = (key: string): Acumulada => {
+    const fila = comerciales.get(key) ?? {
+      key, label: nombreDe(key),
+      hechos: vacia(), propios: vacia(), paraOtros: vacia(), sinComercial: vacia(), aQuien: [],
+      enSuFacturacion: vacia(), hechosPorOtros: vacia(), deQuien: [],
+      destinos: new Map<string, Destino>(), origenes: new Map<string, Destino>(),
+    };
+    comerciales.set(key, fila);
+    return fila;
+  };
   const oficina = { hechos: vacia(), aComerciales: vacia(), sinComercial: vacia(), destinos: new Map<string, Destino>() };
   const sinDecir = new Map<string, AutorSinDecir>();
   const sinAutor = vacia();
@@ -105,13 +138,26 @@ export function repartirAutores(
 
   for (const fila of filas) {
     sumar(total, fila);
+    const credito = repOf(fila.company_code, fila.rep_code);
+    const deUnComercial = credito.assigned && credito.isPerson;
+    const quien = fila.author === SIN_AUTOR ? undefined : asignados.get(fila.author);
+
+    // La cara de la facturación: a quién cuenta, y si se lo hizo otro.
+    if (deUnComercial) {
+      const suya = filaDe(credito.key);
+      sumar(suya.enSuFacturacion, fila);
+      const autor = quien?.is_office ? { key: OFICINA, label: "Oficina y tienda" } : quien?.rep_key ? { key: quien.rep_key, label: nombreDe(quien.rep_key) } : null;
+      if (autor && autor.key !== credito.key) {
+        sumar(suya.hechosPorOtros, fila);
+        sumarA(suya.origenes, autor, fila);
+      }
+    }
+
+    // La cara de quién lo hizo.
     if (fila.author === SIN_AUTOR) {
       sumar(sinAutor, fila);
       continue;
     }
-    const credito = repOf(fila.company_code, fila.rep_code);
-    const deUnComercial = credito.assigned && credito.isPerson;
-    const quien = asignados.get(fila.author);
 
     if (quien?.is_office) {
       sumar(oficina.hechos, fila);
@@ -129,24 +175,19 @@ export function repartirAutores(
     }
 
     const key = quien.rep_key;
-    const comercial = comerciales.get(key) ?? {
-      key, label: nombreDe(key),
-      hechos: vacia(), propios: vacia(), paraOtros: vacia(), sinComercial: vacia(),
-      aQuien: [], destinos: new Map<string, Destino>(),
-    };
+    const comercial = filaDe(key);
     sumar(comercial.hechos, fila);
     if (credito.key === key) sumar(comercial.propios, fila);
     else if (deUnComercial) {
       sumar(comercial.paraOtros, fila);
       sumarA(comercial.destinos, credito, fila);
     } else sumar(comercial.sinComercial, fila);
-    comerciales.set(key, comercial);
   }
 
   return {
     comerciales: [...comerciales.values()]
-      .map(({ destinos, ...comercial }) => ({ ...comercial, aQuien: deMasAMenos(destinos) }))
-      .sort((a, b) => b.paraOtros.documentos - a.paraOtros.documentos || b.hechos.documentos - a.hechos.documentos),
+      .map(({ destinos, origenes, ...comercial }) => ({ ...comercial, aQuien: deMasAMenos(destinos), deQuien: deMasAMenos(origenes) }))
+      .sort((a, b) => b.paraOtros.documentos - a.paraOtros.documentos || b.hechos.documentos - a.hechos.documentos || b.enSuFacturacion.documentos - a.enSuFacturacion.documentos),
     oficina: { hechos: oficina.hechos, aComerciales: oficina.aComerciales, sinComercial: oficina.sinComercial, aQuien: deMasAMenos(oficina.destinos) },
     sinDecir: [...sinDecir.values()].sort((a, b) => b.documentos - a.documentos),
     sinAutor,

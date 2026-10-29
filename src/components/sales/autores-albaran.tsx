@@ -20,13 +20,21 @@ import { rpcAllRows } from "./sales-queries";
 import { DataTable, LoadFailed, Panel, RankList, share, useSageQuery, type Column } from "./sales-ui";
 
 /*
-  Quién hace los albaranes y a quién se le apuntan.
+  Albaranes por comercial: los que hace y a quién se facturan.
 
-  La venta se le cuenta al comercial del cliente, pero el albarán lo hace
-  quien lo hace: aquí se ve cuántos hace cada comercial que acaban contando
-  para otro. Quién es cada usuario de Sage se dice aquí mismo, en «Quién es
-  quién»: el número de usuario no es el de comercial y no se puede deducir.
+  La venta se le cuenta al comercial del cliente, y muchos clientes ya tienen
+  uno asignado: el albarán lo hace quien lo hace, pero se factura al del
+  cliente. Aquí se ve, por comercial, cuántos hace, cuántos van a su
+  facturación y cuántos se facturan a otro; y al revés, todo lo que entra en
+  su facturación y cuánto de eso le hicieron otros.
+
+  Quién es cada usuario de Sage se dice aquí mismo, en «Quién es quién»: el
+  número de usuario no es el de comercial y no se puede deducir.
 */
+
+/** Lo que dice la base cuando la función o la tabla todavía no existen: falta la migración. */
+const SIN_PREPARAR = new Set(["PGRST202", "PGRST205", "42P01", "42883"]);
+const sinPreparar = (error: unknown) => SIN_PREPARAR.has(String((error as { code?: string } | null)?.code ?? ""));
 
 const OFICINA = "oficina";
 
@@ -42,6 +50,8 @@ const sumaDe = (filas: FilaDeComercial[], campo: "hechos" | "propios" | "paraOtr
 
 /** "12 · 8,3 %" y los euros debajo: un porcentaje nunca va sin lo que es en dinero. */
 function parte(trozo: Cuenta, de: Cuenta) {
+  // Un comercial que no hace albaranes no tiene de qué sacar el porcentaje.
+  if (de.documentos === 0) return <span className="muted">—</span>;
   return <>{numberFormatter.format(trozo.documentos)} · {share(trozo.documentos, de.documentos)}<span className="sales-change-amount">{euros(trozo.neto)}</span></>;
 }
 
@@ -56,10 +66,19 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   /** Lo apuntado desde que se abrió la página: null es «quitado». */
   const [cambios, setCambios] = useState<Record<string, QuienEs | null>>({});
 
-  const filas = useSageQuery<FilaDeAutor[]>(JSON.stringify(["autores", from, to, ctx.reloadKey]), async () =>
-    await rpcAllRows<FilaDeAutor>("sage_authors_summary", { p_from: from, p_to: to }, ["month", "company_code", "author", "author_name", "rep_code"].map((column) => ({ column }))));
+  /*
+    Si la base todavía no tiene lo de los autores, no es un fallo de carga: es
+    que falta prepararla. Se dice eso, en vez de «no se pudo cargar», que hace
+    pensar que algo se ha roto.
+  */
+  const filas = useSageQuery<{ preparada: boolean; filas: FilaDeAutor[] }>(JSON.stringify(["autores", from, to, ctx.reloadKey]), async () => {
+    const { data, error } = await rpcAllRows<FilaDeAutor>("sage_authors_summary", { p_from: from, p_to: to }, ["month", "company_code", "author", "author_name", "rep_code"].map((column) => ({ column })));
+    if (error && sinPreparar(error)) return { data: { preparada: false, filas: [] }, error: null };
+    return { data: error ? null : { preparada: true, filas: data ?? [] }, error };
+  });
   const apuntados = useSageQuery<QuienEs[]>(JSON.stringify(["quien-es", ctx.reloadKey]), async () => {
     const { data, error } = await createClient().from("sage_author_reps").select("author, rep_key, is_office");
+    if (error && sinPreparar(error)) return { data: [], error: null };
     return { data: data as QuienEs[] | null, error };
   });
 
@@ -79,39 +98,42 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
 
   if (filas.failed || apuntados.failed) {
     return (
-      <Panel title="Quién hace los albaranes" className="panel panel-padded sales-board-full">
-        <LoadFailed what="quién hace cada albarán" />
+      <Panel title="Albaranes por comercial" className="panel panel-padded sales-board-full">
+        <LoadFailed what="los albaranes por comercial" />
       </Panel>
     );
   }
   if (!filas.data || !apuntados.data) {
     return (
-      <Panel title="Quién hace los albaranes" className="panel panel-padded sales-board-full">
+      <Panel title="Albaranes por comercial" className="panel panel-padded sales-board-full">
         <p className="muted">Cargando…</p>
       </Panel>
     );
   }
-  if (filas.data.length === 0) {
+  if (!filas.data.preparada || filas.data.filas.length === 0) {
     return (
-      <Panel title="Quién hace los albaranes" className="panel panel-padded sales-board-full">
+      <Panel title="Albaranes por comercial" className="panel panel-padded sales-board-full">
         <div className="sales-pending">
-          <strong>Pendiente de la próxima lectura de Sage</strong>
+          <strong>{filas.data.preparada ? "Pendiente de la próxima lectura de Sage" : "Falta preparar la base de datos"}</strong>
           <span>
-            Aquí se verá cuántos albaranes hace cada comercial que se le apuntan a otro. Llega en cuanto el programa del
-            servidor de Sage mande quién hace cada albarán. No hace falta hacer nada aquí: se rellena solo.
+            Aquí se verá, por comercial, cuántos albaranes hace, cuántos van a su facturación y cuántos se facturan a otro
+            comercial porque el cliente ya está asignado.{" "}
+            {filas.data.preparada
+              ? "Llega en cuanto el programa del servidor de Sage mande quién hace cada albarán. No hace falta hacer nada aquí: se rellena solo."
+              : "Antes hay que poner en la base de datos la parte que guarda quién hace cada albarán; en cuanto esté, se rellena con la siguiente lectura de Sage."}
           </span>
         </div>
       </Panel>
     );
   }
 
-  const delPeriodo = filas.data.filter((fila) => marcado(filters.companies, fila.company_code) && mesMarcado(filters, fila.month));
+  const delPeriodo = filas.data.filas.filter((fila) => marcado(filters.companies, fila.company_code) && mesMarcado(filters, fila.month));
   const reparto = repartirAutores(delPeriodo, [...quienEs.values()], ctx.repOf, ctx.repName);
   const conComercial = filters.repKeys.length > 0;
   const comerciales = reparto.comerciales.filter((fila) => comercialMarcado(filters, fila.key));
 
   // Todos los autores del periodo cargado, para decir quién es cada uno: los que faltan, primero.
-  const vistos = autoresVistos(filas.data);
+  const vistos = autoresVistos(filas.data.filas);
   const valorDe = (author: string) => {
     const quien = quienEs.get(author);
     return quien?.is_office ? OFICINA : quien?.rep_key ?? "";
@@ -139,15 +161,15 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   };
 
   const columnas: Column<FilaDeComercial>[] = [
-    { key: "comercial", header: "Quién los hace", text: true, render: (fila) => fila.label, sort: (fila) => fila.label },
+    { key: "comercial", header: "Comercial", text: true, render: (fila) => fila.label, sort: (fila) => fila.label },
     { key: "hechos", header: "Albaranes hechos", render: (fila) => cuenta(fila.hechos), sort: (fila) => fila.hechos.documentos, total: (todas) => cuenta(sumaDe(todas, "hechos")) },
     {
-      key: "propios", header: "Propios", optional: true,
+      key: "propios", header: "A su facturación",
       render: (fila) => parte(fila.propios, fila.hechos), sort: (fila) => fila.propios.documentos,
       total: (todas) => parte(sumaDe(todas, "propios"), sumaDe(todas, "hechos")),
     },
     {
-      key: "otros", header: "Para otro comercial",
+      key: "otros", header: "Facturados a otro comercial",
       render: (fila) => <strong>{parte(fila.paraOtros, fila.hechos)}</strong>, sort: (fila) => fila.paraOtros.documentos,
       total: (todas) => parte(sumaDe(todas, "paraOtros"), sumaDe(todas, "hechos")),
     },
@@ -155,6 +177,22 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
       key: "sin", header: "Sin comercial", optional: true,
       render: (fila) => parte(fila.sinComercial, fila.hechos), sort: (fila) => fila.sinComercial.documentos,
       total: (todas) => parte(sumaDe(todas, "sinComercial"), sumaDe(todas, "hechos")),
+    },
+    /*
+      La otra cara: todo lo que entra en su facturación, lo haya hecho quien
+      sea, y cuánto de eso le hicieron otros. Con esto se ve a quien no hace
+      albaranes pero factura, porque otro se los hace.
+    */
+    {
+      key: "factura", header: "En su facturación", sort: (fila) => fila.enSuFacturacion.documentos,
+      render: (fila) => <>
+        {numberFormatter.format(fila.enSuFacturacion.documentos)}
+        <span className="sales-change-amount">
+          {euros(fila.enSuFacturacion.neto)}
+          {fila.hechosPorOtros.documentos > 0 ? ` · ${numberFormatter.format(fila.hechosPorOtros.documentos)} se los hizo otro` : ""}
+        </span>
+      </>,
+      total: (todas) => cuenta({ documentos: todas.reduce((suma, fila) => suma + fila.enSuFacturacion.documentos, 0), neto: todas.reduce((suma, fila) => suma + fila.enSuFacturacion.neto, 0) }),
     },
   ];
 
@@ -204,8 +242,8 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   const oficina = reparto.oficina;
   return (
     <Panel
-      title="Quién hace los albaranes"
-      subtitle={`Albaranes de ${ctx.periodName} según quién los hace en Sage y a qué comercial se le apunta la venta. Pulsa uno para ver a quién${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`}
+      title="Albaranes por comercial"
+      subtitle={`Albaranes de ${ctx.periodName}: los que hace cada comercial en Sage, cuántos van a su facturación y cuántos se facturan a otro porque el cliente ya está asignado. Pulsa uno para ver a quién${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`}
       trailing={(
         <button type="button" className="sales-chip" aria-expanded={conEditor} onClick={() => setEditando((actual) => !actual)}>
           Quién es quién{sinDecir.length > 0 ? ` · ${numberFormatter.format(sinDecir.length)} sin decir` : ""}
@@ -220,18 +258,31 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
         rowKey={(fila) => fila.key}
         activeKey={abierto}
         onRowClick={(fila) => setAbierto((actual) => (actual === fila.key ? null : fila.key))}
-        initialSort={{ key: "otros", desc: true }}
+        initialSort={{ key: "hechos", desc: true }}
         expand={(fila) => (fila.key === abierto ? (
-          <div className="sales-row-detail-inner">
-            <p className="sales-row-detail-title">
-              {fila.aQuien.length > 0 ? `A quién se apuntan los albaranes que ${fila.label} hace para otros` : `${fila.label} no ha hecho albaranes para otros comerciales en este periodo`}
-            </p>
-            {fila.aQuien.length > 0 ? (
-              <RankList items={fila.aQuien.map((destino) => ({
-                key: destino.key, label: destino.label, value: destino.documentos,
-                valueLabel: numberFormatter.format(destino.documentos), extra: euros(destino.neto),
-              }))} />
-            ) : null}
+          <div className="sales-row-detail-inner sales-two-columns">
+            <div>
+              <p className="sales-row-detail-title">
+                {fila.aQuien.length > 0 ? "Los que hace y se facturan a otro: a quién" : "No ha hecho albaranes que se facturen a otro comercial"}
+              </p>
+              {fila.aQuien.length > 0 ? (
+                <RankList items={fila.aQuien.map((destino) => ({
+                  key: destino.key, label: destino.label, value: destino.documentos,
+                  valueLabel: numberFormatter.format(destino.documentos), extra: euros(destino.neto),
+                }))} />
+              ) : null}
+            </div>
+            <div>
+              <p className="sales-row-detail-title">
+                {fila.deQuien.length > 0 ? "Los de su facturación que le hizo otro: quién" : "Nadie le ha hecho albaranes de su facturación (de los usuarios ya asignados)"}
+              </p>
+              {fila.deQuien.length > 0 ? (
+                <RankList items={fila.deQuien.map((origen) => ({
+                  key: origen.key, label: origen.label, value: origen.documentos,
+                  valueLabel: numberFormatter.format(origen.documentos), extra: euros(origen.neto),
+                }))} />
+              ) : null}
+            </div>
           </div>
         ) : null)}
         empty={quienEs.size === 0
