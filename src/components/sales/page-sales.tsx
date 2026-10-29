@@ -71,10 +71,25 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
     raya, que es distinto de un objetivo de cero.
   */
   const objetivosDelAno = period.year !== null ? targetsFor(ctx.targets, period.year, filters.companies, filters.repKeys) : null;
-  const objetivoDelMes = (row: MonthRow) => {
+  const objetivoCompleto = (row: MonthRow) => {
     if (!objetivosDelAno) return null;
     const mes = Number(row.key.slice(5, 7));
     return objetivosDelAno[mes - 1] ?? null;
+  };
+  /*
+    El mes en curso se compara con lo que va de él, no con el mes entero.
+
+    A día 28, comparar veintiocho días de venta contra el objetivo de treinta
+    y uno daba un mes «por debajo» aunque se fuera bien, y contradecía al
+    Resumen y a Objetivos, que ya lo prorratean así: en proporción a los días
+    que han pasado. Los meses cerrados cuentan enteros.
+  */
+  const mesEnCurso = `${ctx.today.getFullYear()}-${String(ctx.today.getMonth() + 1).padStart(2, "0")}`;
+  const objetivoDelMes = (row: MonthRow) => {
+    const completo = objetivoCompleto(row);
+    if (completo === null || row.key !== mesEnCurso) return completo;
+    const dias = new Date(ctx.today.getFullYear(), ctx.today.getMonth() + 1, 0).getDate();
+    return completo * (ctx.today.getDate() / dias);
   };
   const hayObjetivos = Boolean(objetivosDelAno?.some((valor) => valor !== null && valor > 0));
   /*
@@ -107,7 +122,14 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
       render: (row: MonthRow) => {
         const objetivo = objetivoDelMes(row);
         if (objetivo === null || objetivo === 0) return <span className="muted">—</span>;
-        return <>{euros(objetivo)}{changeCell(ventaDelMes(row), objetivo)}</>;
+        // En el mes en curso se dice que es lo que va de él, y de cuánto:
+        // si no, parece que su objetivo ha encogido.
+        const enCurso = row.key === mesEnCurso;
+        return <>
+          {euros(objetivo)}
+          {enCurso ? <small className="muted"> a día {ctx.today.getDate()}, de {euros(objetivoCompleto(row) ?? 0)}</small> : null}
+          {changeCell(ventaDelMes(row), objetivo)}
+        </>;
       },
       sort: (row: MonthRow) => {
         const objetivo = objetivoDelMes(row);

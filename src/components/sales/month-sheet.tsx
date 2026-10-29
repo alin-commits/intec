@@ -8,8 +8,10 @@ import {
   channelLabel,
   emptyBucket,
   euros,
+  externasPorMes,
   filterRows,
   groupRows,
+  marcado,
   monthWithYear,
   sumBuckets,
   ticketFormatter,
@@ -18,6 +20,7 @@ import {
 import { monthEnd } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import type { SalesContext } from "./sales-context";
+import { rpcAllRows } from "./sales-queries";
 import { changeCell, DataTable, LoadFailed, share, useSageQuery, type Column } from "./sales-ui";
 
 /*
@@ -33,7 +36,8 @@ import { changeCell, DataTable, LoadFailed, share, useSageQuery, type Column } f
   el mes no es el sujeto, es el recorte.
 */
 
-type GrupoDeArticulos = { code: string; name: string | null; articles: number; net_amount: number };
+type FamiliaDeSociedad = { company_code: number; family_code: string; units: number; net_amount: number };
+type Familia = { code: string; name: string; units: number; net_amount: number };
 type ClienteDelMes = { company_code: number; customer_code: string; name: string; net_amount: number; documents: number; municipality: string | null };
 
 const sinNada = <span className="muted">—</span>;
@@ -57,7 +61,17 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
   const bucket = fila?.bucket ?? emptyBucket();
   const margen = fila?.margin ?? bucketMargin(bucket);
   const dto = bucketDiscount(bucket);
-  const antes = fila?.beforeNet ?? 0;
+  /*
+    Y la venta con lo que no pasó por Sage, igual que la fila de la tabla:
+    sin esto, en los meses de 2025 en que Jender aún no estaba en Sage la
+    ficha decía una cifra y la fila que se acababa de pulsar otra, y la
+    variación contra el año anterior salía distinta en los dos sitios. El
+    margen y el descuento siguen siendo solo de Sage, como en la tabla.
+  */
+  const fueraDelMes = month ? externasPorMes(ctx.externalSales, filters, ctx.repOf).get(month) ?? 0 : 0;
+  const fueraAntes = fila?.pair ? externasPorMes(ctx.previousExternalSales, filters, ctx.repOf).get(fila.pair) ?? 0 : 0;
+  const ventas = bucket.net + fueraDelMes;
+  const antes = (fila?.beforeNet ?? 0) + fueraAntes;
 
   // El mes entero como tramo: para la base, un mes es de su día 1 al último.
   const desde = month ? `${month}-01` : null;
@@ -69,8 +83,18 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
     bajar a la base ni esperar a nadie: la ficha abre con ellos puestos.
   */
   const delMes = month ? filterRows(ctx.rows, filters, ctx.repOf, ["month"]).filter((row) => row.month === month) : [];
-  const porComercial = ordenar(groupRows(delMes, (row) => ctx.repOf(row.company_code, row.rep_code).label));
-  const porCanal = ordenar(groupRows(delMes, (row) => channelLabel(row.series)));
+  /*
+    Por la clave de la persona y no por su nombre: dos códigos sin ficha en
+    Sage de sociedades distintas se llaman los dos «Código 5» y se habrían
+    sumado como si fueran uno.
+  */
+  const nombreDe = new Map<string, string>();
+  const porComercial = ordenar(groupRows(delMes, (row) => {
+    const quien = ctx.repOf(row.company_code, row.rep_code);
+    nombreDe.set(quien.key, quien.label);
+    return quien.key;
+  }), (clave) => nombreDe.get(clave) ?? clave);
+  const porCanal = ordenar(groupRows(delMes, (row) => channelLabel(row.series)), (canal) => canal);
   const totalDelMes = delMes.reduce((suma, row) => suma + Number(row.net_amount), 0);
 
   /*
@@ -82,32 +106,62 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
     enviárselo no filtraría de menos, fallaría entera.
   */
   const conFiltros = { ...ctx.rpc, p_months: undefined, p_from: desde, p_to: hasta };
-  const paraArticulos = { ...conFiltros, p_series: undefined };
-  const familias = useSageQuery<GrupoDeArticulos[]>(
-    month ? JSON.stringify(["ficha-mes-familias", paraArticulos, ctx.reloadKey]) : null,
+  /*
+    Las familias salen de la misma función que la pestaña Productos, y se
+    juntan igual: una fila por familia y sociedad, que aquí se suman por
+    familia. No de sage_article_groups: esa solo sabe agrupar por subfamilia
+    o por marca, y pedirle «familia» devolvía subfamilias con la etiqueta de
+    familias. La sociedad y la familia se filtran aquí porque la función no
+    las recibe; el canal no lo sabe, y eso se dice en el bloque.
+  */
+  const familiasPorSociedad = useSageQuery<FamiliaDeSociedad[]>(
+    month ? JSON.stringify(["ficha-mes-familias", desde, hasta, ctx.rpc.p_reps, ctx.reloadKey]) : null,
     async () => {
-      const { data, error } = await createClient().rpc("sage_article_groups", { p_group: "familia", ...paraArticulos });
-      return { data: (data ?? []) as GrupoDeArticulos[], error };
+      const { data, error } = await createClient().rpc("sage_family_summary", {
+        p_from: desde, p_to: hasta, ...(ctx.rpc.p_reps ? { p_reps: ctx.rpc.p_reps } : {}),
+      });
+      return { data: (data ?? []) as FamiliaDeSociedad[], error };
     },
   );
+  const familias = (() => {
+    const suma = new Map<string, Familia>();
+    for (const fila of familiasPorSociedad.data ?? []) {
+      if (!marcado(filters.companies, fila.company_code) || !marcado(filters.families, fila.family_code)) continue;
+      const hay = suma.get(fila.family_code) ?? { code: fila.family_code, name: ctx.familyName(fila.family_code), units: 0, net_amount: 0 };
+      hay.units += Number(fila.units);
+      hay.net_amount += Number(fila.net_amount);
+      suma.set(fila.family_code, hay);
+    }
+    return [...suma.values()].sort((a, b) => b.net_amount - a.net_amount);
+  })();
+  /*
+    Los clientes, todos y por páginas: la base corta a mil filas sin avisar,
+    y un mes con más de mil clientes dejaría el Total por debajo de lo que
+    dice la cabecera.
+  */
   const clientes = useSageQuery<ClienteDelMes[]>(
     month ? JSON.stringify(["ficha-mes-clientes", conFiltros, ctx.reloadKey]) : null,
-    async () => {
-      const { data, error } = await createClient().rpc("sage_customer_list", { ...conFiltros, p_kind: "activos", p_days: 30 });
-      return { data: (data ?? []) as ClienteDelMes[], error };
-    },
+    async () => rpcAllRows<ClienteDelMes>("sage_customer_list", { ...conFiltros, p_kind: "activos", p_days: 30 },
+      [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]),
   );
 
   if (!month || !fila || hidden) return null;
 
-  const ventaDeFamilias = (familias.data ?? []).reduce((suma, grupo) => suma + Number(grupo.net_amount), 0);
+  const ventaDeFamilias = familias.reduce((suma, familia) => suma + familia.net_amount, 0);
   const ventaDeClientes = (clientes.data ?? []).reduce((suma, cliente) => suma + Number(cliente.net_amount), 0);
 
   return (
     <Modal open title={monthWithYear(month)} eyebrow="Ficha del mes" onClose={onClose} scrollInside large>
       <div className="month-sheet">
         <section className="month-sheet-kpis">
-          <Cifra titulo="Ventas" valor={euros(bucket.net)} pie={antes > 0 ? changeCell(bucket.net, antes) : <span className="muted">sin {period.baseCompareShort ?? "antes"} con que comparar</span>} />
+          <Cifra
+            titulo="Ventas"
+            valor={euros(ventas)}
+            pie={<>
+              {antes > 0 ? changeCell(ventas, antes) : <span className="muted">sin {period.baseCompareShort ?? "antes"} con que comparar</span>}
+              {fueraDelMes > 0 ? <span className="muted"> · {euros(fueraDelMes)} no pasan por Sage</span> : null}
+            </>}
+          />
           <Cifra titulo="Margen" valor={margen ? euros(margen.amount) : "—"} pie={margen ? <span className="muted">{formatPercent(margen.percent)} del mes</span> : <span className="muted">sin coste cargado</span>} />
           <Cifra titulo="Descuento" valor={dto ? formatPercent(dto.percent) : "—"} pie={dto ? <span className="muted">{euros(dto.amount)} sobre tarifa</span> : <span className="muted">sin tarifa</span>} />
           <Cifra titulo="Albaranes" valor={numberFormatter.format(bucket.documents)} pie={<span className="muted">ticket {ticketFormatter.format(bucket.documents > 0 ? bucket.net / bucket.documents : 0)}</span>} />
@@ -126,11 +180,11 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
         </p>
 
         <div className="month-sheet-grid">
-          <Bloque titulo="Comerciales" nota={`Quién vendió los ${euros(totalDelMes)} del mes`}>
+          <Bloque titulo="Comerciales" nota={fueraDelMes > 0 ? `Quién vendió los ${euros(totalDelMes)} que pasaron por Sage` : `Quién vendió los ${euros(totalDelMes)} del mes`}>
             <DataTable
               rows={porComercial}
               columns={columnasDeReparto(totalDelMes)}
-              rowKey={(row) => row.label}
+              rowKey={(row) => row.clave}
               limit={8}
               empty="Nadie con venta en este mes."
             />
@@ -140,7 +194,7 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
             <DataTable
               rows={porCanal}
               columns={columnasDeReparto(totalDelMes)}
-              rowKey={(row) => row.label}
+              rowKey={(row) => row.clave}
               limit={8}
               empty="Sin canales en este mes."
             />
@@ -148,20 +202,24 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
 
           <Bloque
             titulo="Familias más vendidas"
-            nota={familias.data && ventaDeFamilias > 0 ? `${euros(ventaDeFamilias)} repartidos en ${familias.data.length} familias` : "Qué se vendió"}
+            nota={[
+              familias.length > 0 ? `${euros(ventaDeFamilias)} repartidos en ${familias.length} familias` : "Qué se vendió",
+              // Este reparto no baja a canal: con uno marcado, se dice.
+              filters.channels.length > 0 ? "de todos los canales" : null,
+            ].filter(Boolean).join(", ")}
           >
-            {familias.failed ? <LoadFailed what="las familias del mes" /> : (
+            {familiasPorSociedad.failed ? <LoadFailed what="las familias del mes" /> : (
               <DataTable
-                rows={[...(familias.data ?? [])].sort((a, b) => Number(b.net_amount) - Number(a.net_amount))}
+                rows={familias}
                 columns={[
-                  { key: "familia", header: "Familia", render: (row) => row.name ?? row.code, sort: (row) => row.name ?? row.code, total: (rows) => `Total · ${rows.length} familias` },
-                  { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((suma, row) => suma + Number(row.net_amount), 0)) },
-                  { key: "peso", header: "Peso", render: (row) => share(Number(row.net_amount), ventaDeFamilias), sort: (row) => Number(row.net_amount), total: () => "100 %" },
-                  { key: "articulos", header: "Artículos", optional: true, render: (row) => numberFormatter.format(Number(row.articles)), sort: (row) => Number(row.articles), total: (rows) => numberFormatter.format(rows.reduce((suma, row) => suma + Number(row.articles), 0)) },
-                ] satisfies Column<GrupoDeArticulos>[]}
+                  { key: "familia", header: "Familia", render: (row) => row.name, sort: (row) => row.name, total: (rows) => `Total · ${rows.length} familias` },
+                  { key: "ventas", header: "Ventas", render: (row) => euros(row.net_amount), sort: (row) => row.net_amount, total: (rows) => euros(rows.reduce((suma, row) => suma + row.net_amount, 0)) },
+                  { key: "peso", header: "Peso", render: (row) => share(row.net_amount, ventaDeFamilias), sort: (row) => row.net_amount, total: () => "100 %" },
+                  { key: "unidades", header: "Unidades", optional: true, render: (row) => numberFormatter.format(Math.round(row.units)), sort: (row) => row.units, total: (rows) => numberFormatter.format(Math.round(rows.reduce((suma, row) => suma + row.units, 0))) },
+                ] satisfies Column<Familia>[]}
                 rowKey={(row) => row.code}
                 limit={10}
-                empty={familias.loading ? "Leyendo las familias…" : "Sin artículos con familia en este mes."}
+                empty={familiasPorSociedad.loading ? "Leyendo las familias…" : "Sin ventas por familia en este mes."}
               />
             )}
           </Bloque>
@@ -214,10 +272,12 @@ function Bloque({ titulo, nota, children }: { titulo: string; nota: string; chil
   );
 }
 
-/** De un agrupado a filas ordenadas de más a menos venta. */
-function ordenar(mapa: Map<string, Bucket>): { label: string; bucket: Bucket }[] {
+type Reparto = { clave: string; label: string; bucket: Bucket };
+
+/** De un agrupado a filas ordenadas de más a menos venta, cada una con su nombre. */
+function ordenar(mapa: Map<string, Bucket>, nombre: (clave: string) => string): Reparto[] {
   return [...mapa]
-    .map(([label, bucket]) => ({ label, bucket }))
+    .map(([clave, bucket]) => ({ clave, label: nombre(clave), bucket }))
     .sort((a, b) => b.bucket.net - a.bucket.net);
 }
 
@@ -226,7 +286,7 @@ function ordenar(mapa: Map<string, Bucket>): { label: string; bucket: Bucket }[]
   parte del mes y con qué margen. El peso es lo que de verdad se mira en una
   ficha de un mes —si un mes se sostiene sobre uno solo, se ve aquí—.
 */
-function columnasDeReparto(total: number): Column<{ label: string; bucket: Bucket }>[] {
+function columnasDeReparto(total: number): Column<Reparto>[] {
   return [
     { key: "quien", header: "Nombre", render: (row) => row.label, sort: (row) => row.label, total: (rows) => `Total · ${rows.length}` },
     { key: "ventas", header: "Ventas", render: (row) => euros(row.bucket.net), sort: (row) => row.bucket.net, total: (rows) => euros(rows.reduce((suma, row) => suma + row.bucket.net, 0)) },

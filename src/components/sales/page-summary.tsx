@@ -97,8 +97,16 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     ? targetToDate(targetsFor(ctx.targets, targetYear, filters.companies, filters.repKeys), targetYear, today, monthIndex)
     : null;
   // Solo los meses que tienen objetivo: si falta el de marzo, su venta no cuenta.
+  /*
+    Lo vendido contra el objetivo lleva también lo que no pasó por Sage, igual
+    que la página de Objetivos: si no, Jender en 2025 cumplía un 14 % de lo
+    suyo con un 80 % vendido. Sin canal ni meses, porque el objetivo es del
+    mes entero.
+  */
+  const fueraParaObjetivo = externasPorMes(ctx.externalSales, { ...filters, channels: [], months: [] }, ctx.repOf);
   const targetReal = targetSoFar
     ? sumRows(filterRows(ctx.rows, filters, ctx.repOf, ["channel", "month"]).filter((row) => targetSoFar.months.includes(row.month))).net
+      + targetSoFar.months.reduce((suma, mes) => suma + (fueraParaObjetivo.get(mes) ?? 0), 0)
     : 0;
 
   // Clientes: con el detalle nuevo de Sage, las cifras con nombre; sin él, los totales de antes.

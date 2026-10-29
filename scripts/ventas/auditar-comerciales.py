@@ -27,11 +27,17 @@ Qué comprueba, y por qué cada cosa:
      del panel —así viene de Sage— pero explica por qué los comerciales nunca
      suman el total del grupo, y dice dónde habría que asignarlo si se quiere.
 
-Ojo con una trampa al medir esto: PostgREST corta cualquier respuesta a 1.000
-filas y el parámetro p_limit de las funciones NO lo cambia. Pedir la lista de
-artículos de un comercial y sumarla da una cifra corta y parece un descuadre
-que no existe. Por eso Productos se compara agrupado por familia, que son
-cientos de filas y no decenas de miles, y el resto se pide por páginas.
+Ojo con dos trampas al medir esto, las dos de PostgREST:
+
+  · Corta cualquier respuesta a 1.000 filas sin avisar, y el parámetro p_limit
+    de las funciones NO lo cambia. Sumar la lista de artículos de un comercial
+    da una cifra corta que parece un descuadre que no existe. Por eso Productos
+    se compara agrupado por familia, que son decenas de filas.
+
+  · En las llamadas a funciones (POST) ignora la cabecera Range: pedir «de la
+    1000 a la 1999» devuelve otra vez las mil primeras, y un bucle que pagina
+    así no termina nunca. Se pagina con ?offset= y ?limit= en la dirección, que
+    es lo mismo que hace la librería del panel.
 
 Uso (desde la raíz del proyecto, con .env.local puesto):
     python scripts/ventas/auditar-comerciales.py 2026
@@ -85,13 +91,10 @@ def llamar(nombre, args, paginando=False):
     """Una función de la base. Con `paginando`, hasta que no venga una página llena."""
     fuera, inicio = [], 0
     while True:
-        cabeceras = dict(CABECERAS)
-        if paginando:
-            cabeceras["Range-Unit"] = "items"
-            cabeceras["Range"] = f"{inicio}-{inicio + PAGINA - 1}"
-        peticion = urllib.request.Request(f"{BASE}/rest/v1/rpc/{nombre}",
+        pagina = f"?limit={PAGINA}&offset={inicio}" if paginando else ""
+        peticion = urllib.request.Request(f"{BASE}/rest/v1/rpc/{nombre}{pagina}",
                                           data=json.dumps(args).encode("utf-8"),
-                                          method="POST", headers=cabeceras)
+                                          method="POST", headers=CABECERAS)
         try:
             with urllib.request.urlopen(peticion, timeout=300) as respuesta:
                 trozo = json.load(respuesta)
@@ -166,9 +169,11 @@ def auditar(anio, fichas, clave_de, grupos):
                        llamar("sage_customer_list", {**rango, "p_reps": pares, "p_kind": "activos", "p_days": 30},
                               paginando=True))
         # Por familia y no por artículo: la lista de artículos la corta
-        # PostgREST a 1.000 filas y el descuadre sería del medidor.
+        # PostgREST a 1.000 filas y el descuadre sería del medidor. Y con la
+        # función de familias, la misma que usa Productos: sage_article_groups
+        # solo sabe agrupar por subfamilia o por marca.
         productos = sum(float(a["net_amount"]) for a in
-                        llamar("sage_article_groups", {"p_group": "familia", **rango, "p_reps": pares}))
+                        llamar("sage_family_summary", {**rango, "p_reps": pares}, paginando=True))
         margen = max(1.0, abs(venta[persona]) * TOLERANCIA)
         avisos = [nombre for nombre, valor in (("clientes", clientes), ("productos", productos))
                   if abs(valor - venta[persona]) > margen]

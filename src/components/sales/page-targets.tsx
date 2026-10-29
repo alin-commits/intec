@@ -5,10 +5,10 @@ import { KpiCard } from "@/components/kpi-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { TrophyIcon, EuroIcon, CalendarIcon } from "@/components/icons";
 import { formatPercent } from "@/lib/format";
-import { euros, filterRows, groupRows, monthLongNames, monthNames, soloUnComercial, soloUnMes, soloUno, type SummaryRow, targetsFor, targetToDate } from "@/lib/sales-model";
+import { euros, externasPorMes, filterRows, groupRows, monthLongNames, monthNames, soloUnComercial, soloUnMes, soloUno, type SummaryRow, targetsFor, targetToDate } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import { writeRows } from "@/lib/supabase/write";
-import type { SalesContext } from "./sales-context";
+import type { ExternalSale, SalesContext } from "./sales-context";
 import { Panel, useSageQuery } from "./sales-ui";
 import { repartirElAno, repartirTrimestre, sumaDe, TRIMESTRES, variacionSobreAnterior } from "@/lib/sales-targets";
 
@@ -113,17 +113,37 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
     en el panel llega hasta hoy y un presupuesto se hace contra el año
     completo.
   */
-  const anteriorQuery = useSageQuery<{ year: number; rows: SummaryRow[] }>(
+  const anteriorQuery = useSageQuery<{ year: number; rows: SummaryRow[]; externas: ExternalSale[] }>(
     JSON.stringify(["objetivos-anterior", shownYear, ctx.reloadKey]),
     async () => {
-      const { data, error } = await createClient().rpc("sage_sales_summary", {
-        p_from: `${shownYear - 1}-01-01`, p_to: `${shownYear - 1}-12-31`, p_basis: "albaran",
-      });
+      const supabase = createClient();
+      const desde = `${shownYear - 1}-01-01`;
+      const hasta = `${shownYear - 1}-12-31`;
+      const [ventas, deFuera] = await Promise.all([
+        supabase.rpc("sage_sales_summary", { p_from: desde, p_to: hasta, p_basis: "albaran" }),
+        supabase.rpc("external_sales_in_range", { p_from: desde, p_to: hasta }),
+      ]);
+      // Lo de fuera de Sage suma si llega, pero no puede ser la razón de que
+      // no haya año anterior con el que presupuestar.
+      if (deFuera.error) console.warn("No se pudieron leer las ventas de fuera de Sage:", deFuera.error.message);
       // El año viaja con las filas: sin él no hay forma de saber si lo que hay
       // en la mano es de este año o del que se miraba hace dos segundos.
-      return { data: error ? null : { year: shownYear - 1, rows: (data ?? []) as SummaryRow[] }, error };
+      return {
+        data: ventas.error ? null : { year: shownYear - 1, rows: (ventas.data ?? []) as SummaryRow[], externas: (deFuera.data ?? []) as ExternalSale[] },
+        error: ventas.error,
+      };
     },
   );
+  /*
+    Lo que no pasó por Sage, con el mismo ámbito que el objetivo.
+
+    Sin esto, Jender en 2025 tenía tres meses —entró en Sage en octubre— y
+    su cumplimiento salía del 14 % contra un objetivo de 275.000 € cuando lo
+    vendido rondaba el 80 %; y «2025 más un %» presupuestaba 2026 sobre tres
+    meses en vez de doce. Se quitan el canal y los meses igual que en lo de
+    Sage, porque el objetivo es del mes entero.
+  */
+  const filtrosDelObjetivo = { ...filters, channels: [], months: [] };
   /*
     La venta del año anterior, o null mientras no se sepa.
 
@@ -137,17 +157,23 @@ function TargetsOfYear({ ctx, shownYear }: { ctx: SalesContext; shownYear: numbe
     const traido = anteriorQuery.data;
     if (!traido || traido.year !== shownYear - 1) return null;
     const porMes = groupRows(filterRows(traido.rows, filters, ctx.repOf, ["channel", "month"]), (row) => row.month);
-    return Array.from({ length: 12 }, (_, index) => porMes.get(`${shownYear - 1}-${String(index + 1).padStart(2, "0")}`)?.net ?? 0);
+    const fuera = externasPorMes(traido.externas, { ...filters, channels: [], months: [] }, ctx.repOf);
+    return Array.from({ length: 12 }, (_, index) => {
+      const clave = `${shownYear - 1}-${String(index + 1).padStart(2, "0")}`;
+      return (porMes.get(clave)?.net ?? 0) + (fuera.get(clave) ?? 0);
+    });
   }, [anteriorQuery.data, filters, ctx.repOf, shownYear]);
 
   // La venta real del ámbito, mes a mes (sin canal ni mes: el objetivo es del mes entero).
   const realRows = filterRows(ctx.rows, filters, ctx.repOf, ["channel", "month"]);
   const realByMonth = groupRows(realRows, (row) => row.month);
-  const real = Array.from({ length: 12 }, (_, index) => realByMonth.get(`${shownYear}-${String(index + 1).padStart(2, "0")}`)?.net ?? 0);
+  const realFuera = externasPorMes(ctx.externalSales, filtrosDelObjetivo, ctx.repOf);
+  const realDe = (clave: string) => (realByMonth.get(clave)?.net ?? 0) + (realFuera.get(clave) ?? 0);
+  const real = Array.from({ length: 12 }, (_, index) => realDe(`${shownYear}-${String(index + 1).padStart(2, "0")}`));
   const unMes = soloUnMes(filters);
   const monthIndex = unMes ? Number(unMes.slice(5, 7)) - 1 : null;
   const soFar = targetToDate(months, shownYear, today, monthIndex);
-  const realSoFar = soFar ? soFar.months.reduce((sum, key) => sum + (realByMonth.get(key)?.net ?? 0), 0) : 0;
+  const realSoFar = soFar ? soFar.months.reduce((sum, key) => sum + realDe(key), 0) : 0;
   const yearTarget = months.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const yearReal = real.reduce((sum, value) => sum + value, 0);
   const hasTargets = months.some((value) => value !== null);
