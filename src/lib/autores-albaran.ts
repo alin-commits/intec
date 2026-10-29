@@ -8,9 +8,13 @@ import type { RepIdentity } from "@/lib/sales-model";
   hace un comercial que acaban contando para otro.
 
   El autor llega como lo resuelve la base ("u:25", el usuario 25 de Sage, o
-  "t:1:150", un operador de TPV sin usuario) y quién es cada uno lo apunta
-  alguien en el Hub: el número de usuario de Sage no es el de comercial, así
-  que no se puede deducir.
+  "t:1:150", un operador de TPV sin usuario) y en el Hub se apunta qué
+  usuarios son de cada comercial: el número de usuario de Sage no es el de
+  comercial, así que no se puede deducir.
+
+  Solo se apuntan los comerciales. Todo usuario que no es de ninguno es otro
+  empleado —administración, almacén, tienda—, sin tener que decirlo uno a uno:
+  en Sage hay decenas de usuarios y comerciales son unos pocos.
 */
 
 /** Lo que devuelve sage_authors_summary: albaranes por mes, autor y comercial asignado. */
@@ -24,7 +28,11 @@ export type FilaDeAutor = {
   net_amount: number;
 };
 
-/** Quién es un autor: un comercial (su clave en el panel) o la oficina. */
+/**
+ * De qué comercial es un usuario de Sage (su clave en el panel). Lo que no
+ * tiene comercial es de otro empleado; `is_office` es de cuando había que
+ * marcarlo, y cuenta igual que no tener comercial.
+ */
 export type QuienEs = { author: string; rep_key: string | null; is_office: boolean };
 
 /** Un comercial del panel, ya juntadas sus fichas de las distintas sociedades. */
@@ -65,14 +73,10 @@ export type FilaDeComercial = {
   deQuien: Destino[];
 };
 
-export type AutorSinDecir = Cuenta & { author: string; nombre: string };
-
 export type RepartoDeAutores = {
   comerciales: FilaDeComercial[];
-  /** Lo que hacen oficina y tienda, y a quién se le apunta. */
-  oficina: { hechos: Cuenta; aComerciales: Cuenta; sinComercial: Cuenta; aQuien: Destino[] };
-  /** Autores que nadie ha dicho todavía quiénes son. */
-  sinDecir: AutorSinDecir[];
+  /** Lo que hacen los demás empleados (los usuarios que no son de ningún comercial), y a quién se le apunta. */
+  otros: { hechos: Cuenta; aComerciales: Cuenta; sinComercial: Cuenta; aQuien: Destino[] };
   /** Albaranes que Sage guardó sin usuario ni operador. */
   sinAutor: Cuenta;
   total: Cuenta;
@@ -82,8 +86,8 @@ export type RepartoDeAutores = {
 export type AutorVisto = Cuenta & { author: string; nombre: string };
 
 const SIN_AUTOR = "desconocido";
-/** La clave de la oficina entre los que hacen albaranes para un comercial. */
-const OFICINA = "oficina";
+/** Los demás empleados, entre los que hacen albaranes para un comercial. */
+const OTROS = { key: "otros", label: "Otros empleados" };
 
 const vacia = (): Cuenta => ({ documentos: 0, neto: 0 });
 
@@ -131,8 +135,7 @@ export function repartirAutores(
     comerciales.set(key, fila);
     return fila;
   };
-  const oficina = { hechos: vacia(), aComerciales: vacia(), sinComercial: vacia(), destinos: new Map<string, Destino>() };
-  const sinDecir = new Map<string, AutorSinDecir>();
+  const otros = { hechos: vacia(), aComerciales: vacia(), sinComercial: vacia(), destinos: new Map<string, Destino>() };
   const sinAutor = vacia();
   const total = vacia();
 
@@ -140,13 +143,16 @@ export function repartirAutores(
     sumar(total, fila);
     const credito = repOf(fila.company_code, fila.rep_code);
     const deUnComercial = credito.assigned && credito.isPerson;
-    const quien = fila.author === SIN_AUTOR ? undefined : asignados.get(fila.author);
+    const sinAutorEnSage = fila.author === SIN_AUTOR;
+    // El comercial que lo hizo, si lo hizo uno; si no, nulo: otro empleado.
+    const comercialAutor = sinAutorEnSage ? null : asignados.get(fila.author)?.rep_key ?? null;
 
     // La cara de la facturación: a quién cuenta, y si se lo hizo otro.
     if (deUnComercial) {
       const suya = filaDe(credito.key);
       sumar(suya.enSuFacturacion, fila);
-      const autor = quien?.is_office ? { key: OFICINA, label: "Oficina y tienda" } : quien?.rep_key ? { key: quien.rep_key, label: nombreDe(quien.rep_key) } : null;
+      // Sin usuario en Sage no se sabe quién fue: no cuenta como hecho por otro.
+      const autor = sinAutorEnSage ? null : comercialAutor ? { key: comercialAutor, label: nombreDe(comercialAutor) } : OTROS;
       if (autor && autor.key !== credito.key) {
         sumar(suya.hechosPorOtros, fila);
         sumarA(suya.origenes, autor, fila);
@@ -154,27 +160,20 @@ export function repartirAutores(
     }
 
     // La cara de quién lo hizo.
-    if (fila.author === SIN_AUTOR) {
+    if (sinAutorEnSage) {
       sumar(sinAutor, fila);
       continue;
     }
-
-    if (quien?.is_office) {
-      sumar(oficina.hechos, fila);
+    if (!comercialAutor) {
+      sumar(otros.hechos, fila);
       if (deUnComercial) {
-        sumar(oficina.aComerciales, fila);
-        sumarA(oficina.destinos, credito, fila);
-      } else sumar(oficina.sinComercial, fila);
-      continue;
-    }
-    if (!quien?.rep_key) {
-      const autor = sinDecir.get(fila.author) ?? { author: fila.author, nombre: fila.author_name, ...vacia() };
-      sumar(autor, fila);
-      sinDecir.set(fila.author, autor);
+        sumar(otros.aComerciales, fila);
+        sumarA(otros.destinos, credito, fila);
+      } else sumar(otros.sinComercial, fila);
       continue;
     }
 
-    const key = quien.rep_key;
+    const key = comercialAutor;
     const comercial = filaDe(key);
     sumar(comercial.hechos, fila);
     if (credito.key === key) sumar(comercial.propios, fila);
@@ -188,8 +187,7 @@ export function repartirAutores(
     comerciales: [...comerciales.values()]
       .map(({ destinos, origenes, ...comercial }) => ({ ...comercial, aQuien: deMasAMenos(destinos), deQuien: deMasAMenos(origenes) }))
       .sort((a, b) => b.paraOtros.documentos - a.paraOtros.documentos || b.hechos.documentos - a.hechos.documentos || b.enSuFacturacion.documentos - a.enSuFacturacion.documentos),
-    oficina: { hechos: oficina.hechos, aComerciales: oficina.aComerciales, sinComercial: oficina.sinComercial, aQuien: deMasAMenos(oficina.destinos) },
-    sinDecir: [...sinDecir.values()].sort((a, b) => b.documentos - a.documentos),
+    otros: { hechos: otros.hechos, aComerciales: otros.aComerciales, sinComercial: otros.sinComercial, aQuien: deMasAMenos(otros.destinos) },
     sinAutor,
     total,
   };

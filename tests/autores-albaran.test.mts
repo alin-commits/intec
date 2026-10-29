@@ -54,27 +54,27 @@ test("dos usuarios de Sage de la misma persona suman en una sola fila", () => {
   assert.deepEqual(pablo?.aQuien.map((destino) => destino.documentos), [10]);
 });
 
-test("la oficina, los autores sin decir y los albaranes sin autor van cada uno a su sitio", () => {
+test("los usuarios que no son de ningún comercial son otros empleados, y los albaranes sin autor van aparte", () => {
   const reparto = repartirAutores(
     [fila("u:3", 10, 8), fila("u:3", null, 2), fila("u:40", 11, 5, 500, "MOSTRADOR2"), fila("desconocido", 10, 7)],
     [{ author: "u:3", rep_key: null, is_office: true }],
     repOf, nombreDe,
   );
-  // Nadie es autor asignado, pero los dos tienen albaranes en su facturación.
+  // Ningún usuario es de un comercial, pero los dos tienen albaranes en su facturación.
   const pablo = reparto.comerciales.find((fila) => fila.key === "PABLO SOLIS IBARRA");
   const ana = reparto.comerciales.find((fila) => fila.key === "ANA BELTRAN ROCA");
   assert.deepEqual(pablo?.hechos, { documentos: 0, neto: 0 });
-  // Ocho de oficina y siete sin usuario: los de oficina se los hizo otro; los sin usuario no se sabe.
+  // Ocho de otros empleados y siete sin usuario: los de otros se los hizo otro; los sin usuario no se sabe.
   assert.deepEqual(pablo?.enSuFacturacion, { documentos: 15, neto: 1500 });
   assert.deepEqual(pablo?.hechosPorOtros, { documentos: 8, neto: 800 });
-  assert.deepEqual(pablo?.deQuien.map((origen) => [origen.label, origen.documentos]), [["Oficina y tienda", 8]]);
-  // Los de un usuario sin decir quién es tampoco cuentan como hechos por otro.
+  assert.deepEqual(pablo?.deQuien.map((origen) => [origen.label, origen.documentos]), [["Otros empleados", 8]]);
+  // Un usuario sin comercial —aunque nadie lo haya marcado— es otro empleado.
   assert.deepEqual(ana?.enSuFacturacion, { documentos: 5, neto: 500 });
-  assert.deepEqual(ana?.hechosPorOtros, { documentos: 0, neto: 0 });
-  assert.deepEqual(reparto.oficina.hechos, { documentos: 10, neto: 1000 });
-  assert.deepEqual(reparto.oficina.aComerciales, { documentos: 8, neto: 800 });
-  assert.deepEqual(reparto.oficina.sinComercial, { documentos: 2, neto: 200 });
-  assert.deepEqual(reparto.sinDecir, [{ author: "u:40", nombre: "MOSTRADOR2", documentos: 5, neto: 500 }]);
+  assert.deepEqual(ana?.hechosPorOtros, { documentos: 5, neto: 500 });
+  // El marcado como oficina de antes y el que no está marcado suman juntos.
+  assert.deepEqual(reparto.otros.hechos, { documentos: 15, neto: 1500 });
+  assert.deepEqual(reparto.otros.aComerciales, { documentos: 13, neto: 1300 });
+  assert.deepEqual(reparto.otros.sinComercial, { documentos: 2, neto: 200 });
   assert.deepEqual(reparto.sinAutor, { documentos: 7, neto: 700 });
   // El total es todo, también lo que no se sabe de quién es.
   assert.equal(reparto.total.documentos, 22);

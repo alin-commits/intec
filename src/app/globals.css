@@ -2206,7 +2206,7 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .autores-editor-intro { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 .autores-fallo { margin: 0; color: #8c1d22; font-size: 12.5px; font-weight: 650; }
 .autores-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px 14px; margin: 0; padding: 0; list-style: none; }
-.autores-fila { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 190px); align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.autores-fila { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
 .autores-fila.is-pendiente { border-style: dashed; background: var(--surface-muted); }
 .autores-quien { display: grid; gap: 1px; min-width: 0; }
 .autores-quien strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -2214,7 +2214,13 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .autores-fila select { min-width: 0; min-height: 34px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; font-size: 12.5px; background: var(--surface); color: inherit; }
 .autores-fila select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 .autores-fila select:disabled { opacity: 0.55; }
-.autores-propuesta { grid-column: 1 / -1; justify-self: start; padding: 3px 10px; font-size: 12px; }
+/* Los usuarios de Sage de un comercial, como fichas que se quitan con la ×. */
+.autores-usuarios { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.autores-usuario { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: 12.5px; font-weight: 700; }
+.autores-usuario small { color: var(--muted); font-size: 11px; font-weight: 600; }
+.autores-usuario button { width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+.autores-usuario button:hover { background: rgba(79, 70, 229, .12); }
+.autores-usuarios select { flex: 1 1 200px; }
 @media (max-width: 820px) {
   .autores-lista, .autores-fila { grid-template-columns: minmax(0, 1fr); }
   .autores-fila select { min-height: 44px; }

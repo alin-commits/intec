@@ -28,15 +28,16 @@ import { DataTable, LoadFailed, Panel, RankList, share, useSageQuery, type Colum
   facturación y cuántos se facturan a otro; y al revés, todo lo que entra en
   su facturación y cuánto de eso le hicieron otros.
 
-  Quién es cada usuario de Sage se dice aquí mismo, en «Quién es quién»: el
-  número de usuario no es el de comercial y no se puede deducir.
+  Qué usuarios de Sage son de cada comercial se dice aquí mismo, empezando
+  por los comerciales: el número de usuario no es el de comercial y no se
+  puede deducir. Los usuarios que no son de ningún comercial son otros
+  empleados, sin tener que marcarlos: en Sage hay decenas y comerciales son
+  unos pocos.
 */
 
 /** Lo que dice la base cuando la función o la tabla todavía no existen: falta la migración. */
 const SIN_PREPARAR = new Set(["PGRST202", "PGRST205", "42P01", "42883"]);
 const sinPreparar = (error: unknown) => SIN_PREPARAR.has(String((error as { code?: string } | null)?.code ?? ""));
-
-const OFICINA = "oficina";
 
 /** Cuántos albaranes y, debajo, lo que suman. */
 function cuenta({ documentos, neto }: Cuenta) {
@@ -132,29 +133,38 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   const conComercial = filters.repKeys.length > 0;
   const comerciales = reparto.comerciales.filter((fila) => comercialMarcado(filters, fila.key));
 
-  // Todos los autores del periodo cargado, para decir quién es cada uno: los que faltan, primero.
+  /*
+    Para decir de quién es cada usuario se parte de los comerciales con venta
+    en el panel —y de los que ya tienen alguno, para poder quitárselo—. Los
+    usuarios que se ofrecen son los que han hecho albaranes en el periodo.
+  */
   const vistos = autoresVistos(filas.data.filas);
-  const valorDe = (author: string) => {
-    const quien = quienEs.get(author);
-    return quien?.is_office ? OFICINA : quien?.rep_key ?? "";
-  };
-  const sinDecir = vistos.filter((autor) => valorDe(autor.author) === "");
-  const porDecir = [...sinDecir, ...vistos.filter((autor) => valorDe(autor.author) !== "")];
+  const deQuienEs = (author: string) => quienEs.get(author)?.rep_key ?? null;
+  const conVenta = ctx.model.byRep.filter((rep) => rep.isPerson && rep.assigned && rep.bucket.net > 0).map((rep) => ({ key: rep.key, label: rep.name }));
+  const conUsuario = [...new Set([...quienEs.values()].map((quien) => quien.rep_key).filter((key): key is string => Boolean(key)))]
+    .filter((key) => !conVenta.some((rep) => rep.key === key))
+    .map((key) => ({ key, label: ctx.repName(key) }));
+  const delPanel = [...conVenta, ...conUsuario].sort((a, b) => a.label.localeCompare(b.label, "es"));
+  const libres = vistos.filter((autor) => deQuienEs(autor.author) === null);
+  const usuariosDe = (key: string) => [...quienEs.values()].filter((quien) => quien.rep_key === key).map((quien) => quien.author);
+  const nombreDelAutor = (author: string) => vistos.find((autor) => autor.author === author)?.nombre ?? origenDelAutor(author);
+  const hayAsignados = [...quienEs.values()].some((quien) => Boolean(quien.rep_key));
   // La primera vez no hay nada apuntado y la tabla saldría vacía: el editor se abre solo.
-  const conEditor = editando || quienEs.size === 0;
+  const conEditor = editando || !hayAsignados;
 
-  const guardar = async (author: string, valor: string) => {
+  /** Le da un usuario de Sage a un comercial, o se lo quita (null). */
+  const guardar = async (author: string, repKey: string | null) => {
     setGuardando(author);
     setFallo(null);
     const supabase = createClient();
-    const fila: QuienEs | null = valor === "" ? null : { author, rep_key: valor === OFICINA ? null : valor, is_office: valor === OFICINA };
+    const fila: QuienEs | null = repKey ? { author, rep_key: repKey, is_office: false } : null;
     const { error } = fila
       ? await supabase.from("sage_author_reps").upsert({ ...fila, updated_at: new Date().toISOString() }, { onConflict: "author" })
       : await supabase.from("sage_author_reps").delete().eq("author", author);
     setGuardando(null);
     if (error) {
       console.error("No se pudo apuntar quién es el autor:", error);
-      setFallo("No se pudo guardar. Solo administración y dirección pueden decir quién es quién.");
+      setFallo("No se pudo guardar. Solo administración y dirección pueden decir qué usuarios son de cada comercial.");
       return;
     }
     setCambios((actuales) => ({ ...actuales, [author]: fila }));
@@ -196,42 +206,49 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
     },
   ];
 
+  /** "usuario 24" o "TPV 150, sociedad 1": corto, para la lista. */
+  const origenCorto = (author: string) => origenDelAutor(author).replace("Usuario ", "usuario ").replace(" de Sage", "").replace("TPV de la sociedad ", "TPV, sociedad ");
+
   const editor = (
     <div className="autores-editor">
       <p className="autores-editor-intro">
-        Cada usuario de Sage que ha hecho albaranes en este periodo, con el comercial que es. Se guarda al elegir. Los de
-        oficina y tienda van aparte: no son comerciales, pero se ve a quién apuntan lo que hacen.
+        Los comerciales con venta en el panel. A cada uno, el usuario o los usuarios de Sage con los que hace albaranes —el
+        suyo y, si vende en tienda, su operador del TPV—. Se guarda al elegir. Los usuarios que no son de ningún comercial
+        cuentan como otros empleados: no hace falta marcarlos.
       </p>
       {fallo ? <p className="autores-fallo" role="alert">{fallo}</p> : null}
       <ul className="autores-lista">
-        {porDecir.map((autor) => {
-          const valor = valorDe(autor.author);
-          const propuesta = valor === "" ? sugerirComercial(autor.nombre, personas) : null;
+        {delPanel.map((rep) => {
+          const suyos = usuariosDe(rep.key);
+          // Los que se parecen por el nombre, primero: solo ordena, no decide nada.
+          const parecidos = libres.filter((autor) => sugerirComercial(autor.nombre, personas)?.key === rep.key);
+          const resto = libres.filter((autor) => !parecidos.includes(autor));
+          const opcion = (autor: (typeof libres)[number]) => (
+            <option key={autor.author} value={autor.author}>
+              {autor.nombre} · {origenCorto(autor.author)} · {numberFormatter.format(autor.documentos)} albaranes
+            </option>
+          );
           return (
-            <li key={autor.author} className={`autores-fila${valor === "" ? " is-pendiente" : ""}`}>
+            <li key={rep.key} className={`autores-fila${suyos.length === 0 ? " is-pendiente" : ""}`}>
               <div className="autores-quien">
-                <strong>{autor.nombre}</strong>
-                <span>{origenDelAutor(autor.author)} · {numberFormatter.format(autor.documentos)} albaranes</span>
+                <strong>{rep.label}</strong>
+                <span>{suyos.length === 0 ? "Sin usuario de Sage: no hace albaranes, o falta elegirlo" : `${suyos.length} usuario${suyos.length === 1 ? "" : "s"} de Sage`}</span>
               </div>
-              <select
-                value={valor}
-                disabled={guardando === autor.author}
-                aria-label={`Quién es ${autor.nombre}`}
-                onChange={(event) => void guardar(autor.author, event.target.value)}
-              >
-                <option value="">Sin decir</option>
-                <option value={OFICINA}>Oficina o tienda</option>
-                <optgroup label="Comerciales">
-                  {personas.map((persona) => <option key={persona.key} value={persona.key}>{persona.label}</option>)}
-                  {valor !== "" && valor !== OFICINA && !personas.some((persona) => persona.key === valor)
-                    ? <option value={valor}>{ctx.repName(valor)}</option> : null}
-                </optgroup>
-              </select>
-              {propuesta ? (
-                <button type="button" className="sales-chip autores-propuesta" disabled={guardando === autor.author} onClick={() => void guardar(autor.author, propuesta.key)}>
-                  ¿Es {propuesta.label}?
-                </button>
-              ) : null}
+              <div className="autores-usuarios">
+                {suyos.map((author) => (
+                  <span key={author} className="autores-usuario">
+                    {nombreDelAutor(author)} <small>{origenCorto(author)}</small>
+                    <button type="button" aria-label={`Quitar ${nombreDelAutor(author)} de ${rep.label}`} disabled={guardando === author}
+                      onClick={() => void guardar(author, null)}>×</button>
+                  </span>
+                ))}
+                <select value="" disabled={guardando !== null || libres.length === 0} aria-label={`Añadir un usuario de Sage a ${rep.label}`}
+                  onChange={(event) => { if (event.target.value) void guardar(event.target.value, rep.key); }}>
+                  <option value="">{libres.length === 0 ? "No quedan usuarios sin comercial" : "+ Añadir usuario de Sage…"}</option>
+                  {parecidos.length > 0 ? <optgroup label="Parecidos por el nombre">{parecidos.map(opcion)}</optgroup> : null}
+                  {resto.length > 0 ? <optgroup label={parecidos.length > 0 ? "Los demás" : "Usuarios sin comercial"}>{resto.map(opcion)}</optgroup> : null}
+                </select>
+              </div>
             </li>
           );
         })}
@@ -239,14 +256,14 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
     </div>
   );
 
-  const oficina = reparto.oficina;
+  const otros = reparto.otros;
   return (
     <Panel
       title="Albaranes por comercial"
       subtitle={`Albaranes de ${ctx.periodName}: los que hace cada comercial en Sage, cuántos van a su facturación y cuántos se facturan a otro porque el cliente ya está asignado. Pulsa uno para ver a quién${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`}
       trailing={(
         <button type="button" className="sales-chip" aria-expanded={conEditor} onClick={() => setEditando((actual) => !actual)}>
-          Quién es quién{sinDecir.length > 0 ? ` · ${numberFormatter.format(sinDecir.length)} sin decir` : ""}
+          Usuarios de cada comercial
         </button>
       )}
       className="panel panel-padded sales-board-full"
@@ -274,7 +291,7 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
             </div>
             <div>
               <p className="sales-row-detail-title">
-                {fila.deQuien.length > 0 ? "Los de su facturación que le hizo otro: quién" : "Nadie le ha hecho albaranes de su facturación (de los usuarios ya asignados)"}
+                {fila.deQuien.length > 0 ? "Los de su facturación que le hizo otro: quién" : "Nadie más le ha hecho albaranes de su facturación"}
               </p>
               {fila.deQuien.length > 0 ? (
                 <RankList items={fila.deQuien.map((origen) => ({
@@ -285,22 +302,17 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
             </div>
           </div>
         ) : null)}
-        empty={quienEs.size === 0
-          ? "Todavía no se ha dicho quién es quién: asigna cada usuario de Sage a su comercial y aquí saldrá lo que hace cada uno."
+        empty={!hayAsignados
+          ? "Todavía no hay usuarios de Sage asignados: elige arriba los de cada comercial y aquí saldrá lo que hace cada uno."
           : conComercial ? "Ningún usuario de Sage asignado a este comercial ha hecho albaranes en este periodo." : "Ningún comercial ha hecho albaranes en este periodo."}
       />
       {/* Lo que no es de ningún comercial, para que el total cuadre con los albaranes del periodo. */}
       {!conComercial ? (
         <div className="sales-inline-stats">
-          {oficina.hechos.documentos > 0 ? (
-            <span title={oficina.aQuien.slice(0, 5).map((destino) => `${destino.label}: ${numberFormatter.format(destino.documentos)}`).join(" · ")}>
-              Oficina y tienda <strong>{numberFormatter.format(oficina.hechos.documentos)} · {euros(oficina.hechos.neto)}</strong>
-              de ellos a comerciales <strong>{numberFormatter.format(oficina.aComerciales.documentos)} · {share(oficina.aComerciales.documentos, oficina.hechos.documentos)}</strong>
-            </span>
-          ) : null}
-          {reparto.sinDecir.length > 0 ? (
-            <span>
-              De usuarios sin decir quién son <strong>{numberFormatter.format(reparto.sinDecir.reduce((suma, autor) => suma + autor.documentos, 0))}</strong>
+          {otros.hechos.documentos > 0 ? (
+            <span title={otros.aQuien.slice(0, 5).map((destino) => `${destino.label}: ${numberFormatter.format(destino.documentos)}`).join(" · ")}>
+              Otros empleados <strong>{numberFormatter.format(otros.hechos.documentos)} · {euros(otros.hechos.neto)}</strong>
+              de ellos facturados a comerciales <strong>{numberFormatter.format(otros.aComerciales.documentos)} · {share(otros.aComerciales.documentos, otros.hechos.documentos)}</strong>
             </span>
           ) : null}
           {reparto.sinAutor.documentos > 0 ? (
