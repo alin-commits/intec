@@ -823,6 +823,29 @@ td.recent-inquiries-actions > * + * { margin-left: 8px; }
 .pending-lead-name strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-lead-name small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-lead-delay { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: 700; white-space: nowrap; }
+/* La campana de pendientes del comercial: fija abajo a la derecha, por encima
+   del contenido y por debajo de las ventanas, que la tapan con su fondo. */
+.campana-comercial { position: fixed; right: 20px; bottom: 20px; z-index: 70; }
+.campana-boton { position: relative; width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 999px; background: white; color: #334155; box-shadow: 0 8px 24px rgba(15, 23, 42, .16); cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+.campana-boton:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(15, 23, 42, .2); }
+.campana-boton:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring), 0 8px 24px rgba(15, 23, 42, .16); }
+.campana-boton svg { width: 22px; height: 22px; }
+.campana-cifra { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 6px; border: 2px solid white; border-radius: 999px; background: #d97706; color: white; font-size: 11px; font-weight: 800; display: grid; place-items: center; }
+.campana-boton.is-urgente .campana-cifra { background: #dc2626; }
+.campana-panel { position: absolute; right: 0; bottom: calc(100% + 12px); width: 360px; max-height: min(70vh, 560px); overflow-y: auto; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 44px rgba(15, 23, 42, .18); }
+.campana-grupo h3 { margin: 12px 0 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.campana-panel .pending-leads-list { margin: 6px 0 0; }
+.campana-nota { margin: 4px 0 0; font-size: 12px; }
+.campana-vacia { margin: 10px 0 4px; font-size: 13.5px; }
+.campana-pie { margin: 12px 0 0; font-size: 11.5px; }
+@media (max-width: 640px) {
+  .campana-comercial { right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .campana-panel { width: calc(100vw - 28px); max-height: 70dvh; }
+  /* El aviso del comparador ocupa todo el ancho en el móvil: con la campana
+     en pantalla, le deja su hueco a la derecha en vez de taparla. */
+  body:has(.campana-comercial) .aviso-comparador { left: 14px; right: 80px; transform: none; max-width: none; }
+}
+@media print { .campana-comercial { display: none; } }
 /* Lo que hay por cerrar: ámbar y no rojo, porque no es un retraso con el cliente sino una ficha sin apuntar. */
 .por-cerrar-grupo h3 { margin: 14px 0 0; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
 .por-cerrar-delay { background: #fef3c7; color: #92400e; }

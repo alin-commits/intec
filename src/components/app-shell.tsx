@@ -10,6 +10,7 @@ import { AvisoExtension } from "@/components/aviso-extension";
 import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
 import { AvisoCompras } from "@/components/compras/aviso-compras";
 import { AvisoPorCerrar } from "@/components/aviso-por-cerrar";
+import { CampanaComercial } from "@/components/campana-comercial";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
@@ -316,6 +317,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Y después, nunca a la vez, lo que dejó a medio camino: contactados e
             interesados que llevan una semana sin cerrarse. */}
         {configured && profile.id && avisoLeadsTerminado && hasAnyRole(profile.roles, ["commercial"]) ? <AvisoPorCerrar userId={profile.id} /> : null}
+        {/* Y siempre, abajo a la derecha, lo mismo que dicen esos dos avisos,
+            al día aunque no se recargue la página. */}
+        {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <CampanaComercial userId={profile.id} /> : null}
         {/*
           Solo a quien lleva compras. Un administrador o dirección entran en
           muchas pantallas al día y esto les saldría una y otra vez por un

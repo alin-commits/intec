@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/modal";
-import { atencionDeLead, esperaDetallada, HORAS_PARA_ATENDER, type CambioDeEstado } from "@/lib/leads/atencion";
-import { createClient } from "@/lib/supabase/client";
+import { cargarSinAtender, type LeadSinAtender } from "@/lib/avisos-comercial";
+import { esperaDetallada, HORAS_PARA_ATENDER } from "@/lib/leads/atencion";
 
 /**
  * El aviso de entrada para un comercial: estos leads tuyos siguen sin tocar y
@@ -18,15 +18,14 @@ import { createClient } from "@/lib/supabase/client";
  * tanto se pasa de plazo otro, vuelve a salir en el acto con ese.
  *
  * El retraso se cuenta en horas laborables, sin fines de semana, con las mismas
- * reglas que la insignia "Sin atender" de la tabla de leads: una sola fuente
- * para las dos cosas, para que nunca digan cosas distintas del mismo lead.
+ * reglas que la insignia "Sin atender" de la tabla de leads. Y la lista sale de
+ * avisos-comercial.ts, la misma que lee la campana de abajo a la derecha: una
+ * sola fuente, para que nunca digan cosas distintas del mismo lead.
  */
 
 const CUANTOS_SE_ENSEÑAN = 8;
 /** Lo que calla tras cerrarlo, mientras no haya ninguno nuevo. */
 const MINUTOS_DE_SILENCIO = 60;
-
-type LeadPendiente = { id: string; nombre: string; empresa: string | null; horas: number };
 
 function clave(userId: string) {
   return `intec.leads-sin-atender.${userId}`;
@@ -73,43 +72,15 @@ export function PendingLeadsNotice({ userId, onTerminado }: {
    */
   onTerminado?: () => void;
 }) {
-  const [pendientes, setPendientes] = useState<LeadPendiente[]>([]);
+  const [pendientes, setPendientes] = useState<LeadSinAtender[]>([]);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let activo = true;
     void (async () => {
-      // Un lead puede llevarlo más de una persona: los suyos salen de la tabla
-      // de responsables, no del lead.
-      const { data } = await createClient()
-        .from("lead_assignees")
-        .select("leads!inner(id, contact_name, client_company_name, created_at, status, lead_status_history(new_status, changed_at))")
-        .eq("profile_id", userId)
-        .eq("leads.status", "new");
-      if (!activo) return;
-
-      const ahora = new Date().toISOString();
-      const tarde: LeadPendiente[] = [];
-      for (const fila of (data ?? []) as unknown as { leads: Record<string, unknown> }[]) {
-        const lead = fila.leads;
-        if (!lead) continue;
-        const historia = (Array.isArray(lead.lead_status_history) ? lead.lead_status_history : []) as Record<string, unknown>[];
-        const atencion = atencionDeLead({
-          createdAt: String(lead.created_at),
-          status: String(lead.status),
-          statusHistory: historia.map((cambio): CambioDeEstado => ({ newStatus: String(cambio.new_status), changedAt: String(cambio.changed_at) })),
-        }, ahora);
-        if (atencion.estado !== "sin-atender") continue;
-        tarde.push({
-          id: String(lead.id),
-          nombre: (lead.contact_name as string | null) || (lead.client_company_name as string | null) || "Sin nombre",
-          empresa: (lead.client_company_name as string | null) ?? null,
-          horas: atencion.horas,
-        });
-      }
+      const tarde = await cargarSinAtender(userId);
       if (!activo) return;
       if (tarde.length === 0) { onTerminado?.(); return; }
-      tarde.sort((a, b) => b.horas - a.horas);
       setPendientes(tarde);
       // Lo enseñado hace menos de una hora se carga igual —hace falta para el
       // botón de la lista— pero sin volver a abrir el diálogo.
