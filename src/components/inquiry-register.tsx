@@ -300,7 +300,15 @@ export function InquiryRegister() {
   const [filtroMarca, setFiltroMarca] = useState("all");
   const [filtroCanal, setFiltroCanal] = useState<"all" | InquiryType>("all");
   const [filtroEstado, setFiltroEstado] = useState<"all" | InquiryStatus>("all");
-  const [filtroOrigen, setFiltroOrigen] = useState<"all" | "single" | "weekly">("all");
+  /** Quién la añadió: el id de su usuario del Hub, o todos. */
+  const [filtroComercial, setFiltroComercial] = useState<string>("all");
+  /*
+    El nombre de cada persona del Hub, para decir quién añadió cada consulta.
+    Sale de list_team_members, que lo puede llamar cualquiera: un comercial
+    no puede leer los perfiles de los demás, y sin esto vería las suyas con
+    nombre y las de los compañeros en blanco.
+  */
+  const [equipo, setEquipo] = useState<Map<string, string>>(new Map());
   const [ordenConsultas, setOrdenConsultas] = useState<{ columna: OrdenConsultas; desc: boolean }>({ columna: "fecha", desc: true });
   /** El historial de la consulta abierta: null mientras carga. */
   const [historial, setHistorial] = useState<HistorialDeFicha>(null);
@@ -382,8 +390,12 @@ export function InquiryRegister() {
       setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
         setCurrentUserId(authData.user.id);
-        const { data: profile } = await supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle();
+        const [{ data: profile }, { data: miembros }] = await Promise.all([
+          supabase.from("profiles").select("roles").eq("id", authData.user.id).maybeSingle(),
+          supabase.rpc("list_team_members"),
+        ]);
         if (!active) return;
+        setEquipo(new Map(((miembros ?? []) as { id: string; full_name: string | null }[]).map((miembro) => [miembro.id, displayName(miembro.full_name || "Usuario")])));
         const roles = (profile?.roles ?? []) as AppRole[];
         setCanRegister(Boolean(profile && hasAnyRole(roles, CONSULTAS_EDIT_ROLES)));
         setIsAdmin(roles.includes("admin"));
@@ -580,8 +592,16 @@ export function InquiryRegister() {
     (salesByInquiry.get(record.id) ?? []).reduce((suma, entry) => suma + entry.value, 0), [salesByInquiry]);
 
   const filtrosDeLista = useMemo(() => ({
-    texto: busquedaConsultas, marca: filtroMarca, canal: filtroCanal, estado: filtroEstado, origen: filtroOrigen,
-  }), [busquedaConsultas, filtroMarca, filtroCanal, filtroEstado, filtroOrigen]);
+    texto: busquedaConsultas, marca: filtroMarca, canal: filtroCanal, estado: filtroEstado, comercial: filtroComercial,
+  }), [busquedaConsultas, filtroMarca, filtroCanal, filtroEstado, filtroComercial]);
+
+  /** Quién añadió una consulta. Si ya no está en el equipo (dado de baja), se dice así. */
+  const nombreDeQuienLaAnadio = useMemo(() => (createdBy: string | null | undefined) =>
+    (createdBy ? equipo.get(createdBy) ?? (equipo.size > 0 ? "Usuario dado de baja" : "") : ""), [equipo]);
+  /** Quienes han añadido alguna de las consultas que se ven, para el filtro. */
+  const quienesAnaden = useMemo(() => [...new Set(filtered.map((record) => record.createdBy).filter((id): id is string => Boolean(id)))]
+    .map((id) => ({ id, nombre: nombreDeQuienLaAnadio(id) || "Usuario" }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es")), [filtered, nombreDeQuienLaAnadio]);
 
   /*
     Qué consultas se ven y en qué orden lo decide consultas-lista.
@@ -595,8 +615,9 @@ export function InquiryRegister() {
     marcaDe: (id) => units.find((unit) => unit.id === id)?.name ?? "",
     canalDe: (canal) => inquiryChannelLabels[canal],
     estadoDe: (estado) => contactStatusLabels[estado],
+    comercialDe: nombreDeQuienLaAnadio,
     valorDe,
-  }), [filtered, filtrosDeLista, ordenConsultas, units, valorDe]);
+  }), [filtered, filtrosDeLista, ordenConsultas, units, valorDe, nombreDeQuienLaAnadio]);
 
   /** Diez por página: una lista más larga no se lee, se busca. */
   const CONSULTAS_POR_PAGINA = 10;
@@ -1384,7 +1405,8 @@ export function InquiryRegister() {
       { header: "Correo", value: (record) => record.email ?? "" },
       { header: "Qué pide", value: (record) => record.productInterest ?? "" },
       { header: "Estado", value: (record) => record.entryMode === "weekly" ? "" : contactStatusLabels[record.status ?? "contactado"] },
-      { header: "Origen", value: (record) => record.entryMode === "weekly" ? "Semanal" : "Individual" },
+      { header: "Añadida por", value: (record) => nombreDeQuienLaAnadio(record.createdBy) },
+      { header: "Tipo de alta", value: (record) => record.entryMode === "weekly" ? "Semanal" : "Individual" },
       { header: "Cantidad", value: (record) => record.count },
       { header: "Valor (€)", value: (record) => (salesByInquiry.get(record.id) ?? []).reduce((sum, entry) => sum + entry.value, 0) },
       { header: "Tipo de venta", value: (record) => (salesByInquiry.get(record.id) ?? []).map((entry) => saleTypeLabels[entry.saleType]).join(" · ") },
@@ -1431,7 +1453,7 @@ export function InquiryRegister() {
             productInterest: record.productInterest ?? null,
             statusKey: record.entryMode === "weekly" ? null : String(record.status ?? "contactado"),
             statusLabel: record.entryMode === "weekly" ? "—" : contactStatusLabels[record.status ?? "contactado"],
-            origin: record.entryMode === "weekly" ? "Semanal" : "Individual",
+            addedBy: nombreDeQuienLaAnadio(record.createdBy) || "—",
             count: Number(record.count ?? 0),
             value: ventas.reduce((suma, entrada) => suma + entrada.value, 0),
             saleTypes: ventas.map((entrada) => saleTypeLabels[entrada.saleType]).join(" · "),
@@ -1593,11 +1615,10 @@ export function InquiryRegister() {
                 {inquiryStatusOrder.map((estado) => <option key={estado} value={estado}>{contactStatusLabels[estado]}</option>)}
               </select>
             </label>
-            <label><span>Origen</span>
-              <select value={filtroOrigen} onChange={(event) => filtrar(setFiltroOrigen, event.target.value as "all" | "single" | "weekly")}>
+            <label><span>Añadida por</span>
+              <select value={filtroComercial} onChange={(event) => filtrar(setFiltroComercial, event.target.value)}>
                 <option value="all">Todos</option>
-                <option value="single">Individual</option>
-                <option value="weekly">Semanal</option>
+                {quienesAnaden.map((persona) => <option key={persona.id} value={persona.id}>{persona.nombre}</option>)}
               </select>
             </label>
           </div>
@@ -1608,7 +1629,7 @@ export function InquiryRegister() {
               Filtrando {numberFormatter.format(recentInquiries.length)} de {numberFormatter.format(filtered.length)} consultas{" "}
               <button type="button" className="button button-compact button-secondary" onClick={() => {
                 setPaginaConsultas(0);
-                setFiltroMarca("all"); setFiltroCanal("all"); setFiltroEstado("all"); setFiltroOrigen("all");
+                setFiltroMarca("all"); setFiltroCanal("all"); setFiltroEstado("all"); setFiltroComercial("all");
               }}>Quitar filtros</button>
             </p>
           ) : null}
@@ -1618,7 +1639,7 @@ export function InquiryRegister() {
             <CabeceraConsultas columna="contacto" etiqueta="Contacto" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="canal" etiqueta="Canal" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="estado" etiqueta="Estado" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
-            <CabeceraConsultas columna="origen" etiqueta="Origen" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
+            <CabeceraConsultas columna="comercial" etiqueta="Añadida por" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="cantidad" etiqueta="Cantidad" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <CabeceraConsultas columna="valor" etiqueta="Valor" orden={ordenConsultas} onOrden={cambiarOrdenConsultas} />
             <th></th>
@@ -1631,8 +1652,9 @@ export function InquiryRegister() {
                 <td>{formatDate(record.createdAt)}</td>
                 <td>{unit?.name ?? "—"}</td>
                 <td>
+                  {/* Sin la columna de origen, el alta semanal se dice aquí: no tiene ficha. */}
                   {record.entryMode === "weekly"
-                    ? <span className="muted">—</span>
+                    ? <span className="muted">Alta semanal</span>
                     : <>
                         <button type="button" className="sales-row-button" onClick={() => abrirFicha(record)}>{record.contactName || "Sin nombre"}</button>
                         <small>{[record.companyName, record.productInterest].filter(Boolean).join(" · ") || "—"}</small>
@@ -1652,7 +1674,7 @@ export function InquiryRegister() {
                   ) : <span className={`badge badge-${contactStatusBadges[record.status ?? "contactado"]}`}>{contactStatusLabels[record.status ?? "contactado"]}</span>}
                   {record.status === "perdido" && record.lostReason ? <small className="motivo-perdida-fila" title="Por qué se perdió">{motivoEnTexto(record.lostReason, record.lostDetail)}</small> : null}
                 </td>
-                <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
+                <td>{nombreDeQuienLaAnadio(record.createdBy) || <span className="muted">—</span>}</td>
                 <td>{numberFormatter.format(record.count)}</td>
                 <td>
                   {recordSales.length > 0
@@ -2065,7 +2087,8 @@ export function InquiryRegister() {
               <div><span>Fecha</span><strong>{formatDate(viewingRecord.createdAt)}</strong></div>
               <div><span>Marca</span><strong>{units.find((unit) => unit.id === viewingRecord.businessUnitId)?.name ?? "—"}</strong></div>
               <div><span>Canal</span><strong>{inquiryChannelLabels[viewingRecord.inquiryType]}</strong></div>
-              <div><span>Origen</span><strong>{viewingRecord.entryMode === "weekly" ? "Recuento semanal" : "Individual"}</strong></div>
+              <div><span>Añadida por</span><strong>{nombreDeQuienLaAnadio(viewingRecord.createdBy) || "—"}</strong></div>
+              <div><span>Tipo de alta</span><strong>{viewingRecord.entryMode === "weekly" ? "Recuento semanal" : "Individual"}</strong></div>
               {viewingRecord.entryMode === "weekly" ? (
                 <div><span>Cantidad</span><strong>{numberFormatter.format(viewingRecord.count)}</strong></div>
               ) : (

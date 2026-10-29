@@ -31,7 +31,8 @@ export type InquiryListRow = {
   productInterest: string | null;
   statusKey: string | null;
   statusLabel: string;
-  origin: string;
+  /** Quién la añadió en el Hub. */
+  addedBy: string;
   count: number;
   value: number;
   saleTypes: string;
@@ -73,6 +74,7 @@ export async function exportInquiryListPdf(rows: InquiryListRow[], options: { pe
       align: "center",
       badge: (fila) => (fila.statusKey ? COLOR_DEL_ESTADO[fila.statusKey] ?? null : null),
     },
+    { header: "Añadida por", value: (fila) => fila.addedBy },
     { header: "Cant.", value: (fila) => String(fila.count), align: "right" },
     { header: "Valor", value: (fila) => (fila.value > 0 ? formatEuroForPdf(fila.value) : "—"), align: "right" },
   ];

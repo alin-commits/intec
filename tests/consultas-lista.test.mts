@@ -3,16 +3,19 @@ import assert from "node:assert/strict";
 import { filtrarConsultas, hayFiltrosPuestos, listaDeConsultas, ordenarConsultas, type ComoSeOrdena, type FiltrosDeConsultas, type NombresYValores } from "../src/lib/consultas-lista.ts";
 import type { InquiryRecord } from "../src/lib/types.ts";
 
-const SIN_FILTROS: FiltrosDeConsultas = { texto: "", marca: "all", canal: "all", estado: "all", origen: "all" };
+const SIN_FILTROS: FiltrosDeConsultas = { texto: "", marca: "all", canal: "all", estado: "all", comercial: "all" };
 
 const MARCAS: Record<string, string> = { u1: "Sumifluid", u2: "Suministros Intec" };
 const nombres: NombresYValores = {
   marcaDe: (id) => MARCAS[id] ?? "",
   canalDe: (canal) => ({ phone: "Teléfono", chat: "Chat", email_form: "Email/Formulario", whatsapp: "Whatsapp", portal_rrss: "Portal/RRSS" }[canal] ?? canal),
   estadoDe: (estado) => ({ contactado: "Contactado", ganado: "Ganado", perdido: "Perdido" }[estado] ?? estado),
+  comercialDe: (id) => (id ? PERSONAS[id] ?? "" : ""),
   valorDe: (record) => VALORES[record.id] ?? 0,
 };
 const VALORES: Record<string, number> = {};
+// Nombres inventados.
+const PERSONAS: Record<string, string> = { p1: "Pablo Solís", p2: "Ana Beltrán" };
 
 function consulta(partes: Partial<InquiryRecord> & { id: string }): InquiryRecord {
   return {
@@ -42,14 +45,15 @@ test("el buscador mira todos los campos de la ficha, sin distinguir mayúsculas"
 
 test("cada filtro de cabecera se queda con lo suyo", () => {
   const filas = [
-    consulta({ id: "a", businessUnitId: "u1", inquiryType: "phone" }),
-    consulta({ id: "b", businessUnitId: "u2", inquiryType: "whatsapp" }),
-    consulta({ id: "c", businessUnitId: "u2", inquiryType: "phone", entryMode: "weekly", count: 7, status: undefined }),
+    consulta({ id: "a", businessUnitId: "u1", inquiryType: "phone", createdBy: "p1" }),
+    consulta({ id: "b", businessUnitId: "u2", inquiryType: "whatsapp", createdBy: "p2" }),
+    consulta({ id: "c", businessUnitId: "u2", inquiryType: "phone", entryMode: "weekly", count: 7, status: undefined, createdBy: "p1" }),
   ];
   assert.deepEqual(filtrarConsultas(filas, { ...SIN_FILTROS, marca: "u2" }).map((f) => f.id), ["b", "c"]);
   assert.deepEqual(filtrarConsultas(filas, { ...SIN_FILTROS, canal: "whatsapp" }).map((f) => f.id), ["b"]);
-  assert.deepEqual(filtrarConsultas(filas, { ...SIN_FILTROS, origen: "weekly" }).map((f) => f.id), ["c"]);
-  assert.deepEqual(filtrarConsultas(filas, { ...SIN_FILTROS, origen: "single" }).map((f) => f.id), ["a", "b"]);
+  // Quién la añadió: las suyas, individuales y semanales.
+  assert.deepEqual(filtrarConsultas(filas, { ...SIN_FILTROS, comercial: "p1" }).map((f) => f.id), ["a", "c"]);
+  assert.deepEqual(filtrarConsultas(filas, { ...SIN_FILTROS, comercial: "p2" }).map((f) => f.id), ["b"]);
 });
 
 /*
@@ -82,6 +86,12 @@ test("ordena por lo que se lee, no por el código de debajo", () => {
   const asc: ComoSeOrdena = { columna: "unidad", desc: false };
   assert.deepEqual(ordenarConsultas(filas, asc, nombres).map((f) => f.id), ["b", "a"], "Sumifluid antes que Suministros Intec");
   assert.deepEqual(ordenarConsultas(filas, { ...asc, desc: true }, nombres).map((f) => f.id), ["a", "b"]);
+});
+
+test("por quién la añadió ordena por su nombre", () => {
+  const filas = [consulta({ id: "a", createdBy: "p1" }), consulta({ id: "b", createdBy: "p2" }), consulta({ id: "c", createdBy: null })];
+  // Sin nombre va primero en orden ascendente: la cadena vacía.
+  assert.deepEqual(ordenarConsultas(filas, { columna: "comercial", desc: false }, nombres).map((f) => f.id), ["c", "b", "a"], "Ana antes que Pablo");
 });
 
 test("por cantidad y por valor ordena por número, no por texto", () => {
@@ -133,4 +143,5 @@ test("el buscador no cuenta como filtro puesto: se ve solo", () => {
   assert.equal(hayFiltrosPuestos({ ...SIN_FILTROS, texto: "ana" }), false);
   assert.equal(hayFiltrosPuestos({ ...SIN_FILTROS, marca: "u1" }), true);
   assert.equal(hayFiltrosPuestos({ ...SIN_FILTROS, estado: "ganado" }), true);
+  assert.equal(hayFiltrosPuestos({ ...SIN_FILTROS, comercial: "p1" }), true);
 });

@@ -1,4 +1,4 @@
-import type { InquiryEntryMode, InquiryRecord, InquiryStatus, InquiryType } from "@/lib/types";
+import type { InquiryRecord, InquiryStatus, InquiryType } from "@/lib/types";
 
 /*
   Qué consultas se ven en la lista y en qué orden.
@@ -10,7 +10,7 @@ import type { InquiryEntryMode, InquiryRecord, InquiryStatus, InquiryType } from
 */
 
 /** Por qué columna se ordena la lista de consultas. */
-export type OrdenConsultas = "fecha" | "unidad" | "contacto" | "canal" | "estado" | "origen" | "cantidad" | "valor";
+export type OrdenConsultas = "fecha" | "unidad" | "contacto" | "canal" | "estado" | "comercial" | "cantidad" | "valor";
 
 export type FiltrosDeConsultas = {
   /** Lo que se ha escrito en el buscador. */
@@ -18,7 +18,8 @@ export type FiltrosDeConsultas = {
   marca: string | "all";
   canal: InquiryType | "all";
   estado: InquiryStatus | "all";
-  origen: InquiryEntryMode | "all";
+  /** Quién la añadió: el id de su usuario del Hub. */
+  comercial: string | "all";
 };
 
 export type ComoSeOrdena = { columna: OrdenConsultas; desc: boolean };
@@ -32,6 +33,8 @@ export type NombresYValores = {
   marcaDe: (businessUnitId: string) => string;
   canalDe: (canal: InquiryType) => string;
   estadoDe: (estado: InquiryStatus) => string;
+  /** El nombre de quien la añadió, para ordenar por lo que se lee. */
+  comercialDe: (createdBy: string | null | undefined) => string;
   valorDe: (record: InquiryRecord) => number;
 };
 
@@ -53,7 +56,7 @@ export function filtrarConsultas(records: InquiryRecord[], filtros: FiltrosDeCon
     if (!encaja(record, texto)) return false;
     if (filtros.marca !== "all" && record.businessUnitId !== filtros.marca) return false;
     if (filtros.canal !== "all" && record.inquiryType !== filtros.canal) return false;
-    if (filtros.origen !== "all" && record.entryMode !== filtros.origen) return false;
+    if (filtros.comercial !== "all" && record.createdBy !== filtros.comercial) return false;
     /*
       El estado solo lo tienen las individuales: un recuento semanal es una
       cifra, no una consulta con ficha. Así que filtrar por estado es además
@@ -76,7 +79,7 @@ export function ordenarConsultas(records: InquiryRecord[], orden: ComoSeOrdena, 
       case "contacto": return enMinusculas(a.contactName).localeCompare(enMinusculas(b.contactName), "es");
       case "canal": return nombres.canalDe(a.inquiryType).localeCompare(nombres.canalDe(b.inquiryType), "es");
       case "estado": return nombres.estadoDe(a.status ?? ESTADO_POR_DEFECTO).localeCompare(nombres.estadoDe(b.status ?? ESTADO_POR_DEFECTO), "es");
-      case "origen": return a.entryMode.localeCompare(b.entryMode);
+      case "comercial": return nombres.comercialDe(a.createdBy).localeCompare(nombres.comercialDe(b.createdBy), "es");
       case "cantidad": return a.count - b.count;
       case "valor": return nombres.valorDe(a) - nombres.valorDe(b);
       default: return a.createdAt.localeCompare(b.createdAt);
@@ -105,5 +108,5 @@ export function listaDeConsultas(
 
 /** Si hay algún filtro de columna puesto (el buscador no cuenta: se ve solo). */
 export function hayFiltrosPuestos(filtros: FiltrosDeConsultas): boolean {
-  return filtros.marca !== "all" || filtros.canal !== "all" || filtros.estado !== "all" || filtros.origen !== "all";
+  return filtros.marca !== "all" || filtros.canal !== "all" || filtros.estado !== "all" || filtros.comercial !== "all";
 }
