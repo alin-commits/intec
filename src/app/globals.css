@@ -2214,6 +2214,8 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .autores-fila select { min-width: 0; min-height: 34px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; font-size: 12.5px; background: var(--surface); color: inherit; }
 .autores-fila select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 .autores-fila select:disabled { opacity: 0.55; }
+/* El código de comisionista junto al nombre, como en Sage. */
+.autores-codigo { margin-left: 7px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
 /* Los usuarios de Sage de un comercial, como fichas que se quitan con la ×. */
 .autores-usuarios { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .autores-usuario { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: 12.5px; font-weight: 700; }

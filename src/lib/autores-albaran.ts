@@ -205,6 +205,35 @@ export function autoresVistos(filas: FilaDeAutor[]): AutorVisto[] {
   return [...vistos.values()].sort((a, b) => b.documentos - a.documentos);
 }
 
+/**
+ * Los operadores del TPV que son un comisionista, enlazados solos.
+ *
+ * En la tienda, cada comercial tiene de operador el mismo número que de
+ * comisionista: el operador 150 de la sociedad 1 es el comisionista 150. Se
+ * enlaza cuando coinciden el número y también el nombre —alguna palabra de
+ * cuatro letras o más—, para que un operador que reutilice el número de otro
+ * no se cuele. Los usuarios de Sage no siguen esa regla (el usuario 24 no es
+ * el comisionista 24) y se eligen a mano.
+ *
+ * Lo que se apunte a mano manda sobre esto: también quitarle el enlace.
+ */
+export function enlacesPorNumero(
+  autores: { author: string; nombre: string }[],
+  repOf: (companyCode: number, repCode: number | null) => RepIdentity,
+): QuienEs[] {
+  const enlaces: QuienEs[] = [];
+  for (const autor of autores) {
+    const tpv = /^t:(\d+):(\d+)$/.exec(autor.author);
+    if (!tpv) continue;
+    const comisionista = repOf(Number(tpv[1]), Number(tpv[2]));
+    if (!comisionista.isPerson) continue;
+    const suyas = new Set(llano(comisionista.label).split(/[^A-Z]+/).filter((palabra) => palabra.length >= 4));
+    const casa = llano(autor.nombre).split(/[^A-Z]+/).some((palabra) => suyas.has(palabra));
+    if (casa) enlaces.push({ author: autor.author, rep_key: comisionista.key, is_office: false });
+  }
+  return enlaces;
+}
+
 /** "Usuario 25 de Sage" o "TPV de la sociedad 1, operador 150": de dónde sale el autor. */
 export function origenDelAutor(author: string): string {
   const usuario = /^u:(\d+)$/.exec(author);

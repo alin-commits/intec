@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoresVistos, origenDelAutor, repartirAutores, sugerirComercial, type FilaDeAutor } from "../src/lib/autores-albaran.ts";
+import { autoresVistos, enlacesPorNumero, origenDelAutor, repartirAutores, sugerirComercial, type FilaDeAutor } from "../src/lib/autores-albaran.ts";
 import type { RepIdentity } from "../src/lib/sales-model.ts";
 
 // Nombres inventados. Fichas: sociedad 1, comerciales 10 (Pablo), 11 (Ana) y 99 (GENERAL, comodín).
@@ -102,4 +102,15 @@ test("la propuesta de comercial: por palabra entera, por apellido dentro del usu
   assert.equal(sugerirComercial("Ana", personas), null);
   assert.equal(sugerirComercial("ADMIN", personas), null);
   assert.equal(sugerirComercial("", personas), null);
+});
+
+test("un operador del TPV se enlaza solo con el comisionista de su número si el nombre casa", () => {
+  const enlaces = enlacesPorNumero([
+    { author: "t:1:10", nombre: "Pablo Solís" },      // número y nombre: se enlaza
+    { author: "t:1:11", nombre: "Mostrador tarde" },  // el número es de Ana, el nombre no: no
+    { author: "t:1:99", nombre: "General" },          // el 99 es un comodín: no
+    { author: "t:1:150", nombre: "Lucía Prieto" },    // no hay comisionista 150: no
+    { author: "u:10", nombre: "Pablo" },              // un usuario de Sage no sigue la regla
+  ], (_company, code) => (code !== null && fichas[code]) || { key: "1-150", label: "Código 150", assigned: true, isPerson: false });
+  assert.deepEqual(enlaces, [{ author: "t:1:10", rep_key: "PABLO SOLIS IBARRA", is_office: false }]);
 });

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   autoresVistos,
+  enlacesPorNumero,
   origenDelAutor,
   repartirAutores,
   sugerirComercial,
@@ -83,11 +84,31 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
     return { data: data as QuienEs[] | null, error };
   });
 
-  const quienEs = new Map((apuntados.data ?? []).map((fila) => [fila.author, fila]));
+  /*
+    De quién es cada usuario: primero los operadores del TPV que se enlazan
+    solos con su comisionista por el número; encima, lo apuntado a mano, que
+    manda —también para quitar uno de esos enlaces—; y encima, lo que se
+    acaba de cambiar en esta pantalla.
+  */
+  const vistos = autoresVistos(filas.data?.filas ?? []);
+  const enlazados = enlacesPorNumero(vistos, ctx.repOf);
+  const automaticos = new Set(enlazados.map((enlace) => enlace.author));
+  const quienEs = new Map(enlazados.map((enlace) => [enlace.author, enlace]));
+  for (const fila of apuntados.data ?? []) {
+    quienEs.set(fila.author, fila);
+    automaticos.delete(fila.author);
+  }
   for (const [author, fila] of Object.entries(cambios)) {
+    automaticos.delete(author);
     if (fila) quienEs.set(author, fila);
     else quienEs.delete(author);
   }
+
+  /** "comisionista 51", o los varios que tenga en distintas sociedades: lo que se ve en Sage. */
+  const comoComisionista = (key: string) => {
+    const codigos = [...new Set(ctx.reps.filter((rep) => ctx.repOf(rep.company_code, rep.code).key === key).map((rep) => rep.code))].sort((a, b) => a - b);
+    return codigos.length === 0 ? "" : `comisionista ${codigos.join(", ")}`;
+  };
 
   // Los comerciales a los que se puede asignar un usuario: las personas, sin los comodines de Sage.
   const personas: Persona[] = [];
@@ -138,7 +159,6 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
     en el panel —y de los que ya tienen alguno, para poder quitárselo—. Los
     usuarios que se ofrecen son los que han hecho albaranes en el periodo.
   */
-  const vistos = autoresVistos(filas.data.filas);
   const deQuienEs = (author: string) => quienEs.get(author)?.rep_key ?? null;
   const conVenta = ctx.model.byRep.filter((rep) => rep.isPerson && rep.assigned && rep.bucket.net > 0).map((rep) => ({ key: rep.key, label: rep.name }));
   const conUsuario = [...new Set([...quienEs.values()].map((quien) => quien.rep_key).filter((key): key is string => Boolean(key)))]
@@ -152,15 +172,17 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   // La primera vez no hay nada apuntado y la tabla saldría vacía: el editor se abre solo.
   const conEditor = editando || !hayAsignados;
 
-  /** Le da un usuario de Sage a un comercial, o se lo quita (null). */
+  /*
+    Le da un usuario de Sage a un comercial, o se lo quita (null). Quitar no
+    borra la fila: la deja sin comercial, porque un operador del TPV que se
+    enlaza solo volvería a enlazarse si no quedara apuntado que no es él.
+  */
   const guardar = async (author: string, repKey: string | null) => {
     setGuardando(author);
     setFallo(null);
     const supabase = createClient();
-    const fila: QuienEs | null = repKey ? { author, rep_key: repKey, is_office: false } : null;
-    const { error } = fila
-      ? await supabase.from("sage_author_reps").upsert({ ...fila, updated_at: new Date().toISOString() }, { onConflict: "author" })
-      : await supabase.from("sage_author_reps").delete().eq("author", author);
+    const fila: QuienEs = { author, rep_key: repKey, is_office: false };
+    const { error } = await supabase.from("sage_author_reps").upsert({ ...fila, updated_at: new Date().toISOString() }, { onConflict: "author" });
     setGuardando(null);
     if (error) {
       console.error("No se pudo apuntar quién es el autor:", error);
@@ -171,7 +193,10 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   };
 
   const columnas: Column<FilaDeComercial>[] = [
-    { key: "comercial", header: "Comercial", text: true, render: (fila) => fila.label, sort: (fila) => fila.label },
+    {
+      key: "comercial", header: "Comercial", text: true, sort: (fila) => fila.label,
+      render: (fila) => <>{fila.label}{comoComisionista(fila.key) ? <small className="autores-codigo">{comoComisionista(fila.key).replace("comisionista ", "")}</small> : null}</>,
+    },
     { key: "hechos", header: "Albaranes hechos", render: (fila) => cuenta(fila.hechos), sort: (fila) => fila.hechos.documentos, total: (todas) => cuenta(sumaDe(todas, "hechos")) },
     {
       key: "propios", header: "A su facturación",
@@ -212,9 +237,9 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   const editor = (
     <div className="autores-editor">
       <p className="autores-editor-intro">
-        Los comerciales con venta en el panel. A cada uno, el usuario o los usuarios de Sage con los que hace albaranes —el
-        suyo y, si vende en tienda, su operador del TPV—. Se guarda al elegir. Los usuarios que no son de ningún comercial
-        cuentan como otros empleados: no hace falta marcarlos.
+        Los comisionistas con venta en el panel. A cada uno, el usuario o los usuarios de Sage con los que hace albaranes. Su
+        operador del TPV se enlaza solo, porque lleva su mismo número de comisionista; el usuario de Sage hay que elegirlo, porque
+        su número no coincide. Se guarda al elegir. Los usuarios que no son de ningún comisionista cuentan como otros empleados.
       </p>
       {fallo ? <p className="autores-fallo" role="alert">{fallo}</p> : null}
       <ul className="autores-lista">
@@ -232,12 +257,14 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
             <li key={rep.key} className={`autores-fila${suyos.length === 0 ? " is-pendiente" : ""}`}>
               <div className="autores-quien">
                 <strong>{rep.label}</strong>
-                <span>{suyos.length === 0 ? "Sin usuario de Sage: no hace albaranes, o falta elegirlo" : `${suyos.length} usuario${suyos.length === 1 ? "" : "s"} de Sage`}</span>
+                <span>
+                  {[comoComisionista(rep.key), suyos.length === 0 ? "sin usuario de Sage: no hace albaranes, o falta elegirlo" : `${suyos.length} usuario${suyos.length === 1 ? "" : "s"} de Sage`].filter(Boolean).join(" · ")}
+                </span>
               </div>
               <div className="autores-usuarios">
                 {suyos.map((author) => (
                   <span key={author} className="autores-usuario">
-                    {nombreDelAutor(author)} <small>{origenCorto(author)}</small>
+                    {nombreDelAutor(author)} <small>{origenCorto(author)}{automaticos.has(author) ? " · por su número" : ""}</small>
                     <button type="button" aria-label={`Quitar ${nombreDelAutor(author)} de ${rep.label}`} disabled={guardando === author}
                       onClick={() => void guardar(author, null)}>×</button>
                   </span>
@@ -260,7 +287,7 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   return (
     <Panel
       title="Albaranes por comercial"
-      subtitle={`Albaranes de ${ctx.periodName}: los que hace cada comercial en Sage, cuántos van a su facturación y cuántos se facturan a otro porque el cliente ya está asignado. Pulsa uno para ver a quién${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`}
+      subtitle={`Albaranes de ${ctx.periodName}: los que hace cada comercial en Sage, cuántos van a su facturación y cuántos se facturan a otro comisionista porque el cliente es suyo. Pulsa uno para ver a quién${filters.channels.length > 0 ? " · sin filtro de canal" : ""}`}
       trailing={(
         <button type="button" className="sales-chip" aria-expanded={conEditor} onClick={() => setEditando((actual) => !actual)}>
           Usuarios de cada comercial
