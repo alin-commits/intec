@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { LeadStatus } from "@/lib/types";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
+import { AutoresDeAlbaran } from "./autores-albaran";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerTotals } from "./sales-queries";
 import { days, LoadFailed, Panel, PendingDetail, RankList, share, useSageQuery } from "./sales-ui";
@@ -429,6 +430,8 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
             </div>
           ) : <PendingDetail what="El detalle de abonos e incidencias por motivo" />}
         </Panel>
+
+        <AutoresDeAlbaran ctx={ctx} />
 
         {ctx.canSeeLeads ? (
           <Panel title={`Leads de la web en ${periodName}`} subtitle="Los que entran al Hub por la web y las campañas (no dependen de sociedad, canal ni comercial de Sage)" className="panel panel-padded sales-board-full">
