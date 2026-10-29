@@ -20,8 +20,15 @@
     5. Si la ficha del comercial (Comisionistas) guarda algún usuario, que es
        lo que permitiría saber de quién es cada autor sin apuntarlo a mano.
 
-  No lee importes de clientes ni datos personales de nadie más allá del código
-  de usuario que ya va en cada albarán. No escribe nada.
+    6. El cruce con nombres a partir de _TS_SysUsuario, que la primera
+       pasada encontró como la columna del autor: quién hizo cada albarán
+       (su nombre en Sage) y a qué comercial se le apuntó.
+    7. Los usuarios de Sage, con su código, su nombre y si están activos,
+       para apuntar en el Hub qué usuario es cada comercial.
+
+  De lsysUsuarios solo se leen el código, el nombre, el apodo y si está
+  activo: esa tabla guarda también contraseñas y tokens, y esas columnas no se
+  tocan. No lee importes de clientes. No escribe nada.
 
   CÓMO SE USA
   -----------
@@ -138,7 +145,11 @@ if ($columnas.Rows.Count -eq 0) {
 
 # --- 2 y 3. Valores y cruce con el comercial asignado ---------------------
 $tieneComisionista = (Consultar $servidorBueno "select count(*) as n from sys.columns c join sys.tables t on t.object_id = c.object_id where t.name = 'CabeceraAlbaranCliente' and c.name = 'CodigoComisionista';").Rows[0]["n"] -gt 0
-$desde = (Get-Date).AddDays(-$Dias).ToString("yyyy-MM-dd")
+# La fecha va como yyyyMMdd y con el estilo 112, igual que en el agente: con
+# el servidor en español, '2026-07-31' se lee como día 7 del mes 31 y la
+# consulta entera falla. Fue lo que dejó sin datos los pasos 2 y 3 la primera vez.
+$desde = (Get-Date).AddDays(-$Dias).ToString("yyyyMMdd")
+$desdeSql = "convert(datetime, '$desde', 112)"
 foreach ($fila in $columnas.Rows) {
   $col = $fila["Columna"]
   Titulo "2. VALORES DE [$col] EN LOS ÚLTIMOS $Dias DÍAS"
@@ -146,7 +157,7 @@ foreach ($fila in $columnas.Rows) {
     $valores = Consultar $servidorBueno @"
 select top 20 cast([$col] as nvarchar(100)) as Valor, count(*) as Albaranes
 from CabeceraAlbaranCliente
-where FechaAlbaran >= '$desde'
+where FechaAlbaran >= $desdeSql
 group by cast([$col] as nvarchar(100))
 order by count(*) desc;
 "@
@@ -164,7 +175,7 @@ select top 40
   CodigoComisionista as ComercialAsignado,
   count(*) as Albaranes
 from CabeceraAlbaranCliente
-where FechaAlbaran >= '$desde'
+where FechaAlbaran >= $desdeSql
 group by CodigoEmpresa, cast([$col] as nvarchar(100)), CodigoComisionista
 order by count(*) desc;
 "@
@@ -205,6 +216,74 @@ order by c.column_id;
 if ($enComisionistas.Rows.Count -eq 0) { Write-Host "  Ninguna: el enlace autor -> comercial habrá que apuntarlo en el Hub." -ForegroundColor Yellow }
 foreach ($fila in $enComisionistas.Rows) { Write-Host ("  {0,-40} {1}" -f $fila["Columna"], $fila["Tipo"]) }
 Guardar $enComisionistas "comisionistas-usuario.csv"
+
+# --- 6. Quién hizo el albarán y a quién se le apuntó, con nombres ---------
+function Existe-Tabla($tabla) { return (Consultar $servidorBueno "select count(*) as n from sys.tables where name = '$tabla';").Rows[0]["n"] -gt 0 }
+function Existe-Columna($tabla, $columna) { return (Consultar $servidorBueno "select count(*) as n from sys.columns c join sys.tables t on t.object_id = c.object_id where t.name = '$tabla' and c.name = '$columna';").Rows[0]["n"] -gt 0 }
+
+# El nombre del comercial: la primera columna de texto con algo escrito, igual
+# que hacen el agente y nombres.ps1, porque en cada instalación se llama distinto.
+$columnasComercial = Consultar $servidorBueno @"
+select c.name from sys.columns c join sys.tables t on t.object_id = c.object_id
+join sys.types ty on ty.user_type_id = c.user_type_id
+where t.name = 'Comisionistas' and ty.name in ('varchar', 'nvarchar', 'char', 'nchar') and c.max_length >= 10
+order by c.column_id;
+"@
+$trozos = @()
+foreach ($fila in $columnasComercial.Rows) {
+  $trozos += "nullif(ltrim(rtrim(cast(c.[$($fila["name"])] as nvarchar(200)))), '')"
+  if ($trozos.Count -ge 8) { break }
+}
+$nombreComercial = if ($trozos.Count -gt 0) { "coalesce(" + ($trozos -join ", ") + ", 'Sin nombre')" } else { "'Sin nombre'" }
+
+if ((Existe-Columna "CabeceraAlbaranCliente" "_TS_SysUsuario") -and $tieneComisionista) {
+  $hayUsuarios = Existe-Tabla "lsysUsuarios"
+  $nombreUsuario = if ($hayUsuarios) { "coalesce(nullif(ltrim(rtrim(u.sysNickName)), ''), nullif(ltrim(rtrim(u.sysUserName)), ''), 'Sin nombre')" } else { "'Sin nombre'" }
+  $joinUsuarios = if ($hayUsuarios) { "left join lsysUsuarios u on u.sysUsuario = a._TS_SysUsuario" } else { "" }
+
+  Titulo "6. QUIÉN HIZO EL ALBARÁN (_TS_SysUsuario) Y A QUIÉN SE LE APUNTÓ — ÚLTIMOS $Dias DÍAS"
+  try {
+    $cobertura = Consultar $servidorBueno @"
+select count(*) as Total,
+  sum(case when a._TS_SysUsuario is null or a._TS_SysUsuario = 0 then 1 else 0 end) as SinAutor
+from CabeceraAlbaranCliente a
+where a.FechaAlbaran >= $desdeSql;
+"@
+    $fila = $cobertura.Rows[0]
+    Write-Host ("  {0} albaranes, {1} sin autor apuntado" -f $fila["Total"], $fila["SinAutor"]) -ForegroundColor White
+    $cruceNombres = Consultar $servidorBueno @"
+select top 80
+  a.CodigoEmpresa as Empresa,
+  a._TS_SysUsuario as Usuario,
+  $nombreUsuario as QuienLoHizo,
+  a.CodigoComisionista as Comercial,
+  $nombreComercial as SeLeApuntaA,
+  count(*) as Albaranes
+from CabeceraAlbaranCliente a
+$joinUsuarios
+left join Comisionistas c on c.CodigoEmpresa = a.CodigoEmpresa and c.CodigoComisionista = a.CodigoComisionista
+where a.FechaAlbaran >= $desdeSql
+group by a.CodigoEmpresa, a._TS_SysUsuario, $nombreUsuario, a.CodigoComisionista, $nombreComercial
+order by count(*) desc;
+"@
+    foreach ($c in $cruceNombres.Rows) {
+      Write-Host ("  empresa {0,-2} {1,-22} -> {2,-26} {3,6} albaranes" -f $c["Empresa"], ("{0} ({1})" -f $c["QuienLoHizo"], $c["Usuario"]), ("{0} ({1})" -f $c["SeLeApuntaA"], $c["Comercial"]), $c["Albaranes"])
+    }
+    Guardar $cruceNombres "cruce-con-nombres.csv"
+  } catch { Write-Host "  no se pudo: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+  # --- 7. Los usuarios de Sage, para apuntar quién es cada comercial ---------
+  if ($hayUsuarios) {
+    Titulo "7. USUARIOS DE SAGE (solo código, nombre y si está activo)"
+    try {
+      $usuarios = Consultar $servidorBueno "select sysUsuario as Usuario, sysUserName as Nombre, sysNickName as Apodo, sysActivo as Activo from lsysUsuarios order by sysUsuario;"
+      foreach ($u in $usuarios.Rows) { Write-Host ("  {0,-6} {1,-30} {2,-20} activo={3}" -f $u["Usuario"], $u["Nombre"], $u["Apodo"], $u["Activo"]) }
+      Guardar $usuarios "usuarios-sage.csv"
+    } catch { Write-Host "  no se pudo: $($_.Exception.Message)" -ForegroundColor Yellow }
+  }
+} else {
+  Titulo "6. NO HAY _TS_SysUsuario: el autor habrá que buscarlo en las columnas del paso 1"
+}
 
 Write-Host ""
 Write-Host "=======================================================" -ForegroundColor Green
