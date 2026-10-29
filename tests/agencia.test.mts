@@ -5,17 +5,19 @@ import {
   cuandoEs,
   gastoDelMes,
   invertidoEn,
+  invertidoPorServicio,
   mesAMes,
   mesesDe,
   mesesDelAnio,
   porConcepto,
   retornoDe,
+  servicioSugerido,
   type FilaDeConsultas,
   type PartidaDeAgencia,
 } from "../src/lib/agencia.ts";
 
 const partida = (businessUnitId: string | null, concept: string, monthlyAmount: number, startMonth: string, endMonth: string | null = null): PartidaDeAgencia =>
-  ({ id: `${businessUnitId}-${concept}-${startMonth}`, businessUnitId, concept, monthlyAmount, startMonth, endMonth, notes: null });
+  ({ id: `${businessUnitId}-${concept}-${startMonth}`, businessUnitId, concept, service: servicioSugerido(concept), monthlyAmount, startMonth, endMonth, notes: null });
 
 const fila = (month: string, unit: string, inquiries: number, won = 0, wonAmount = 0, offered = 0, offeredAmount = 0): FilaDeConsultas =>
   ({ month, business_unit_id: unit, inquiries, won, won_amount: wonAmount, offered, offered_amount: offeredAmount });
@@ -107,4 +109,30 @@ test("cuándo es una partida, dicho para personas", () => {
   assert.equal(cuandoEs(partida("intec", "Web", 1, "2026-06", "2026-06"), nombre), "Solo en 2026-06");
   assert.equal(cuandoEs(partida("intec", "SEO", 1, "2026-01"), nombre), "Cada mes desde 2026-01");
   assert.equal(cuandoEs(partida("intec", "SEO", 1, "2026-01", "2026-06"), nombre), "Cada mes de 2026-01 a 2026-06");
+});
+
+test("el servicio que se propone por el concepto", () => {
+  assert.equal(servicioSugerido("SEO"), "seo");
+  assert.equal(servicioSugerido("Posicionamiento web (20 keywords)"), "seo");
+  assert.equal(servicioSugerido("SEM (gestión)"), "sem");
+  assert.equal(servicioSugerido("Google Ads (inversión)"), "sem");
+  assert.equal(servicioSugerido("Campañas de búsqueda"), "sem");
+  assert.equal(servicioSugerido("Web"), "otro");
+  // «Ads» como palabra, no dentro de otra.
+  assert.equal(servicioSugerido("Leads cualificados"), "otro");
+});
+
+test("lo invertido se reparte por servicio, y suma lo mismo que el total", () => {
+  const partidas = [
+    partida("intec", "SEO", 450, "2026-01"),
+    partida("intec", "SEM (gestión)", 300, "2026-01"),
+    partida("intec", "Google Ads (inversión)", 600, "2026-03"),
+    partida("intec", "Web", 3000, "2026-02", "2026-02"),
+    partida(null, "Informes y consultoría", 100, "2026-01"),
+  ];
+  const meses = ["2026-01", "2026-02", "2026-03"];
+  const reparto = invertidoPorServicio(partidas, meses, "todas");
+  assert.deepEqual(reparto, { seo: 1350, sem: 1500, otro: 3300 });
+  assert.equal(reparto.seo + reparto.sem + reparto.otro, invertidoEn(partidas, meses, "todas"));
+  assert.deepEqual(invertidoPorServicio(partidas, meses, "intec"), { seo: 1350, sem: 1500, otro: 3000 });
 });

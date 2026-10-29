@@ -8,12 +8,32 @@
   Los meses van como "2026-10".
 */
 
+/**
+ * A qué va una partida. La inversión se ve por separado —cuánto a SEO y
+ * cuánto a SEM—, pero las consultas y el retorno cuentan todo junto: una
+ * consulta no dice si llegó por el SEO o por el SEM.
+ */
+export type Servicio = "seo" | "sem" | "otro";
+export const SERVICIOS: Servicio[] = ["seo", "sem", "otro"];
+export const NOMBRE_DEL_SERVICIO: Record<Servicio, string> = { seo: "SEO", sem: "SEM", otro: "Otros" };
+
+/**
+ * El servicio que le corresponde a un concepto, para proponerlo al apuntar
+ * una partida: lo mismo que hace la migración con las que ya había.
+ */
+export function servicioSugerido(concepto: string): Servicio {
+  if (/\bseo\b|posicionamiento/i.test(concepto)) return "seo";
+  if (/\bsem\b|google ads|\bads\b|adwords|campañ|anuncio/i.test(concepto)) return "sem";
+  return "otro";
+}
+
 /** Una partida del presupuesto: tanto al mes, de un mes a otro (o sin final). */
 export type PartidaDeAgencia = {
   id: string;
   /** null: de todas las marcas sin repartir. Cuenta en el total, no en ninguna marca. */
   businessUnitId: string | null;
   concept: string;
+  service: Servicio;
   monthlyAmount: number;
   startMonth: string;
   /** null: sigue. Igual que el inicio: un gasto de una sola vez. */
@@ -82,6 +102,13 @@ const deLaMarca = (marca: MarcaElegida) => (partida: PartidaDeAgencia) => marca 
 /** Lo invertido en esos meses. Con «todas», también lo que no es de ninguna marca. */
 export function invertidoEn(partidas: PartidaDeAgencia[], meses: string[], marca: MarcaElegida): number {
   return partidas.filter(deLaMarca(marca)).reduce((suma, partida) => suma + meses.reduce((enMes, mes) => enMes + gastoDelMes(partida, mes), 0), 0);
+}
+
+/** Lo invertido en esos meses y esa marca, por servicio. */
+export function invertidoPorServicio(partidas: PartidaDeAgencia[], meses: string[], marca: MarcaElegida): Record<Servicio, number> {
+  const reparto: Record<Servicio, number> = { seo: 0, sem: 0, otro: 0 };
+  for (const servicio of SERVICIOS) reparto[servicio] = invertidoEn(partidas.filter((partida) => partida.service === servicio), meses, marca);
+  return reparto;
 }
 
 /** Lo invertido y lo que han dado las consultas, en esos meses y esa marca. */

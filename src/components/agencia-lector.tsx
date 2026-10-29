@@ -2,7 +2,7 @@
 
 import { useState, type ChangeEvent } from "react";
 import { Modal } from "@/components/ui/modal";
-import { partidasQueSeSolapan, type PartidaDeAgencia } from "@/lib/agencia";
+import { partidasQueSeSolapan, type PartidaDeAgencia, type Servicio } from "@/lib/agencia";
 import type { PartidaPropuesta } from "@/lib/agencia-lector";
 import { reportSafeError } from "@/lib/errors";
 import { euros } from "@/lib/sales-model";
@@ -102,6 +102,7 @@ export function AgenciaLector({ abierto, marcas, partidas, nombreDelMes, onCerra
         return {
           business_unit_id: propuesta.businessUnitId,
           concept: propuesta.concept.trim(),
+          service: propuesta.service,
           monthly_amount: Math.round(propuesta.monthlyAmount * 100) / 100,
           start_month: `${propuesta.startMonth}-01`,
           end_month: hasta ? `${hasta}-01` : null,
@@ -167,6 +168,13 @@ export function AgenciaLector({ abierto, marcas, partidas, nombreDelMes, onCerra
                         </label>
                         <label><span>Concepto</span>
                           <input value={propuesta.concept} maxLength={80} list="agencia-conceptos" onChange={(evento) => cambiar(propuesta.clave, { concept: evento.target.value })} />
+                        </label>
+                        <label><span>Servicio</span>
+                          <select value={propuesta.service} onChange={(evento) => cambiar(propuesta.clave, { service: evento.target.value as Servicio })}>
+                            <option value="seo">SEO</option>
+                            <option value="sem">SEM</option>
+                            <option value="otro">Otros</option>
+                          </select>
                         </label>
                         <label><span>{propuesta.unaVez ? "Importe (€)" : "Al mes (€)"}</span>
                           <input type="number" min="0" step="0.01" inputMode="decimal" value={propuesta.monthlyAmount}

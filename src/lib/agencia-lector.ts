@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Servicio } from "@/lib/agencia";
 
 /*
   Leer con IA el presupuesto que manda la agencia (PDF o Excel) y pasarlo a
@@ -24,6 +25,7 @@ export function esquemaDeLectura(marcas: string[]) {
     partidas: z.array(z.object({
       marca: z.enum(opciones),
       concepto: z.string(),
+      servicio: z.enum(["seo", "sem", "otro"]),
       importe_mensual: z.number(),
       una_vez: z.boolean(),
       desde: z.string(),
@@ -53,6 +55,7 @@ CONCEPTOS. Cuando encajen, usa estos nombres: ${input.conceptos.map((concepto) =
 - Si no encaja ninguno, un nombre corto en español, de una a cuatro palabras.
 
 CADA PARTIDA:
+- servicio: «seo» si es posicionamiento orgánico; «sem» si son campañas de pago, tanto lo que cobra la agencia por llevarlas como lo que se paga a Google por los anuncios; «otro» para lo demás (web, contenidos, informes, consultoría…).
 - importe_mensual: euros SIN IVA que se pagan cada mes. Si una cifra viene con IVA y también sin él, usa la de sin IVA. Si solo viene con IVA, quítale el 21 % y dilo en avisos. Si da un total anual de algo que se paga cada mes, divídelo entre los meses que cubre y dilo en notas.
 - una_vez: true si se paga una sola vez (un alta, un proyecto, una web nueva). Entonces «desde» y «hasta» son el mismo mes: el del pago.
 - desde y hasta: meses con la forma AAAA-MM. «hasta» es null si sigue sin fecha de fin. Si no dice cuándo empieza, usa ${mesActual} y dilo en avisos.
@@ -70,6 +73,7 @@ avisos: frases cortas con lo que hay que revisar. Vacío si todo está claro.`;
 export type PartidaPropuesta = {
   businessUnitId: string | null;
   concept: string;
+  service: Servicio;
   monthlyAmount: number;
   startMonth: string;
   endMonth: string | null;
@@ -113,6 +117,7 @@ export function limpiarLectura(lectura: LecturaDeLaIa, marcas: { id: string; nam
     partidas.push({
       businessUnitId: marca?.id ?? null,
       concept: concepto,
+      service: partida.servicio,
       monthlyAmount: Math.round(partida.importe_mensual * 100) / 100,
       startMonth: desde,
       endMonth: hasta,

@@ -11,21 +11,27 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Toast } from "@/components/ui/toast";
+import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { UnitBrandMark } from "@/components/unit-brand-mark";
 import {
   CONCEPTOS_SUGERIDOS,
+  NOMBRE_DEL_SERVICIO,
+  SERVICIOS,
   cifrasDe,
   cuandoEs,
   invertidoEn,
+  invertidoPorServicio,
   mesAMes,
   mesesDe,
   mesesDelAnio,
   porConcepto,
   retornoDe,
+  servicioSugerido,
   type CifrasDeAgencia,
   type FilaDeConsultas,
   type MarcaElegida,
   type PartidaDeAgencia,
+  type Servicio,
 } from "@/lib/agencia";
 import { AGENCIA_EDIT_ROLES, AGENCIA_ROLES, hasAnyRole } from "@/lib/constants";
 import { todayKey } from "@/lib/dates";
@@ -41,8 +47,10 @@ import type { BusinessUnit } from "@/lib/types";
   consultas de esa marca (sin Portales/RRSS ni leads).
 
   Todo el gasto de una marca es una inversión y todas sus consultas cuentan
-  contra ella: no se reparte entre SEO y SEM. Cada consulta que pasa a ganada
-  suma su venta al marcador, y el retorno se recalcula solo.
+  contra ella. La inversión se ve por separado —SEO, SEM y lo demás—, pero
+  las consultas y el retorno van en conjunto: una consulta no dice si llegó
+  por el SEO o por el SEM. Cada consulta que pasa a ganada suma su venta al
+  marcador, y el retorno se recalcula solo.
 */
 
 const COLORES = ["#4f46e5", "#0891b2", "#f59e0b", "#10b981", "#e11d48", "#7c3aed", "#64748b"];
@@ -51,6 +59,7 @@ const SIN_MARCA = "";
 type Borrador = {
   businessUnitId: string;
   concept: string;
+  service: Servicio;
   monthlyAmount: string;
   unaVez: boolean;
   startMonth: string;
@@ -74,6 +83,8 @@ function mapPartida(fila: Record<string, unknown>): PartidaDeAgencia {
     id: String(fila.id),
     businessUnitId: (fila.business_unit_id as string | null) ?? null,
     concept: String(fila.concept ?? ""),
+    // Sin la migración que lo añade, se deduce del concepto, como hace ella.
+    service: SERVICIOS.includes(fila.service as Servicio) ? fila.service as Servicio : servicioSugerido(String(fila.concept ?? "")),
     monthlyAmount: Number(fila.monthly_amount ?? 0),
     startMonth: String(fila.start_month ?? "").slice(0, 7),
     endMonth: fila.end_month ? String(fila.end_month).slice(0, 7) : null,
@@ -124,7 +135,7 @@ function MarcadorDeRetorno({ cifras, titulo }: { cifras: CifrasDeAgencia; titulo
   );
 }
 
-type FilaDeMarca = { key: string; nombre: string; cifras: CifrasDeAgencia };
+type FilaDeMarca = { key: string; nombre: string; cifras: CifrasDeAgencia; servicios: Record<Servicio, number> };
 
 export function AgenciaManager() {
   const hoy = todayKey();
@@ -144,7 +155,7 @@ export function AgenciaManager() {
 
   const cargarPartidas = useCallback(async () => {
     const { data, error } = await createClient().from("agency_budget_lines")
-      .select("id, business_unit_id, concept, monthly_amount, start_month, end_month, notes").order("start_month");
+      .select("*").order("start_month");
     if (error) throw error;
     setPartidas((data ?? []).map((fila) => mapPartida(fila as Record<string, unknown>)));
   }, []);
@@ -210,6 +221,7 @@ export function AgenciaManager() {
   */
   const puntos = useMemo(() => mesAMes(partidas, filas, mesesDe(`${anio}-01`, `${anio}-12`), marca), [partidas, filas, anio, marca]);
   const conceptos = useMemo(() => porConcepto(partidas, meses, marca), [partidas, meses, marca]);
+  const porServicio = useMemo(() => invertidoPorServicio(partidas, meses, marca), [partidas, meses, marca]);
 
   const anios = useMemo(() => {
     const primero = Math.min(anioActual, ...partidas.map((partida) => Number(partida.startMonth.slice(0, 4))));
@@ -221,8 +233,10 @@ export function AgenciaManager() {
   // Por marca, y aparte lo que no es de ninguna: suma en el total, sin consultas propias.
   const sinRepartir = partidas.filter((partida) => partida.businessUnitId === null);
   const porMarca: FilaDeMarca[] = [
-    ...marcas.map((unidad) => ({ key: unidad.id, nombre: unidad.name, cifras: cifrasDe(partidas, filas, meses, unidad.id) })),
-    { key: SIN_MARCA, nombre: "Todas, sin repartir", cifras: cifrasDe(sinRepartir, [], meses, "todas") },
+    ...marcas.map((unidad) => ({
+      key: unidad.id, nombre: unidad.name, cifras: cifrasDe(partidas, filas, meses, unidad.id), servicios: invertidoPorServicio(partidas, meses, unidad.id),
+    })),
+    { key: SIN_MARCA, nombre: "Todas, sin repartir", cifras: cifrasDe(sinRepartir, [], meses, "todas"), servicios: invertidoPorServicio(sinRepartir, meses, "todas") },
   ].filter((fila) => fila.cifras.invertido > 0 || fila.cifras.consultas > 0 || fila.cifras.vendido > 0);
 
   const suma = (lista: FilaDeMarca[]): CifrasDeAgencia => lista.reduce((total, fila) => ({
@@ -233,6 +247,13 @@ export function AgenciaManager() {
   const columnas: Column<FilaDeMarca>[] = [
     { key: "marca", header: "Marca", text: true, render: (fila) => fila.nombre, sort: (fila) => fila.nombre },
     { key: "invertido", header: "Invertido", render: (fila) => euros(fila.cifras.invertido), sort: (fila) => fila.cifras.invertido, total: (lista) => euros(suma(lista).invertido) },
+    // Lo invertido, por servicio. Las consultas y el retorno siguen en conjunto.
+    ...(["seo", "sem"] as const).map((servicio): Column<FilaDeMarca> => ({
+      key: servicio, header: `En ${NOMBRE_DEL_SERVICIO[servicio]}`, optional: true,
+      render: (fila) => (fila.servicios[servicio] ? euros(fila.servicios[servicio]) : <span className="muted">—</span>),
+      sort: (fila) => fila.servicios[servicio],
+      total: (lista) => euros(lista.reduce((total, fila) => total + fila.servicios[servicio], 0)),
+    })),
     {
       key: "consultas", header: "Consultas", sort: (fila) => fila.cifras.consultas,
       render: (fila) => {
@@ -270,17 +291,24 @@ export function AgenciaManager() {
 
   const borradorNuevo = (): Borrador => ({
     businessUnitId: marca === "todas" ? (marcas[0]?.id ?? SIN_MARCA) : marca,
-    concept: "", monthlyAmount: "", unaVez: false, startMonth: hoy.slice(0, 7), endMonth: "", notes: "",
+    concept: "", service: "otro", monthlyAmount: "", unaVez: false, startMonth: hoy.slice(0, 7), endMonth: "", notes: "",
   });
   const abrirPartida = (partida: PartidaDeAgencia) => setEditor({
     id: partida.id,
     borrador: {
-      businessUnitId: partida.businessUnitId ?? SIN_MARCA, concept: partida.concept, monthlyAmount: String(partida.monthlyAmount),
+      businessUnitId: partida.businessUnitId ?? SIN_MARCA, concept: partida.concept, service: partida.service, monthlyAmount: String(partida.monthlyAmount),
       unaVez: partida.endMonth === partida.startMonth, startMonth: partida.startMonth, endMonth: partida.endMonth ?? "", notes: partida.notes ?? "",
     },
   });
   const cambiar = <K extends keyof Borrador>(campo: K, valor: Borrador[K]) =>
     setEditor((actual) => (actual ? { ...actual, borrador: { ...actual.borrador, [campo]: valor } } : actual));
+  /** Al escribir el concepto se propone el servicio, salvo que ya se haya elegido otro a mano. */
+  const cambiarConcepto = (concepto: string) => setEditor((actual) => {
+    if (!actual) return actual;
+    const { borrador } = actual;
+    const propuesto = borrador.service === servicioSugerido(borrador.concept) ? servicioSugerido(concepto) : borrador.service;
+    return { ...actual, borrador: { ...borrador, concept: concepto, service: propuesto } };
+  });
 
   const guardar = async (evento: FormEvent) => {
     evento.preventDefault();
@@ -299,6 +327,7 @@ export function AgenciaManager() {
     const fila = {
       business_unit_id: borrador.businessUnitId || null,
       concept: borrador.concept.trim(),
+      service: borrador.service,
       monthly_amount: importe,
       start_month: `${borrador.startMonth}-01`,
       end_month: fin ? `${fin}-01` : null,
@@ -407,6 +436,18 @@ export function AgenciaManager() {
           helper={`${numberFormatter.format(cifras.ofertas)} consultas con oferta o en seguimiento: aún no cuentan`} />
       </section>
 
+      {/* La inversión, por servicio: SEO y SEM por separado. Lo demás sigue en conjunto. */}
+      <Cifras
+        titulo="La inversión, por servicio"
+        subtitulo={`Lo invertido en ${periodo}. Las consultas y el retorno cuentan todo junto: una consulta no dice si llegó por el SEO o por el SEM`}
+        cifras={SERVICIOS.filter((servicio) => servicio !== "otro" || porServicio.otro > 0).map((servicio): Cifra => ({
+          key: servicio,
+          etiqueta: `En ${NOMBRE_DEL_SERVICIO[servicio]}`,
+          valor: euros(porServicio[servicio]),
+          nota: cifras.invertido > 0 ? `${formatPercent((porServicio[servicio] / cifras.invertido) * 100)} de lo invertido` : "sin inversión en el periodo",
+        }))}
+      />
+
       <section className="expenses-grid">
         <article className="panel chart-panel">
           <div className="panel-heading"><div><h2>Invertido y vendido, acumulado</h2><p className="panel-subtitle">Mes a mes en {anio}. Donde la línea verde pasa a la naranja, la agencia se ha pagado{hayPrevisto ? "; lo que falta del año, con lo presupuestado" : ""}</p></div></div>
@@ -473,7 +514,7 @@ export function AgenciaManager() {
                 <button type="button" onClick={() => abrirPartida(partida)}>
                   <span className="agencia-partida-texto">
                     <strong>{partida.concept}</strong>
-                    <small>{nombreDeMarca(partida.businessUnitId)} · {cuandoEs(partida, nombreDelMes)}{partida.notes ? ` · ${partida.notes}` : ""}</small>
+                    <small>{NOMBRE_DEL_SERVICIO[partida.service]} · {nombreDeMarca(partida.businessUnitId)} · {cuandoEs(partida, nombreDelMes)}{partida.notes ? ` · ${partida.notes}` : ""}</small>
                   </span>
                   <strong>{euros(partida.monthlyAmount)}{partida.endMonth === partida.startMonth ? "" : "/mes"}</strong>
                 </button>
@@ -495,7 +536,14 @@ export function AgenciaManager() {
               </label>
               <label><span>Concepto *</span>
                 <input value={editor.borrador.concept} readOnly={!puedeEditar} maxLength={80} list="agencia-conceptos" placeholder="SEO, SEM, Google Ads…" required
-                  onChange={(evento) => cambiar("concept", evento.target.value)} />
+                  onChange={(evento) => cambiarConcepto(evento.target.value)} />
+              </label>
+              <label><span>Servicio *</span>
+                <select value={editor.borrador.service} disabled={!puedeEditar} onChange={(evento) => cambiar("service", evento.target.value as Servicio)}>
+                  <option value="seo">SEO (posicionamiento)</option>
+                  <option value="sem">SEM (campañas y Google Ads)</option>
+                  <option value="otro">Otros (web, contenidos, informes…)</option>
+                </select>
               </label>
               <label><span>Cómo se paga *</span>
                 <select value={editor.borrador.unaVez ? "una" : "mes"} disabled={!puedeEditar} onChange={(evento) => cambiar("unaVez", evento.target.value === "una")}>
