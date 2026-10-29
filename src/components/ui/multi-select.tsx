@@ -20,6 +20,11 @@ import { useClickOutside } from "@/components/ui/use-click-outside";
      estorba; con treinta comerciales hace falta.
    · Se cierra al pulsar fuera y con Escape, y lo marcado se aplica al momento:
      no hay botón de aceptar que se quede sin pulsar.
+   · Lo marcado sube arriba, en su propio bloque fijo encima de la lista. Con
+     treinta comerciales, lo elegido se quedaba perdido a media lista y había
+     que buscarlo para ver qué estaba puesto o para quitarlo. Fijo y no dentro
+     de lo que se desplaza: marcando uno del final, desaparecía de la vista
+     hacia arriba y parecía que no había pasado nada.
 */
 
 export type OpcionMulti = { value: string; label: string; grupo?: string };
@@ -50,15 +55,19 @@ export function MultiSelect({ label, opciones, seleccionadas, onChange, textoVac
     return opciones.filter((opcion) => opcion.label.toLowerCase().includes(texto));
   }, [opciones, busqueda]);
 
-  // Agrupadas si alguna lo pide (los meses, por año).
+  // Las marcadas, arriba y en el orden de la lista (los meses, seguidos).
+  const arriba = useMemo(() => visibles.filter((opcion) => marcadas.has(opcion.value)), [visibles, marcadas]);
+
+  // Las demás, agrupadas si alguna lo pide (los meses, por año).
   const grupos = useMemo(() => {
     const mapa = new Map<string, OpcionMulti[]>();
     for (const opcion of visibles) {
+      if (marcadas.has(opcion.value)) continue;
       const clave = opcion.grupo ?? "";
       mapa.set(clave, [...(mapa.get(clave) ?? []), opcion]);
     }
     return [...mapa.entries()];
-  }, [visibles]);
+  }, [visibles, marcadas]);
 
   const resumen = (() => {
     if (seleccionadas.length === 0) return textoVacio;
@@ -100,6 +109,19 @@ export function MultiSelect({ label, opciones, seleccionadas, onChange, textoVac
               <button type="button" className="text-link" onClick={() => onChange([])}>Ninguno</button>
             ) : null}
           </div>
+
+          {arriba.length > 0 ? (
+            <div className="multi-select-marcadas">
+              <p className="multi-select-grupo">Marcados</p>
+              {arriba.map((opcion) => (
+                <label key={opcion.value} className="multi-select-opcion">
+                  <input type="checkbox" checked onChange={() => alternar(opcion.value)} />
+                  {/* Fuera de su grupo, el mes necesita el año: "enero" solo no dice de cuál. */}
+                  <span>{opcion.grupo ? `${opcion.label} · ${opcion.grupo}` : opcion.label}</span>
+                </label>
+              ))}
+            </div>
+          ) : null}
 
           <div className="multi-select-lista">
             {grupos.map(([grupo, suyas]) => (

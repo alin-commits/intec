@@ -120,6 +120,9 @@ export function SalesDashboard() {
   const [externalSales, setExternalSales] = useState<ExternalSale[]>([]);
   const [previousExternalSales, setPreviousExternalSales] = useState<ExternalSale[]>([]);
   const [previousRows, setPreviousRows] = useState<SummaryRow[]>([]);
+  /** Lo del año anterior en los meses que faltan del año en curso (ver `pendingMonths`). */
+  const [pendingPreviousRows, setPendingPreviousRows] = useState<SummaryRow[]>([]);
+  const [pendingPreviousExternalSales, setPendingPreviousExternalSales] = useState<ExternalSale[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
   const [families, setFamilies] = useState<FamilyName[]>([]);
@@ -220,7 +223,7 @@ export function SalesDashboard() {
       setError(null);
       try {
         const supabase = createClient();
-        const { base, baseCompare } = resolvePeriod({ choice, compare: compareChoice, months: [], today, dataFrom });
+        const { base, baseCompare, pendingCompare } = resolvePeriod({ choice, compare: compareChoice, months: [], today, dataFrom });
         // Un año son unas 700 filas y todo el histórico pasa de 2.500: se piden
         // por páginas, con un orden fijo para que ninguna se repita ni se pierda.
         const load = (range: DateRange) => fetchAllPages<SummaryRow>((start, end) =>
@@ -243,19 +246,26 @@ export function SalesDashboard() {
           }
           return (data ?? []) as ExternalSale[];
         };
-        const [current, before, externas, externasAntes] = await Promise.all([
+        const [current, before, externas, externasAntes, pendiente, externasPendientes] = await Promise.all([
           load(base),
           baseCompare ? load(baseCompare) : Promise.resolve({ data: [] as SummaryRow[], error: null }),
           loadExternas(base),
           loadExternas(baseCompare ?? null),
+          pendingCompare ? load(pendingCompare) : Promise.resolve({ data: [] as SummaryRow[], error: null }),
+          loadExternas(pendingCompare),
         ]);
         const failure = current.error ?? before.error;
         if (failure) throw failure;
+        // Lo de los meses que faltan acompaña: si no llega, esos meses salen sin
+        // el año anterior, pero el panel carga igual.
+        if (pendiente.error) console.warn("No se pudo leer el año anterior de los meses que faltan:", pendiente.error);
         if (!active) return;
         setRows(current.data);
         setPreviousRows(before.data);
         setExternalSales(externas);
         setPreviousExternalSales(externasAntes);
+        setPendingPreviousRows(pendiente.error ? [] : pendiente.data);
+        setPendingPreviousExternalSales(externasPendientes);
         setLoaded({ choice, compare: compareChoice });
         setBusy(false);
       } catch (cause) {
@@ -518,6 +528,8 @@ export function SalesDashboard() {
     previousRows,
     externalSales,
     previousExternalSales,
+    pendingPreviousRows,
+    pendingPreviousExternalSales,
     model,
     rpc,
     rpcCompare,

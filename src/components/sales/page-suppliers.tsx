@@ -7,7 +7,7 @@ import { familyMargin, partsOf, sumParts } from "@/lib/sage-panel";
 import { channelColors, discountPercent, euros, monthLabel, pairOf, soloUnMes, soloUno, variation } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
 import type { SalesContext } from "./sales-context";
-import { changeCell, DataTable, LoadFailed, Panel, PendingDetail, share, useSageQuery, type Column } from "./sales-ui";
+import { changeCell, DataTable, LoadFailed, Panel, PendingDetail, puntosQueFaltan, share, useSageQuery, type Column } from "./sales-ui";
 
 /*
   Proveedores: cuánto se vende de lo de cada uno y si sube o baja.
@@ -240,14 +240,14 @@ export function SuppliersPage({ ctx }: { ctx: SalesContext }) {
             className="panel chart-panel sales-board-full"
           >
             <TrendChart
-              data={puntos}
+              data={[...puntos, ...puntosQueFaltan(period, ["ventas", "anterior"])]}
               series={[
                 ...(period.baseCompare ? [{ key: "anterior", label: period.baseCompareShort ?? "", color: "#cbd5e1" }] : []),
                 { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ]}
               ariaLabel={`Venta mensual del proveedor ${nombreDelMarcado}`}
               valueFormatter={euros}
-              onSelect={(indice) => ctx.toggleMonth(monthKeys[indice] ?? null)}
+              onSelect={(indice) => { if (indice < monthKeys.length) ctx.toggleMonth(monthKeys[indice]); }}
               selectedIndex={mesMarcado >= 0 ? mesMarcado : null}
             />
           </Panel>

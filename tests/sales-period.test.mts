@@ -247,3 +247,21 @@ test("muchos meses sueltos se dicen por su número, que enumerarlos no cabe", ()
   const period = resolveMeses({ kind: "year", year: 2026 }, ["2026-01", "2026-03", "2026-05", "2026-07", "2026-09"]);
   assert.equal(period.label, "5 meses");
 });
+
+test("el año en curso dice qué meses faltan y de dónde sacar los del año anterior", () => {
+  const period = resolve({ kind: "year", year: 2026 });
+  assert.deepEqual(period.pendingMonths, ["2026-10", "2026-11", "2026-12"]);
+  assert.deepEqual(period.pendingCompare, { from: "2025-10-01", to: "2025-12-31" });
+  // Los meses del periodo siguen sin pasar de hoy: lo que falta no es periodo.
+  assert.equal(period.months.at(-1), "2026-09");
+});
+
+test("un año cerrado, los últimos doce meses o sin comparar no tienen meses que falten de los que tirar", () => {
+  assert.deepEqual(resolve({ kind: "year", year: 2025 }).pendingMonths, []);
+  assert.deepEqual(resolve({ kind: "last12" }).pendingMonths, []);
+  const sinComparar = resolve({ kind: "year", year: 2026 }, { kind: "none" });
+  assert.deepEqual(sinComparar.pendingMonths, ["2026-10", "2026-11", "2026-12"]);
+  assert.equal(sinComparar.pendingCompare, null);
+  const conElAnterior = resolve({ kind: "year", year: 2026 }, { kind: "previous" });
+  assert.equal(conElAnterior.pendingCompare, null);
+});

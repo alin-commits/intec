@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
-import { DataTable, LoadFailed, Panel, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
+import { DataTable, LoadFailed, Panel, puntosQueFaltan, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
 import type { CustomerRow } from "./sales-list-modal";
 
 /*
@@ -394,7 +394,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
         >
           {monthly.failed ? <LoadFailed what="los clientes por mes" /> : (
             <TrendChart
-              data={points}
+              data={[...points, ...puntosQueFaltan(period, ["activos", "nuevos", "anterior"], hayMesMarcado(filters))]}
               series={[
                 ...(hasBefore ? [{ key: "anterior", label: period.baseCompareShort ?? "", color: "#cbd5e1" }] : []),
                 { key: "activos", label: "Con compra", color: "#0ea5e9" },
@@ -402,7 +402,7 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
               ]}
               ariaLabel={`Clientes por mes en ${period.baseLabel}`}
               total={false}
-              onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
+              onSelect={(index) => { if (index < monthKeys.length) ctx.toggleMonth(monthKeys[index]); }}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />
           )}

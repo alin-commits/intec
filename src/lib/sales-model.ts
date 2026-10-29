@@ -1023,3 +1023,29 @@ export function externasPorMes(
   }
   return mapa;
 }
+
+/** El mismo mes del año anterior: "2026-11" → "2025-11". */
+export const mismoMesDelAnioAnterior = (mes: string) => `${Number(mes.slice(0, 4)) - 1}-${mes.slice(5, 7)}`;
+
+/**
+ * Lo vendido el año anterior en cada uno de los meses que faltan del año en
+ * curso, con lo de fuera de Sage y con los filtros del panel menos el de mes.
+ * La clave es el mes de este año ("2026-11"), que es donde se pinta.
+ *
+ * Es lo que dibujan los gráficos detrás de los meses que aún no han llegado:
+ * sin venta propia, pero con la referencia de lo que se hizo entonces.
+ */
+export function anteriorDeLosQueFaltan(
+  meses: string[],
+  filas: SummaryRow[],
+  deFuera: VentaDeFuera[],
+  filters: SalesFilters,
+  repOf: (companyCode: number, repCode: number | null) => RepIdentity,
+): Map<string, number> {
+  const porMes = groupRows(filterRows(filas, filters, repOf, ["month"]), (row) => row.month);
+  const fueraPorMes = externasPorMes(deFuera, filters, repOf);
+  return new Map(meses.map((mes) => {
+    const pareja = mismoMesDelAnioAnterior(mes);
+    return [mes, (porMes.get(pareja)?.net ?? 0) + (fueraPorMes.get(pareja) ?? 0)];
+  }));
+}

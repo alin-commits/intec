@@ -9,7 +9,7 @@ import { channelColors, discountPercent, euros, hayComercialMarcado, marcado, mo
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
 import type { SalesContext } from "./sales-context";
-import { changeCell, DataTable, LoadFailed, Panel, PendingDetail, share, useSageQuery, type Column } from "./sales-ui";
+import { changeCell, DataTable, LoadFailed, Panel, PendingDetail, puntosQueFaltan, share, useSageQuery, type Column } from "./sales-ui";
 
 /*
   Productos: de la familia a la subfamilia y al artículo, y por marca. Pulsar
@@ -401,7 +401,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
             className="panel chart-panel sales-board-full"
           >
             <TrendChart
-              data={familyPoints}
+              data={[...familyPoints, ...puntosQueFaltan(period, ["ventas", "anterior"])]}
               series={[
                 ...(period.baseCompare ? [{ key: "anterior", label: period.baseCompareShort ?? "", color: "#cbd5e1" }] : []),
                 { key: "ventas", label: "Ventas", color: "#4f46e5" },
@@ -410,7 +410,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
                 ? `Venta mensual de la subfamilia ${nombreSubfamilia}`
                 : `Venta mensual de la familia ${ctx.familyName(familia)}`}
               valueFormatter={euros}
-              onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
+              onSelect={(index) => { if (index < monthKeys.length) ctx.toggleMonth(monthKeys[index]); }}
               selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
             />
           </Panel>

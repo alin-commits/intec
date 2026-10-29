@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { euros, tenths, variation } from "@/lib/sales-model";
+import { euros, monthLabel, tenths, variation } from "@/lib/sales-model";
+import type { SalesPeriod } from "@/lib/sales-period";
 
 /*
   Piezas que comparten las páginas de Ventas.
@@ -38,6 +39,20 @@ export function useSageQuery<T>(key: string | null, load: () => PromiseLike<{ da
     loading: key !== null && state.key !== key,
     failed: state.key === key && state.failed,
   };
+}
+
+/**
+ * Los meses que faltan del año en curso, para el final de un gráfico mes a mes.
+ *
+ * Con su etiqueta y todas las series en blanco: el eje llega a diciembre y la
+ * línea se corta en el mes de hoy, en vez de acabar en octubre como si ahí
+ * acabara el año. En blanco y no a cero, que a cero parecería que se ha
+ * dejado de vender. Si el gráfico pinta solo los meses marcados, no se añade
+ * nada: esos meses no se pueden marcar.
+ */
+export function puntosQueFaltan(period: SalesPeriod, series: string[], soloLoMarcado = false): Record<string, string | null>[] {
+  if (soloLoMarcado) return [];
+  return period.pendingMonths.map((mes) => ({ label: monthLabel(mes, period.multiYear), ...Object.fromEntries(series.map((serie) => [serie, null])) }));
 }
 
 export type RankItem = {

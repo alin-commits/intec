@@ -13,7 +13,7 @@ import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { AutoresDeAlbaran } from "./autores-albaran";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerTotals } from "./sales-queries";
-import { days, LoadFailed, Panel, PendingDetail, RankList, share, useSageQuery } from "./sales-ui";
+import { days, LoadFailed, Panel, PendingDetail, puntosQueFaltan, RankList, share, useSageQuery } from "./sales-ui";
 
 /*
   Comercial: ofertas, pedidos, cartera por servir, abonos e incidencias, y los
@@ -287,7 +287,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
           className="panel chart-panel sales-board-wide"
         >
           <TrendChart
-            data={points}
+            data={[...points, ...puntosQueFaltan(period, ["ofertas", "convertidas", "pedidos"], hayMesMarcado(filters))]}
             series={[
               { key: "ofertas", label: "Ofertas", color: "#6366f1" },
               ...(ctx.detail.offers ? [{ key: "convertidas", label: "Convertidas", color: "#f59e0b" }] : []),
@@ -295,7 +295,7 @@ export function CommercialPage({ ctx }: { ctx: SalesContext }) {
             ]}
             ariaLabel={`Ofertas y pedidos por mes en ${period.baseLabel}`}
             valueFormatter={euros}
-            onSelect={(index) => ctx.toggleMonth(monthKeys[index] ?? null)}
+            onSelect={(index) => { if (index < monthKeys.length) ctx.toggleMonth(monthKeys[index]); }}
             selectedIndex={selectedMonthIndex >= 0 ? selectedMonthIndex : null}
           />
           {beforeRecords ? (

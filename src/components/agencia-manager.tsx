@@ -204,7 +204,11 @@ export function AgenciaManager() {
   const cifras = useMemo(() => cifrasDe(partidas, filas, meses, marca), [partidas, filas, meses, marca]);
   const retorno = retornoDe(cifras);
   const presupuestoDelAnio = useMemo(() => invertidoEn(partidas, mesesDe(`${anio}-01`, `${anio}-12`), marca), [partidas, anio, marca]);
-  const puntos = useMemo(() => mesAMes(partidas, filas, meses, marca), [partidas, filas, meses, marca]);
+  /*
+    El año entero, también los meses que faltan: lo invertido sigue con lo
+    presupuestado —es lo que queda por gastar— y lo vendido se corta hoy.
+  */
+  const puntos = useMemo(() => mesAMes(partidas, filas, mesesDe(`${anio}-01`, `${anio}-12`), marca), [partidas, filas, anio, marca]);
   const conceptos = useMemo(() => porConcepto(partidas, meses, marca), [partidas, meses, marca]);
 
   const anios = useMemo(() => {
@@ -347,6 +351,9 @@ export function AgenciaManager() {
   }
 
   const enCurso = anio === anioActual;
+  /** El último mes que cuenta (hoy, en el año en curso) y si después queda presupuesto que pintar. */
+  const ultimoMes = meses[meses.length - 1] ?? `${anio}-12`;
+  const hayPrevisto = ultimoMes < `${anio}-12`;
   const periodo = enCurso ? `${anio}, hasta hoy` : String(anio);
   const marcaElegida = marca === "todas" ? null : marcas.find((unidad) => unidad.id === marca) ?? null;
   const partidasVisibles = partidas
@@ -402,10 +409,23 @@ export function AgenciaManager() {
 
       <section className="expenses-grid">
         <article className="panel chart-panel">
-          <div className="panel-heading"><div><h2>Invertido y vendido, acumulado</h2><p className="panel-subtitle">Mes a mes en {periodo}. Donde la línea verde pasa a la naranja, la agencia se ha pagado</p></div></div>
+          <div className="panel-heading"><div><h2>Invertido y vendido, acumulado</h2><p className="panel-subtitle">Mes a mes en {anio}. Donde la línea verde pasa a la naranja, la agencia se ha pagado{hayPrevisto ? "; lo que falta del año, con lo presupuestado" : ""}</p></div></div>
           <TrendChart
-            data={puntos.map((punto) => ({ label: nombreDelMes(punto.mes).split(" ")[0], invertido: Math.round(punto.invertidoAcumulado), vendido: Math.round(punto.vendidoAcumulado) }))}
-            series={[{ key: "invertido", label: "Invertido", color: "#f59e0b" }, { key: "vendido", label: "Vendido", color: "#10b981" }]}
+            data={puntos.map((punto) => {
+              const llegado = punto.mes <= ultimoMes;
+              return {
+                label: nombreDelMes(punto.mes).split(" ")[0],
+                invertido: llegado ? Math.round(punto.invertidoAcumulado) : null,
+                // Lo previsto arranca en el último mes con datos, para que las dos líneas se toquen.
+                previsto: punto.mes >= ultimoMes && hayPrevisto ? Math.round(punto.invertidoAcumulado) : null,
+                vendido: llegado ? Math.round(punto.vendidoAcumulado) : null,
+              };
+            })}
+            series={[
+              { key: "invertido", label: "Invertido", color: "#f59e0b" },
+              ...(hayPrevisto ? [{ key: "previsto", label: "Presupuestado", color: "#fcd34d" }] : []),
+              { key: "vendido", label: "Vendido", color: "#10b981" },
+            ]}
             ariaLabel={`Invertido y vendido acumulados en ${periodo}`}
             valueFormatter={euros}
             total={false}

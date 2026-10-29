@@ -192,6 +192,13 @@ export type SalesContext = {
   /** Lo que no pasó por Sage, del periodo y del de al lado. */
   externalSales: ExternalSale[];
   previousExternalSales: ExternalSale[];
+  /**
+   * Lo vendido el año anterior en los meses que faltan del año en curso
+   * (`period.pendingMonths`), para enseñarlo al lado de esos meses. No entra
+   * en ningún total: el año en curso todavía no los tiene.
+   */
+  pendingPreviousRows: SummaryRow[];
+  pendingPreviousExternalSales: ExternalSale[];
   model: SalesModel;
   /** Los filtros tal como los piden las funciones de la base de datos. */
   rpc: SalesRpcArgs;

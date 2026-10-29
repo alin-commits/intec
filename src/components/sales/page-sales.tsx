@@ -2,7 +2,7 @@
 
 import { TrendChart } from "@/components/charts/trend-chart";
 import { formatPercent, numberFormatter } from "@/lib/format";
-import { bucketDiscount, bucketMargin, channelLabel, euros, externasDelFiltro, externasPorMes, filterRows, groupRows, hayMesMarcado, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, sumBuckets, targetsFor, ticketFormatter, type Bucket, type SummaryRow, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { bucketDiscount, bucketMargin, channelLabel, emptyBucket, euros, externasDelFiltro, externasPorMes, filterRows, groupRows, hayMesMarcado, monthLabel, monthName, monthWithYear, parejasDe, soloUnComercial, soloUnMes, soloUno, sumBuckets, targetsFor, ticketFormatter, type Bucket, type SummaryRow, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { addDays, dayCount } from "@/lib/sales-period";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
@@ -59,8 +59,39 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   const empresasDeFuera = [...new Set(externasDelFiltro(ctx.externalSales, filters, ctx.repOf).map((fila) => fila.source))];
 
   type MonthRow = (typeof model.monthly.months)[number];
+
+  /*
+    Los meses que faltan del año en curso, también en la tabla.
+
+    No tienen venta todavía, pero sí objetivo y lo que se vendió en ellos el
+    año anterior, que es lo que hace falta para ver lo que queda de año. Van
+    detrás de los demás y no cuentan en el Total, que sigue siendo lo que va
+    de año contra el mismo tramo: sumar diciembre del año pasado a un año que
+    aún no ha llegado a diciembre daría una caída que no existe.
+  */
+  const porLlegar = new Set(period.pendingMonths);
+  const antesPendiente = groupRows(filterRows(ctx.pendingPreviousRows, filters, ctx.repOf, ["month"]), (row) => row.month);
+  const fueraPendientePorMes = externasPorMes(ctx.pendingPreviousExternalSales, filters, ctx.repOf);
+  const filasPendientes: MonthRow[] = period.pendingMonths.map((key, posicion) => {
+    const pair = period.pendingCompare ? `${Number(key.slice(0, 4)) - 1}-${key.slice(5, 7)}` : null;
+    return {
+      index: model.monthly.months.length + posicion,
+      key,
+      label: monthLabel(key, period.multiYear),
+      pair,
+      bucket: emptyBucket(),
+      margin: null,
+      beforeNet: pair ? antesPendiente.get(pair)?.net ?? 0 : 0,
+    };
+  });
+  const filasDelAnio = [...model.monthly.months, ...filasPendientes];
+  /** Solo los meses que ya han llegado: los que suman en el Total. */
+  const llegados = (rows: MonthRow[]) => rows.filter((row) => !porLlegar.has(row.key));
+  const sinLlegar = (row: MonthRow) => porLlegar.has(row.key);
+
   const ventaDelMes = (row: MonthRow) => row.bucket.net + (fueraPorMes.get(row.key) ?? 0);
-  const ventaAnteriorDelMes = (row: MonthRow) => row.beforeNet + (row.pair ? fueraAntesPorMes.get(row.pair) ?? 0 : 0);
+  const ventaAnteriorDelMes = (row: MonthRow) =>
+    row.beforeNet + (row.pair ? (fueraAntesPorMes.get(row.pair) ?? 0) + (fueraPendientePorMes.get(row.pair) ?? 0) : 0);
 
   /*
     El objetivo del mes y cómo se va respecto a él, en la misma columna.
@@ -100,12 +131,18 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
   */
   const beforeOf = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
   const monthColumns: Column<MonthRow>[] = [
-    { key: "mes", header: "Mes", text: true, render: (row) => <span className="sales-capitalize">{period.multiYear ? monthWithYear(row.key) : monthName(row.key)}</span>, sort: (row) => row.key },
-    { key: "ventas", header: "Ventas", render: (row) => euros(ventaDelMes(row)), sort: (row) => ventaDelMes(row), total: (rows) => euros(rows.reduce((suma, row) => suma + ventaDelMes(row), 0)) },
+    {
+      key: "mes", header: "Mes", text: true, sort: (row) => row.key,
+      render: (row) => <>
+        <span className="sales-capitalize">{period.multiYear ? monthWithYear(row.key) : monthName(row.key)}</span>
+        {sinLlegar(row) ? <small className="sales-por-llegar">por llegar</small> : null}
+      </>,
+    },
+    { key: "ventas", header: "Ventas", render: (row) => (sinLlegar(row) ? <span className="muted">—</span> : euros(ventaDelMes(row))), sort: (row) => ventaDelMes(row), total: (rows) => euros(llegados(rows).reduce((suma, row) => suma + ventaDelMes(row), 0)) },
     ...(monthCompared ? [
       // Cada fila lleva al lado su pareja: con un año contra el anterior, la columna es ese año.
-      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (ventaAnteriorDelMes(row) ? euros(ventaAnteriorDelMes(row)) : <span className="muted">—</span>), sort: (row: MonthRow) => ventaAnteriorDelMes(row), total: (rows: MonthRow[]) => euros(beforeOf(rows, ventaAnteriorDelMes)) },
-      { key: "var", header: "Variación", render: (row: MonthRow) => changeCell(ventaDelMes(row), ventaAnteriorDelMes(row)), sort: (row: MonthRow) => variation(ventaDelMes(row), ventaAnteriorDelMes(row)) ?? -Infinity, total: (rows: MonthRow[]) => changeCell(beforeOf(rows, ventaDelMes), beforeOf(rows, ventaAnteriorDelMes)) },
+      { key: "antes", header: period.year !== null && period.compareKind === "year" ? String(period.year - 1) : period.baseCompareShort ?? "", optional: true, render: (row: MonthRow) => (ventaAnteriorDelMes(row) ? euros(ventaAnteriorDelMes(row)) : <span className="muted">—</span>), sort: (row: MonthRow) => ventaAnteriorDelMes(row), total: (rows: MonthRow[]) => euros(beforeOf(llegados(rows), ventaAnteriorDelMes)) },
+      { key: "var", header: "Variación", render: (row: MonthRow) => (sinLlegar(row) ? <span className="muted">—</span> : changeCell(ventaDelMes(row), ventaAnteriorDelMes(row))), sort: (row: MonthRow) => (sinLlegar(row) ? -Infinity : variation(ventaDelMes(row), ventaAnteriorDelMes(row)) ?? -Infinity), total: (rows: MonthRow[]) => changeCell(beforeOf(llegados(rows), ventaDelMes), beforeOf(llegados(rows), ventaAnteriorDelMes)) },
     ] : []),
     /*
       El objetivo del mes y cómo se va respecto a él, juntos en una columna:
@@ -122,6 +159,8 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
       render: (row: MonthRow) => {
         const objetivo = objetivoDelMes(row);
         if (objetivo === null || objetivo === 0) return <span className="muted">—</span>;
+        // Un mes que no ha llegado no va ni bien ni mal: solo tiene su objetivo.
+        if (sinLlegar(row)) return euros(objetivo);
         // En el mes en curso se dice que es lo que va de él, y de cuánto:
         // si no, parece que su objetivo ha encogido.
         const enCurso = row.key === mesEnCurso;
@@ -133,20 +172,32 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
       },
       sort: (row: MonthRow) => {
         const objetivo = objetivoDelMes(row);
-        return objetivo ? variation(ventaDelMes(row), objetivo) ?? -Infinity : -Infinity;
+        return objetivo && !sinLlegar(row) ? variation(ventaDelMes(row), objetivo) ?? -Infinity : -Infinity;
       },
       total: (rows: MonthRow[]) => {
-        const objetivo = rows.reduce((suma, row) => suma + (objetivoDelMes(row) ?? 0), 0);
+        const objetivo = llegados(rows).reduce((suma, row) => suma + (objetivoDelMes(row) ?? 0), 0);
         if (objetivo === 0) return <span className="muted">—</span>;
-        return <>{euros(objetivo)}{changeCell(beforeOf(rows, ventaDelMes), objetivo)}</>;
+        return <>{euros(objetivo)}{changeCell(beforeOf(llegados(rows), ventaDelMes), objetivo)}</>;
       },
     }] : []),
     { key: "margen", header: "Margen €", optional: true, render: (row) => marginCell(row.bucket, "amount"), sort: (row) => row.margin?.amount ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "amount") },
     { key: "margenp", header: "Margen %", render: (row) => marginCell(row.bucket, "percent"), sort: (row) => row.margin?.percent ?? -Infinity, total: (rows) => marginCell(sumBuckets(rows, (row) => row.bucket), "percent") },
     { key: "dto", header: "Dto.", render: (row) => discountCell(row.bucket), sort: (row) => discountSort(row.bucket), total: (rows) => discountCell(sumBuckets(rows, (row) => row.bucket)) },
-    { key: "docs", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(row.bucket.documents), sort: (row) => row.bucket.documents, total: (rows) => numberFormatter.format(sumBuckets(rows, (row) => row.bucket).documents) },
+    { key: "docs", header: "Albaranes", optional: true, render: (row) => (sinLlegar(row) ? <span className="muted">—</span> : numberFormatter.format(row.bucket.documents)), sort: (row) => row.bucket.documents, total: (rows) => numberFormatter.format(sumBuckets(rows, (row) => row.bucket).documents) },
     { key: "ticket", header: "Ticket", optional: true, render: (row) => ticket(row.bucket), sort: (row) => (row.bucket.documents ? row.bucket.net / row.bucket.documents : 0), total: (rows) => ticket(sumBuckets(rows, (row) => row.bucket)) },
   ];
+
+  /*
+    Lo que queda de año, en una línea debajo de la tabla: cuánto falta para
+    el objetivo del año y cuánto se vendió en esos meses el año anterior.
+  */
+  const objetivoDelAnioEntero = objetivosDelAno?.reduce<number>((suma, valor) => suma + (valor ?? 0), 0) ?? 0;
+  const vendidoEnElAnio = beforeOf(model.monthly.months, ventaDelMes);
+  const faltaParaElObjetivo = objetivoDelAnioEntero - vendidoEnElAnio;
+  const anteriorDeLoQueFalta = beforeOf(filasPendientes, ventaAnteriorDelMes);
+  const tramoQueFalta = period.pendingMonths.length > 0
+    ? `${monthName(period.pendingMonths[0])}${period.pendingMonths.length > 1 ? `–${monthName(period.pendingMonths[period.pendingMonths.length - 1])}` : ""}`
+    : "";
 
   type RepRow = (typeof model.byRep)[number];
   const repColumns: Column<RepRow>[] = [
@@ -208,12 +259,30 @@ export function SalesMarginPage({ ctx }: { ctx: SalesContext }) {
           className="panel table-panel sales-board-full"
         >
           <DataTable
-            rows={model.monthly.months}
+            rows={filasDelAnio}
             columns={monthColumns}
             rowKey={(row) => row.key}
             activeKey={soloUnMes(filters)}
-            onRowClick={(row) => ctx.openMonth(row.key)}
+            // Un mes que no ha llegado no tiene ficha que abrir.
+            onRowClick={(row) => { if (!sinLlegar(row)) ctx.openMonth(row.key); }}
           />
+          {period.pendingMonths.length > 0 && period.year !== null ? (
+            <div className="sales-inline-stats">
+              <span>El Total es lo que va de {period.year}; {tramoQueFalta} está por llegar.</span>
+              {hayObjetivos && objetivoDelAnioEntero > 0 ? (
+                <>
+                  <span>Objetivo de {period.year} <strong>{euros(objetivoDelAnioEntero)}</strong></span>
+                  <span>
+                    {faltaParaElObjetivo > 0 ? "Falta para llegar" : "Superado en"} <strong>{euros(Math.abs(faltaParaElObjetivo))}</strong>
+                    {" "}· {formatPercent((vendidoEnElAnio / objetivoDelAnioEntero) * 100)} hecho
+                  </span>
+                </>
+              ) : null}
+              {period.pendingCompare && anteriorDeLoQueFalta > 0 ? (
+                <span>En {tramoQueFalta} de {period.year - 1} se vendieron <strong>{euros(anteriorDeLoQueFalta)}</strong></span>
+              ) : null}
+            </div>
+          ) : null}
         </Panel>
 
         {/*

@@ -6,7 +6,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { ConversionIcon, EuroIcon, UsuariosIcon } from "@/components/icons";
 import { trustedNewCustomersFrom } from "@/lib/sage-panel";
-import { bucketMargin, delta, emptyBucket, euros, externasDelFiltro, externasPorMes, filterRows, hayMesMarcado, marcado, mesMarcado, monthName, signedEuros, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
+import { anteriorDeLosQueFaltan, bucketMargin, delta, emptyBucket, euros, externasDelFiltro, externasPorMes, filterRows, hayMesMarcado, marcado, mesMarcado, monthLabel, monthName, signedEuros, soloUnComercial, soloUnMes, soloUno, sumRows, targetsFor, targetToDate, tenths, ticketFormatter, UNASSIGNED_KEY, variation } from "@/lib/sales-model";
 import { formatPercent, numberFormatter } from "@/lib/format";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type SalesContext } from "./sales-context";
@@ -187,6 +187,22 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
     sumaMargen += mes.margin?.amount ?? 0;
     return { label: mes.label, ventas: Math.round(sumaVentas), anterior: Math.round(sumaAntes), margen: Math.round(sumaMargen) };
   });
+  /*
+    Los meses que faltan del año, al final: sin venta, pero con lo que se
+    vendió en ellos el año anterior, que es la referencia de lo que queda. En
+    el acumulado, esa línea sigue sumando hasta diciembre.
+  */
+  const faltan = hayMesMarcado(filters) ? [] : period.pendingMonths;
+  const anteriorQueFalta = anteriorDeLosQueFaltan(faltan, ctx.pendingPreviousRows, ctx.pendingPreviousExternalSales, filters, ctx.repOf);
+  const conAnterior = period.pendingCompare !== null && monthly.hasBefore;
+  const puntosQueFaltan = faltan.map((mes) => ({
+    label: monthLabel(mes, period.multiYear), ventas: null, margen: null,
+    anterior: conAnterior ? Math.round(anteriorQueFalta.get(mes) ?? 0) : null,
+  }));
+  const acumuladoQueFalta = faltan.map((mes) => {
+    sumaAntes += anteriorQueFalta.get(mes) ?? 0;
+    return { label: monthLabel(mes, period.multiYear), ventas: null, margen: null, anterior: conAnterior ? Math.round(sumaAntes) : null };
+  });
   // Con menos de tres meses el minigráfico es una raya entre dos puntos: no
   // dice nada y encima quita sitio a la cifra, así que no se pinta.
   const hayLinea = porMes.length >= 3;
@@ -315,7 +331,7 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
                   : monthly.marginComplete ? "Ventas y margen por mes" : "Ventas por mes"}
                 {/* Lo de detrás es lo que se compara de verdad: con meses
                     marcados son sus parejas, no el año entero. */}
-                {monthly.hasBefore ? `, con ${(hayMesMarcado(filters) ? period.compareShort : period.baseCompareShort) ?? ""} detrás en gris` : ""}
+                {monthly.hasBefore ? `, con ${(hayMesMarcado(filters) ? period.compareShort : conAnterior && faltan.length > 0 && period.year !== null ? String(period.year - 1) : period.baseCompareShort) ?? ""} detrás en gris` : ""}
                 {hayMesMarcado(filters) ? ". Pulsa un mes para quitarlo." : ". Pulsa un mes para filtrar."}
               </p>
               {/* Si la línea lleva algo que no viene de Sage, se dice: cuando
@@ -336,16 +352,19 @@ export function SummaryPage({ ctx }: { ctx: SalesContext }) {
             </div>
           </div>
           <TrendChart
-            data={chartMode === "acumulado" ? acumulado : puntos}
+            data={chartMode === "acumulado" ? [...acumulado, ...acumuladoQueFalta] : [...puntos, ...puntosQueFaltan]}
             series={[
-              ...(monthly.hasBefore ? [{ key: "anterior", label: period.baseCompareShort ?? "Comparado", color: "#cbd5e1" }] : []),
+              // Si la línea gris sigue hasta diciembre, ya no es «ene–29 oct»: es el año entero.
+              ...(monthly.hasBefore ? [{ key: "anterior", label: (conAnterior && faltan.length > 0 && period.year !== null ? String(period.year - 1) : period.baseCompareShort) ?? "Comparado", color: "#cbd5e1" }] : []),
               { key: "ventas", label: "Ventas", color: "#4f46e5" },
               ...(monthly.marginComplete ? [{ key: "margen", label: "Margen", color: "#10b981" }] : []),
             ]}
             ariaLabel={`Evolución mensual de ventas de ${period.baseLabel}`}
             valueFormatter={euros}
-            total={chartMode !== "acumulado"}
-            onSelect={(index) => ctx.toggleMonth(porMes[index]?.key ?? null)}
+            // Con los meses que faltan, el año anterior no se suma: llevaría
+            // noviembre y diciembre contra un año que aún no los tiene.
+            total={chartMode === "acumulado" ? false : faltan.length > 0 ? ["ventas", "margen"] : true}
+            onSelect={(index) => { if (index < porMes.length) ctx.toggleMonth(porMes[index].key); }}
             selectedIndex={mesElegido ? porMes.findIndex((mes) => mes.key === mesElegido) : null}
           />
         </article>

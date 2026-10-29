@@ -26,6 +26,8 @@ import {
   type Rep,
   type SalesTarget,
   type SummaryRow,
+  anteriorDeLosQueFaltan,
+  mismoMesDelAnioAnterior,
 } from "../src/lib/sales-model.ts";
 
 const reps: Rep[] = [
@@ -327,4 +329,18 @@ test("con varias familias marcadas se quedan las subfamilias de las que sigan", 
 test("sin subfamilias marcadas, los filtros no se tocan", () => {
   const filtros = { ...noFilters, families: ["11"] };
   assert.equal(sinSubfamiliasHuerfanas(filtros), filtros, "el mismo objeto: nada que recortar");
+});
+
+test("los meses que faltan llevan lo del mismo mes del año anterior, con lo de fuera y los filtros", () => {
+  assert.equal(mismoMesDelAnioAnterior("2026-11"), "2025-11");
+  const filas = [row("2025-11", 1, "A", 5, 1000), row("2025-11", 2, "A", 9, 500), row("2025-12", 1, "A", 5, 700)];
+  const deFuera = [{ month: "2025-12-01", company_code: 1, rep_code: null, net_amount: 300 }];
+  const todos = anteriorDeLosQueFaltan(["2026-11", "2026-12"], filas, deFuera, noFilters, repOf);
+  assert.deepEqual([...todos], [["2026-11", 1500], ["2026-12", 1000]]);
+  // Con una sociedad marcada, solo lo suyo.
+  const deLaDos = anteriorDeLosQueFaltan(["2026-11", "2026-12"], filas, deFuera, { ...noFilters, companies: [2] }, repOf);
+  assert.deepEqual([...deLaDos], [["2026-11", 500], ["2026-12", 0]]);
+  // El filtro de mes no cuenta: esos meses no se pueden marcar.
+  const conMes = anteriorDeLosQueFaltan(["2026-11"], filas, [], { ...noFilters, months: ["2026-03"] }, repOf);
+  assert.deepEqual([...conMes], [["2026-11", 1500]]);
 });

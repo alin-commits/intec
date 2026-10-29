@@ -31,8 +31,24 @@ export type SalesPeriod = {
   basePartial: boolean;
   /** Lo que se carga para comparar el periodo entero, mes a mes. */
   baseCompare: DateRange | null;
-  /** Los meses del periodo entero ("2026-08"). */
+  /** Los meses del periodo entero ("2026-08"). Nunca pasan de hoy. */
   months: string[];
+  /**
+   * Los meses que faltan del año que se mira, si está en curso: mirando 2026
+   * a finales de octubre, noviembre y diciembre.
+   *
+   * No son parte del periodo —no tienen venta y no cuentan en ningún total—,
+   * pero las tablas y los gráficos mes a mes los enseñan igual, con su
+   * objetivo y lo que se vendió en ellos el año anterior: es la única forma
+   * de ver lo que queda de año. Vacío en cualquier otro periodo.
+   */
+  pendingMonths: string[];
+  /**
+   * Lo que se vendió el año anterior en esos meses que faltan, para ponerlo
+   * al lado. Solo comparando con el año anterior: con otra comparación, la
+   * pareja de un mes que no ha llegado no está clara. Nulo si no hay.
+   */
+  pendingCompare: DateRange | null;
   /**
    * Los meses marcados, en orden. Vacío es "todos los del periodo".
    *
@@ -272,6 +288,14 @@ export function resolvePeriod(input: {
 
   // ---- Los meses marcados ----
   const months = monthsBetween(base.from, base.to);
+  // Los que faltan del año en curso: de después de hoy a diciembre.
+  const yearEnd = choice.kind === "year" ? `${choice.year}-12-01` : null;
+  const pendingMonths = yearEnd !== null && base.to.slice(0, 7) < yearEnd.slice(0, 7)
+    ? monthsBetween(`${shiftMonth(base.to.slice(0, 7), 1)}-01`, yearEnd)
+    : [];
+  const pendingCompare = pendingMonths.length > 0 && compare.kind === "year" && choice.kind === "year"
+    ? { from: `${choice.year - 1}-${pendingMonths[0].slice(5, 7)}-01`, to: `${choice.year - 1}-12-31` }
+    : null;
   // Solo cuentan los que existen en el periodo: marcar marzo y cambiar a un
   // año que no lo tiene no debe dejar el panel en blanco.
   const chosenMonths = [...new Set(input.months ?? [])].filter((item) => months.includes(item)).sort();
@@ -378,6 +402,8 @@ export function resolvePeriod(input: {
     basePartial: base.to === todayKey,
     baseCompare,
     months,
+    pendingMonths,
+    pendingCompare,
     selectedMonths,
     compareMonths,
     scattered,
