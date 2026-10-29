@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { DonutChart } from "@/components/charts/donut-chart";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { ConsultasIcon, ConversionIcon, DocumentIcon, EuroIcon } from "@/components/icons";
+import { AgenciaLector } from "@/components/agencia-lector";
 import { KpiCard } from "@/components/kpi-card";
 import { DataTable, type Column } from "@/components/sales/sales-ui";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -138,6 +139,7 @@ export function AgenciaManager() {
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ id: string | null; borrador: Borrador } | null>(null);
   const [aBorrar, setABorrar] = useState<PartidaDeAgencia | null>(null);
+  const [lectorAbierto, setLectorAbierto] = useState(false);
   const [ocupado, setOcupado] = useState(false);
 
   const cargarPartidas = useCallback(async () => {
@@ -366,6 +368,7 @@ export function AgenciaManager() {
               {anios.map((valor) => <option key={valor} value={valor}>{valor}</option>)}
             </select>
           </label>
+          {puedeEditar ? <button type="button" className="button button-secondary" onClick={() => setLectorAbierto(true)}>Leer presupuesto con IA</button> : null}
           {puedeEditar ? <button type="button" className="button button-primary" onClick={() => setEditor({ id: null, borrador: borradorNuevo() })}>+ Añadir partida</button> : null}
         </div>
       </section>
@@ -439,7 +442,9 @@ export function AgenciaManager() {
         </div>
         {partidasVisibles.length === 0 ? (
           <p className="muted">
-            {partidas.length === 0 ? "Todavía no hay presupuesto. Pulsa «+ Añadir partida» para apuntar lo que se paga a la agencia por cada marca." : "Ninguna partida cuenta en este año."}
+            {partidas.length === 0
+              ? "Todavía no hay presupuesto. Sube el que manda la agencia con «Leer presupuesto con IA», o apunta cada partida con «+ Añadir partida»."
+              : "Ninguna partida cuenta en este año."}
           </p>
         ) : (
           <ul className="agencia-partidas">
@@ -471,7 +476,6 @@ export function AgenciaManager() {
               <label><span>Concepto *</span>
                 <input value={editor.borrador.concept} readOnly={!puedeEditar} maxLength={80} list="agencia-conceptos" placeholder="SEO, SEM, Google Ads…" required
                   onChange={(evento) => cambiar("concept", evento.target.value)} />
-                <datalist id="agencia-conceptos">{CONCEPTOS_SUGERIDOS.map((concepto) => <option key={concepto} value={concepto} />)}</datalist>
               </label>
               <label><span>Cómo se paga *</span>
                 <select value={editor.borrador.unaVez ? "una" : "mes"} disabled={!puedeEditar} onChange={(evento) => cambiar("unaVez", evento.target.value === "una")}>
@@ -508,6 +512,22 @@ export function AgenciaManager() {
           </form>
         ) : null}
       </Modal>
+
+      {/* Los conceptos de siempre, para el formulario y para el lector: así se escriben igual. */}
+      <datalist id="agencia-conceptos">{CONCEPTOS_SUGERIDOS.map((concepto) => <option key={concepto} value={concepto} />)}</datalist>
+
+      <AgenciaLector
+        abierto={lectorAbierto}
+        marcas={marcas}
+        partidas={partidas}
+        nombreDelMes={nombreDelMes}
+        onCerrar={() => setLectorAbierto(false)}
+        onGuardado={(cuantas) => {
+          setLectorAbierto(false);
+          setMensaje(`${cuantas} partida${cuantas === 1 ? "" : "s"} guardada${cuantas === 1 ? "" : "s"} del presupuesto.`);
+          void cargarPartidas().catch((causa: unknown) => setMensaje(reportSafeError(causa, "Se guardaron, pero no se pudieron recargar. Recarga la página.")));
+        }}
+      />
 
       <ConfirmationDialog open={aBorrar !== null} title="¿Borrar la partida?" confirmLabel="Borrar" destructive busy={ocupado} onCancel={() => setABorrar(null)} onConfirm={() => void borrar()}>
         {aBorrar ? (

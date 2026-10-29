@@ -140,6 +140,26 @@ export function mesAMes(partidas: PartidaDeAgencia[], filas: FilaDeConsultas[], 
   });
 }
 
+/** "SEO", "seo " y "Seo" son el mismo concepto. */
+const claveDeConcepto = (concepto: string) => concepto.trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * Las partidas que ya hay de la misma marca y el mismo concepto con algún mes
+ * en común. Cargar dos veces el mismo presupuesto duplicaría el gasto, y el
+ * retorno saldría a la mitad sin que nada lo dijera.
+ */
+export function partidasQueSeSolapan(
+  nueva: Pick<PartidaDeAgencia, "businessUnitId" | "concept" | "startMonth" | "endMonth">,
+  partidas: PartidaDeAgencia[],
+): PartidaDeAgencia[] {
+  const clave = claveDeConcepto(nueva.concept);
+  return partidas.filter((partida) =>
+    partida.businessUnitId === nueva.businessUnitId
+    && claveDeConcepto(partida.concept) === clave
+    && (nueva.endMonth === null || partida.startMonth <= nueva.endMonth)
+    && (partida.endMonth === null || nueva.startMonth <= partida.endMonth));
+}
+
 /**
  * En qué se va el dinero, por concepto. "SEO" y "seo " son el mismo: se juntan
  * sin mayúsculas ni espacios de más, con el nombre como se escribió primero.
@@ -149,7 +169,7 @@ export function porConcepto(partidas: PartidaDeAgencia[], meses: string[], marca
   for (const partida of partidas.filter(deLaMarca(marca))) {
     const importe = meses.reduce((suma, mes) => suma + gastoDelMes(partida, mes), 0);
     if (importe === 0) continue;
-    const clave = partida.concept.trim().replace(/\s+/g, " ").toLowerCase();
+    const clave = claveDeConcepto(partida.concept);
     const entrada = conceptos.get(clave) ?? { concepto: partida.concept.trim(), importe: 0 };
     entrada.importe += importe;
     conceptos.set(clave, entrada);
