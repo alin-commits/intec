@@ -78,6 +78,11 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
     if (error && sinPreparar(error)) return { data: { preparada: false, filas: [] }, error: null };
     return { data: error ? null : { preparada: true, filas: data ?? [] }, error };
   });
+  // El nombre de cada usuario de Sage, para los que no han hecho albaranes en el periodo y no salen en las filas.
+  const usuariosDeSage = useSageQuery<{ code: number; name: string }[]>(JSON.stringify(["usuarios-sage", ctx.reloadKey]), async () => {
+    const { data, error } = await createClient().from("sage_users").select("code, name");
+    return { data: error ? [] : data as { code: number; name: string }[], error: null };
+  });
   const apuntados = useSageQuery<QuienEs[]>(JSON.stringify(["quien-es", ctx.reloadKey]), async () => {
     const { data, error } = await createClient().from("sage_author_reps").select("author, rep_key, is_office");
     if (error && sinPreparar(error)) return { data: [], error: null };
@@ -167,7 +172,9 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   const delPanel = [...conVenta, ...conUsuario].sort((a, b) => a.label.localeCompare(b.label, "es"));
   const libres = vistos.filter((autor) => deQuienEs(autor.author) === null);
   const usuariosDe = (key: string) => [...quienEs.values()].filter((quien) => quien.rep_key === key).map((quien) => quien.author);
-  const nombreDelAutor = (author: string) => vistos.find((autor) => autor.author === author)?.nombre ?? origenDelAutor(author);
+  const nombreDelAutor = (author: string) => vistos.find((autor) => autor.author === author)?.nombre
+    ?? usuariosDeSage.data?.find((usuario) => `u:${usuario.code}` === author)?.name
+    ?? origenDelAutor(author);
   const hayAsignados = [...quienEs.values()].some((quien) => Boolean(quien.rep_key));
   // La primera vez no hay nada apuntado y la tabla saldría vacía: el editor se abre solo.
   const conEditor = editando || !hayAsignados;
