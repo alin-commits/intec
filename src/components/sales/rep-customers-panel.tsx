@@ -39,7 +39,8 @@ export type RepCustomerRow = {
   email: string | null;
   left_on: string | null;
   net_amount: number;
-  documents: number;
+  /** Nulo con una familia marcada: un albarán puede llevar varias y no se sabe cuántos son de ella. */
+  documents: number | null;
   previous_amount: number;
   first_purchase: string | null;
   last_purchase: string | null;
@@ -142,7 +143,7 @@ export function RepCustomersPanel({ ctx }: { ctx: SalesContext }) {
     { header: "Teléfono", value: (fila) => fila.phone },
     { header: "Correo", value: (fila) => fila.email },
     { header: conImporte ? "Comprado (€)" : "Compraba antes (€)", value: (fila) => Number(conImporte ? fila.net_amount : fila.previous_amount) },
-    { header: "Albaranes", value: (fila) => Number(fila.documents) },
+    { header: "Albaranes", value: (fila) => (fila.documents === null ? null : Number(fila.documents)) },
     { header: "Primera compra", value: (fila) => fila.first_purchase },
     { header: "Última compra", value: (fila) => fila.last_purchase },
     { header: "Días sin comprar", value: (fila) => fila.days_since_last },

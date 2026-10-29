@@ -109,9 +109,23 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
   */
   const subfamilyKeys = familia === null ? [] : filters.subfamilies.filter((key) => key.startsWith(`${familia}:`));
   const subfamily = subfamilyKeys.length === 1 ? subfamilyKeys[0].slice(familia!.length + 1) : null;
-  const marcarSubfamilia = (code: string) => {
+  /*
+    Abrir una subfamilia la marca como filtro y abre los clientes que la
+    compran, con todos los filtros puestos y su compra de esa subfamilia. Al
+    volver a pulsarla se quita el filtro, sin abrir nada.
+  */
+  const marcarSubfamilia = (code: string, nombre: string | null) => {
     const key = `${familia}:${code}`;
-    ctx.setFilters({ subfamilies: filters.subfamilies.includes(key) ? [] : [key] });
+    const quitar = filters.subfamilies.includes(key);
+    ctx.setFilters({ subfamilies: quitar ? [] : [key] });
+    if (quitar) return;
+    const cual = nombre || `la subfamilia ${code}`;
+    ctx.openList({
+      type: "clientes",
+      kind: "activos",
+      title: `Clientes que compran ${cual} en ${ctx.periodName}`,
+      description: `Los que han comprado de ${cual} (${ctx.familyName(familia!)}) en el periodo, con los filtros puestos. La compra es la de esta subfamilia, de mayor a menor.`,
+    });
   };
 
   const reload = ctx.reloadKey;
@@ -354,7 +368,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
     <div className="sales-row-detail-inner">
       <p className="sales-row-detail-title">
         Subfamilias de {ctx.familyName(familia)}
-        {ctx.detail.articles ? <> · {subfamily ? "pulsa otra vez para quitar el filtro" : "pulsa una para filtrar esta pantalla"}</> : null}
+        {ctx.detail.articles ? <> · {subfamily ? "pulsa otra vez para quitar el filtro" : "pulsa una para ver sus clientes y filtrar esta pantalla"}</> : null}
       </p>
       {ctx.detail.articles ? (
         <DataTable
@@ -362,7 +376,7 @@ export function ProductsPage({ ctx }: { ctx: SalesContext }) {
           columns={groupColumns("Subfamilia", subfamilies.data ?? [])}
           rowKey={(row) => row.code}
           activeKey={subfamily}
-          onRowClick={(row) => marcarSubfamilia(row.code)}
+          onRowClick={(row) => marcarSubfamilia(row.code, row.name)}
           initialSort={{ key: "ventas", desc: true }}
           limit={12}
           empty={subfamilies.loading ? "Cargando…" : "Sin subfamilias con venta en este periodo."}

@@ -38,7 +38,8 @@ import { changeCell, DataTable, LoadFailed, share, useSageQuery, type Column } f
 
 type FamiliaDeSociedad = { company_code: number; family_code: string; units: number; net_amount: number };
 type Familia = { code: string; name: string; units: number; net_amount: number };
-type ClienteDelMes = { company_code: number; customer_code: string; name: string; net_amount: number; documents: number; municipality: string | null };
+// Los albaranes van a nulo con una familia marcada: no se sabe cuántos son de ella.
+type ClienteDelMes = { company_code: number; customer_code: string; name: string; net_amount: number; documents: number | null; municipality: string | null };
 
 const sinNada = <span className="muted">—</span>;
 
@@ -235,7 +236,7 @@ export function MonthSheet({ month, ctx, onClose, hidden = false }: {
                   { key: "cliente", header: "Cliente", render: (row) => <><strong>{row.name}</strong>{row.municipality ? <small className="muted"> · {row.municipality}</small> : null}</>, sort: (row) => row.name, total: (rows) => `Total · ${rows.length} clientes` },
                   { key: "ventas", header: "Ventas", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(rows.reduce((suma, row) => suma + Number(row.net_amount), 0)) },
                   { key: "peso", header: "Peso", render: (row) => share(Number(row.net_amount), ventaDeClientes), sort: (row) => Number(row.net_amount), total: () => "100 %" },
-                  { key: "albaranes", header: "Albaranes", optional: true, render: (row) => numberFormatter.format(Number(row.documents)), sort: (row) => Number(row.documents), total: (rows) => numberFormatter.format(rows.reduce((suma, row) => suma + Number(row.documents), 0)) },
+                  { key: "albaranes", header: "Albaranes", optional: true, render: (row) => (row.documents === null ? <span className="muted">—</span> : numberFormatter.format(Number(row.documents))), sort: (row) => Number(row.documents ?? -1), total: (rows) => (rows.some((row) => row.documents === null) ? <span className="muted">—</span> : numberFormatter.format(rows.reduce((suma, row) => suma + Number(row.documents), 0))) },
                 ] satisfies Column<ClienteDelMes>[]}
                 rowKey={(row) => `${row.company_code}:${row.customer_code}`}
                 limit={10}

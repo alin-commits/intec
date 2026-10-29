@@ -121,7 +121,7 @@ export function sumParts<T>(rows: T[], pick: (row: T) => Partial<SalesParts>): S
 }
 
 /** Lo que trae una fila que guarda la venta en `net_amount` (subfamilias, marcas, artículos). */
-export const partsOf = (row: { net_amount: number | string; trusted_net?: number; trusted_cost?: number; trusted_without_cost?: number; gross_amount?: number; gross_net?: number; units?: number; documents?: number; articles?: number; customers?: number }): Partial<SalesParts> => ({
+export const partsOf = (row: { net_amount: number | string; trusted_net?: number; trusted_cost?: number; trusted_without_cost?: number; gross_amount?: number; gross_net?: number; units?: number; documents?: number | null; articles?: number; customers?: number }): Partial<SalesParts> => ({
   net: Number(row.net_amount),
   units: Number(row.units ?? 0),
   documents: Number(row.documents ?? 0),

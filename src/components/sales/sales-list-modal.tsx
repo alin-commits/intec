@@ -30,7 +30,8 @@ export type CustomerRow = {
   first_purchase: string | null;
   last_purchase: string | null;
   net_amount: number;
-  documents: number;
+  /** Nulo con una familia marcada: un albarán puede llevar varias y no se sabe cuántos son de ella. */
+  documents: number | null;
   days_since_last: number | null;
   /** La persona a la que llamar: el contacto comercial del cliente en Sage, o el primero con teléfono. */
   contact_name?: string | null;
@@ -187,7 +188,7 @@ export function SalesListModal({ request, ctx, onClose, hidden = false }: {
       { header: "Última compra", value: (row) => row.last_purchase },
       { header: "Días sin comprar", value: (row) => row.days_since_last },
       { header: "Importe", value: (row) => Number(row.net_amount) },
-      { header: "Albaranes", value: (row) => Number(row.documents) },
+      { header: "Albaranes", value: (row) => (row.documents === null ? null : Number(row.documents)) },
     ];
     exportacion = { rows: list, columns: csvColumns as CsvColumn<unknown>[] };
   } else if (request.type === "ofertas") {
