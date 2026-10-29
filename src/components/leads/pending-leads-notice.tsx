@@ -64,7 +64,15 @@ function apuntarVisto(userId: string, ids: string[]) {
   }
 }
 
-export function PendingLeadsNotice({ userId }: { userId: string }) {
+export function PendingLeadsNotice({ userId, onTerminado }: {
+  userId: string;
+  /**
+   * Cuando ya no va a enseñar nada más: no había leads tarde, ya se vieron hace
+   * menos de una hora, o se cerró. Lo usa el aviso de lo que hay por cerrar
+   * para salir después y no a la vez: dos ventanas apiladas no las lee nadie.
+   */
+  onTerminado?: () => void;
+}) {
   const [pendientes, setPendientes] = useState<LeadPendiente[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -99,19 +107,22 @@ export function PendingLeadsNotice({ userId }: { userId: string }) {
           horas: atencion.horas,
         });
       }
-      if (!activo || tarde.length === 0) return;
+      if (!activo) return;
+      if (tarde.length === 0) { onTerminado?.(); return; }
       tarde.sort((a, b) => b.horas - a.horas);
       setPendientes(tarde);
       // Lo enseñado hace menos de una hora se carga igual —hace falta para el
       // botón de la lista— pero sin volver a abrir el diálogo.
       if (!yaSeVieron(userId, tarde.map((lead) => lead.id))) setOpen(true);
+      else onTerminado?.();
     })();
     return () => { activo = false; };
-  }, [userId]);
+  }, [userId, onTerminado]);
 
   function cerrar() {
     apuntarVisto(userId, pendientes.map((lead) => lead.id));
     setOpen(false);
+    onTerminado?.();
   }
 
   if (pendientes.length === 0) return null;

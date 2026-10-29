@@ -5,6 +5,7 @@ import type {
   CampaignStatus,
   InquiryType,
   LeadStatus,
+  LossReason,
   MailingCampaignType,
   SaleType,
   SocialNetwork,
@@ -218,6 +219,26 @@ export const contactStatusBadges: Record<InquiryStatus, string> = {
   interesado: "interested",
   ganado: "won",
   perdido: "lost",
+};
+
+/*
+  Los motivos de pérdida, en el orden en que se ofrecen: primero los que
+  dependen de nosotros —precio, plazo, stock, condiciones—, que son los que se
+  pueden arreglar, y después los del cliente. «Otro» al final, y pide escribir
+  cuál, porque un «otro» sin explicar no le dice nada a nadie.
+*/
+export const lossReasonOrder: LossReason[] = ["precio", "plazo", "competencia", "sin_stock", "condiciones", "sin_presupuesto", "no_encaja", "no_contesta", "otro"];
+
+export const lossReasonLabels: Record<LossReason, string> = {
+  precio: "Precio",
+  plazo: "Plazo de entrega",
+  competencia: "Se fue con la competencia",
+  sin_stock: "No lo tenemos o sin stock",
+  condiciones: "Condiciones de pago",
+  sin_presupuesto: "Sin presupuesto o lo aplaza",
+  no_encaja: "No es lo que necesitaba",
+  no_contesta: "Dejó de contestar",
+  otro: "Otro motivo",
 };
 
 /** El orden en que se avanza, para el CRM. */

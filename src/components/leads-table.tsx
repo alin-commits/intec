@@ -14,7 +14,7 @@ import { exportLeadReportPdf } from "@/lib/lead-report-pdf";
 import { dateKeyInMadrid, inDateKeyRange } from "@/lib/dates";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { AppRole, BusinessUnit, Lead, LeadStatus } from "@/lib/types";
+import type { AppRole, BusinessUnit, Lead, LeadStatus, LossReason } from "@/lib/types";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -29,6 +29,8 @@ import { ClockIcon, ConversionIcon, EuroIcon, LeadsIcon, PlusCircleIcon, SearchI
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { atencionDeLead, horasEnPalabras, HORAS_PARA_ATENDER } from "@/lib/leads/atencion";
+import { MotivoDePerdidaCampos, motivoEnTexto } from "@/components/motivo-de-perdida";
+import { faltaEnElMotivo, MOTIVO_VACIO, motivoParaGuardar, type MotivoEscrito } from "@/lib/por-cerrar";
 
 const STORAGE_KEY = "intec-demo-leads";
 
@@ -179,6 +181,11 @@ export function LeadsTable() {
   const [pendingStatus, setPendingStatus] = useState<{ lead: Lead; status: LeadStatus } | null>(null);
   /** El importe que se pide al pasar a oferta o a ganado: es el de su apunte en Consultas. */
   const [pendingValue, setPendingValue] = useState("");
+  /** Por qué se pierde: se pide al pasar a perdido, desde la lista o desde la ficha. */
+  const [pendingMotivo, setPendingMotivo] = useState<MotivoEscrito>(MOTIVO_VACIO);
+  const [motivoFicha, setMotivoFicha] = useState<MotivoEscrito>(MOTIVO_VACIO);
+  /** El estado con el que se abrió la ficha: el motivo se exige al pasar a perdido, no al editar uno que ya lo estaba. */
+  const [estadoAlAbrir, setEstadoAlAbrir] = useState<LeadStatus | null>(null);
   const [access, setAccess] = useState<"checking" | "allowed" | "denied">(configured ? "checking" : "allowed");
   /** La primera carga falló: en vez de girar para siempre se dice y se puede reintentar. */
   const [loadFailed, setLoadFailed] = useState(false);
@@ -386,7 +393,7 @@ export function LeadsTable() {
 
   async function loadRealData() {
     const supabase = createClient();
-    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }, { data: asignadosData, error: asignadosError }] = await Promise.all([
+    const [{ data: unitData, error: unitError }, { data: campaignData, error: campaignError }, { data: leadData, error: leadError }, { data: authData }, { data: asignadosData, error: asignadosError }, { data: motivosData }] = await Promise.all([
       supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
       supabase.from("campaigns").select("id, name, business_unit_id").neq("status", "archived").order("name"),
       fetchAllPages((from, to) => supabase.from("leads").select("id, business_unit_id, campaign_id, contact_name, client_company_name, email, phone, location, product_interest, status, lead_type, source, notes, sale_value, meta_lead_id, created_at, updated_at, campaigns(name), lead_status_history(id, previous_status, new_status, changed_at, changed_by), lead_log(id, created_at, kind, text)").order("created_at", { ascending: false }).order("id").range(from, to)),
@@ -394,6 +401,9 @@ export function LeadsTable() {
       // En consulta aparte y no anidada en la de leads: si la migración de
       // responsables no está aplicada todavía, la página sigue funcionando.
       fetchAllPages<{ lead_id: string; profile_id: string }>((from, to) => supabase.from("lead_assignees").select("lead_id, profile_id").order("lead_id").order("profile_id").range(from, to)),
+      // El motivo de pérdida, aparte por lo mismo: sin su migración, la lista
+      // de leads se carga igual y solo falta el motivo.
+      fetchAllPages<{ id: string; lost_reason: LossReason; lost_detail: string | null }>((from, to) => supabase.from("leads").select("id, lost_reason, lost_detail").not("lost_reason", "is", null).order("id").range(from, to)),
     ]);
     if (unitError || campaignError || leadError) {
       setMessage(reportSafeError(unitError ?? campaignError ?? leadError, "No se pudieron cargar los datos."));
@@ -412,7 +422,12 @@ export function LeadsTable() {
       asignados.set(fila.lead_id, lista);
     }
     setAsignacionesOk(!asignadosError);
-    setRows((leadData ?? []).map((row) => mapLeadRow(row as Record<string, unknown>, asignados)));
+    const motivos = new Map((motivosData ?? []).map((fila) => [fila.id, fila]));
+    setRows((leadData ?? []).map((row) => {
+      const lead = mapLeadRow(row as Record<string, unknown>, asignados);
+      const motivo = motivos.get(lead.id);
+      return motivo ? { ...lead, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail } : lead;
+    }));
     // El gasto es un extra: si falla, la lista de leads se enseña igual.
     const { rows: gasto } = await loadAdsSpendByMonth(supabase);
     setGastoEnPublicidad(gasto);
@@ -443,6 +458,8 @@ export function LeadsTable() {
     // aviso por correo en cuanto el lead entra sin nadie detrás.
     const draftForNew = blankDraft(registrableUnits);
     setDraft(unitId !== "all" ? { ...draftForNew, businessUnitId: unitId } : { ...draftForNew, businessUnitId: "" });
+    setEstadoAlAbrir(null);
+    setMotivoFicha(MOTIVO_VACIO);
     setEditorOpen(true);
     setMessage(null);
   }
@@ -468,6 +485,8 @@ export function LeadsTable() {
       assignees: lead.assignees ?? [],
       statusHistory: lead.statusHistory,
     });
+    setEstadoAlAbrir(lead.status);
+    setMotivoFicha({ reason: lead.lostReason ?? "", detail: lead.lostDetail ?? "" });
     setEditorOpen(true);
     setMessage(null);
   }
@@ -488,6 +507,12 @@ export function LeadsTable() {
     if (!draft.businessUnitId || (!draft.contactName.trim() && !draft.clientCompanyName.trim())) {
       setMessage("Selecciona una unidad y añade el contacto o la empresa cliente.");
       return;
+    }
+    // Al pasar a perdido hace falta el motivo; si ya lo estaba, solo se
+    // comprueba lo que se haya escrito, que puede no ser nada.
+    if (draft.status === "lost" && (estadoAlAbrir !== "lost" || motivoFicha.reason)) {
+      const falta = faltaEnElMotivo(motivoFicha);
+      if (falta) { setMessage(falta); return; }
     }
     setBusy(true);
     setMessage(null);
@@ -524,6 +549,9 @@ export function LeadsTable() {
           source: draft.source.trim() || null,
           notes: draft.notes?.trim() || null,
           sale_value: draft.saleValue,
+          // Solo si está perdido: fuera de ahí la base lo borra sola, y así un
+          // lead se puede seguir guardando aunque falte su migración.
+          ...(draft.status === "lost" ? motivoParaGuardar(true, motivoFicha) : {}),
         };
         const supabase = createClient();
         let leadId = editingId;
@@ -579,6 +607,7 @@ export function LeadsTable() {
   function askStatusChange(lead: Lead, status: LeadStatus) {
     setPendingStatus({ lead, status });
     setPendingValue(lead.saleValue === null ? "" : String(lead.saleValue));
+    setPendingMotivo({ reason: lead.lostReason ?? "", detail: lead.lostDetail ?? "" });
   }
 
   async function confirmStatusChange() {
@@ -589,6 +618,12 @@ export function LeadsTable() {
       setMessage("El importe tiene que ser un número igual o mayor que cero.");
       return;
     }
+    const pierde = pendingStatus.status === "lost";
+    if (pierde) {
+      const falta = faltaEnElMotivo(pendingMotivo);
+      if (falta) { setMessage(falta); return; }
+    }
+    const motivo = motivoParaGuardar(pierde, pendingMotivo);
     setBusy(true);
     try {
       if (!configured) {
@@ -596,13 +631,19 @@ export function LeadsTable() {
           ...lead,
           status: pendingStatus.status,
           saleValue,
+          lostReason: motivo.lost_reason,
+          lostDetail: motivo.lost_detail,
           updatedAt: new Date().toISOString(),
           statusHistory: [{ id: `H-${Date.now()}`, previousStatus: lead.status, newStatus: pendingStatus.status, changedAt: new Date().toISOString(), changedByName: "Alín" }, ...(lead.statusHistory ?? [])],
         } : lead);
         persistDemo(next);
       } else {
         await writeRows(
-          createClient().from("leads").update(withValue ? { status: pendingStatus.status, sale_value: saleValue } : { status: pendingStatus.status }).eq("id", pendingStatus.lead.id),
+          createClient().from("leads").update({
+            status: pendingStatus.status,
+            ...(withValue ? { sale_value: saleValue } : {}),
+            ...(pierde ? motivo : {}),
+          }).eq("id", pendingStatus.lead.id),
           "No se pudo cambiar el estado: puede que alguien haya borrado el lead o que tu rol no permita cambiarlo.",
         );
         await loadRealData();
@@ -797,7 +838,7 @@ export function LeadsTable() {
                   <td><span className="unit-name"><i style={{ background: unit?.accent }} />{unit?.name ?? "—"}</span></td>
                   <td><strong>{lead.contactName || "Sin contacto"}</strong><small>{lead.clientCompanyName || "—"}</small></td>
                   <td>{lead.campaign || "General"}</td>
-                  <td onClick={(event) => event.stopPropagation()}>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}{(() => {
+                  <td onClick={(event) => event.stopPropagation()}>{canEdit ? <select className={`table-select badge-select badge-${lead.status}`} value={lead.status} onChange={(event) => askStatusChange(lead, event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`badge badge-${lead.status}`}>{leadStatusLabels[lead.status]}</span>}{lead.status === "lost" && lead.lostReason ? <small className="motivo-perdida-fila" title="Por qué se perdió">{motivoEnTexto(lead.lostReason, lead.lostDetail)}</small> : null}{(() => {
                     const atencion = atencionPorLead.get(lead.id);
                     if (atencion?.estado === "tarde") return <small className="lead-atencion is-tarde" title={`Pasó ${horasEnPalabras(atencion.horas)} hasta que alguien lo tocó`}>Atendido tarde · {horasEnPalabras(atencion.horas)}</small>;
                     if (atencion?.estado === "sin-atender") return <small className="lead-atencion is-sin-atender" title="Sigue en Nuevo y ya se pasó el plazo">Sin atender · {horasEnPalabras(atencion.horas)}</small>;
@@ -841,6 +882,7 @@ export function LeadsTable() {
         ) : pendingStatus && consultasNote(pendingStatus.lead.status, pendingStatus.status) ? (
           <p className="muted">{consultasNote(pendingStatus.lead.status, pendingStatus.status)}</p>
         ) : null}
+        {pendingStatus?.status === "lost" ? <MotivoDePerdidaCampos value={pendingMotivo} onChange={setPendingMotivo} disabled={busy} /> : null}
       </ConfirmationDialog>
 
       <Modal open={editorOpen} title={editingId ? "Editar lead" : "Nuevo lead"} eyebrow="Gestión comercial" scrollInside onClose={() => setEditorOpen(false)}>
@@ -855,6 +897,11 @@ export function LeadsTable() {
             <label><span>Población</span><input value={draft.location} readOnly={!canEdit} onChange={(event) => updateDraft("location", event.target.value)} /></label>
             <label><span>Producto o interés</span><input value={draft.productInterest} readOnly={!canEdit} onChange={(event) => updateDraft("productInterest", event.target.value)} /></label>
             <label><span>Estado *</span><select value={draft.status} disabled={!canEdit} onChange={(event) => updateDraft("status", event.target.value as LeadStatus)}>{Object.entries(leadStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            {draft.status === "lost" ? (
+              <div className="form-field-wide">
+                <MotivoDePerdidaCampos value={motivoFicha} onChange={setMotivoFicha} disabled={!canEdit} obligatorio={estadoAlAbrir !== "lost"} />
+              </div>
+            ) : null}
 
             <label><span>Tipo</span><select value={draft.type} disabled={!canEdit} onChange={(event) => updateDraft("type", event.target.value)}>{Object.values(leadTypeLabels).map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
             <label><span>Fuente</span><input value={draft.source} readOnly={!canEdit} onChange={(event) => updateDraft("source", event.target.value)} /></label>

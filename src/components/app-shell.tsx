@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { CampanasIcon, ComprasIcon, ConsultasIcon, CrmIcon, DashboardIcon, EuroIcon, InboxIcon, KeyIcon, LeadsIcon, LogoutIcon, SearchIcon, TarjetasIcon, TicketsIcon, UnidadesIcon, UsuariosIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { AccountSwitcher, PreviewBanner, type CuentaDePrueba } from "@/components/account-switcher";
 import { AvisoExtension } from "@/components/aviso-extension";
 import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
 import { AvisoCompras } from "@/components/compras/aviso-compras";
+import { AvisoPorCerrar } from "@/components/aviso-por-cerrar";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
@@ -143,6 +144,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<{ id: string; fullName: string; roles: AppRole[]; isPreview: boolean }>(() => ({ id: "", fullName: "", roles: [], isPreview: false }));
   // Las cuentas de prueba solo las pide quien puede usarlas.
   const [cuentasDePrueba, setCuentasDePrueba] = useState<CuentaDePrueba[]>([]);
+  /** El aviso de leads sin atender ya terminó: hasta entonces no sale el de lo que hay por cerrar. */
+  const [avisoLeadsTerminado, setAvisoLeadsTerminado] = useState(false);
+  const terminarAvisoLeads = useCallback(() => setAvisoLeadsTerminado(true), []);
   const [hasAssignedCard, setHasAssignedCard] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   /*
@@ -308,7 +312,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Va aquí, fuera de lo que el bloqueador esconde: dentro no se vería. */}
         <AvisoExtension />
         {/* Los leads sin tocar se le recuerdan a quien los lleva, no a quien mira. */}
-        {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <PendingLeadsNotice userId={profile.id} /> : null}
+        {configured && profile.id && hasAnyRole(profile.roles, ["commercial"]) ? <PendingLeadsNotice userId={profile.id} onTerminado={terminarAvisoLeads} /> : null}
+        {/* Y después, nunca a la vez, lo que dejó a medio camino: contactados e
+            interesados que llevan una semana sin cerrarse. */}
+        {configured && profile.id && avisoLeadsTerminado && hasAnyRole(profile.roles, ["commercial"]) ? <AvisoPorCerrar userId={profile.id} /> : null}
         {/*
           Solo a quien lleva compras. Un administrador o dirección entran en
           muchas pantallas al día y esto les saldría una y otra vez por un

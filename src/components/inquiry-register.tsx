@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useSearchParams } from "next/navigation";
+import { MotivoDePerdidaCampos, motivoEnTexto } from "@/components/motivo-de-perdida";
+import { faltaEnElMotivo, MOTIVO_VACIO, motivoParaGuardar, type MotivoEscrito } from "@/lib/por-cerrar";
 import { DateField, MonthField } from "@/components/ui/date-field";
 import { ChannelTable, type ChannelTableColumn, type ChannelTableRow } from "@/components/channel-table";
 import { TrendChart } from "@/components/charts/trend-chart";
@@ -23,7 +26,7 @@ import { currencyFormatter, displayName, formatDate, formatDateTime, formatPerce
 import { exportInquiryReportPdf, type UnitReportRow } from "@/lib/inquiry-report-pdf";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/fetch-all";
-import type { AppRole, BusinessUnit, InquiryRecord, InquiryStatus, InquiryType, SaleType, SalesEntry } from "@/lib/types";
+import type { AppRole, BusinessUnit, InquiryRecord, InquiryStatus, InquiryType, LossReason, SaleType, SalesEntry } from "@/lib/types";
 import { PageLoadFailed, PageLoader } from "@/components/ui/page-loader";
 import { TablePagination } from "@/components/ui/table-pagination";
 
@@ -134,6 +137,9 @@ const VENTA_DEL_ESTADO: Partial<Record<InquiryStatus, SaleType>> = {
   perdido: "perdido",
 };
 
+/** Lo que se lee de una consulta, igual en la lista, en el alta y al abrir una por su enlace. */
+const COLUMNAS_CONSULTA = "id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, sale_value, created_by, created_at";
+
 function mapInquiry(row: Record<string, unknown>): InquiryRecord {
   return {
     id: String(row.id),
@@ -238,6 +244,17 @@ export function InquiryRegister() {
   const [pendingDelete, setPendingDelete] = useState<InquiryRecord | null>(null);
   const [pendingStatus, setPendingStatus] = useState<{ record: InquiryRecord; status: InquiryStatus } | null>(null);
   const [pendingStatusValue, setPendingStatusValue] = useState("");
+  /*
+    El motivo de pérdida de cada puerta por la que se marca «perdido»: la
+    lista, el alta, la ficha y la venta rápida. Por separado, porque cada una
+    se abre y se vacía a su aire.
+  */
+  const [motivoLista, setMotivoLista] = useState<MotivoEscrito>(MOTIVO_VACIO);
+  const [motivoNueva, setMotivoNueva] = useState<MotivoEscrito>(MOTIVO_VACIO);
+  const [motivoEdicion, setMotivoEdicion] = useState<MotivoEscrito>(MOTIVO_VACIO);
+  const [motivoRapido, setMotivoRapido] = useState<MotivoEscrito>(MOTIVO_VACIO);
+  /** El estado con el que se abrió la ficha: el motivo se exige al pasar a perdido, no al editar una que ya lo estaba. */
+  const [estadoAlAbrirEdicion, setEstadoAlAbrirEdicion] = useState<InquiryStatus | null>(null);
   /** Los datos de quien pregunta, al registrar una consulta individual. Todo opcional. */
   const [fichaNueva, setFichaNueva] = useState(FICHA_VACIA);
   const [editingRecord, setEditingRecord] = useState<InquiryRecord | null>(null);
@@ -338,11 +355,14 @@ export function InquiryRegister() {
     let active = true;
     (async () => {
       const supabase = createClient();
-      const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }] = await Promise.all([
+      const [{ data: unitData, error: unitError }, { data: inquiryData, error: inquiryError }, { data: salesData, error: salesError }, { data: authData }, { data: motivosData }] = await Promise.all([
         supabase.from("business_units").select("id, name, slug, brand_color, logo_url, is_active, sort_order, visible_in_consultas, visible_in_leads").eq("is_active", true).order("sort_order"),
-        fetchAllPages((from, to) => supabase.from("inquiries").select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, sale_value, created_by, created_at").gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("inquiries").select(COLUMNAS_CONSULTA).gte("created_at", fetchStart).lt("created_at", fetchEnd).order("created_at", { ascending: false }).order("id").range(from, to)),
         fetchAllPages((from, to) => supabase.from("sales_entries").select(SALE_COLUMNS).gte("occurred_on", dateKeyInMadrid(fetchStart)).lt("occurred_on", dateKeyInMadrid(fetchEnd)).order("occurred_on", { ascending: false }).order("id").range(from, to)),
         supabase.auth.getUser(),
+        // El motivo de pérdida, en consulta aparte: sin su migración la lista
+        // se carga igual y solo falta el motivo.
+        fetchAllPages<{ id: string; lost_reason: LossReason; lost_detail: string | null }>((from, to) => supabase.from("inquiries").select("id, lost_reason, lost_detail").not("lost_reason", "is", null).gte("created_at", fetchStart).lt("created_at", fetchEnd).order("id").range(from, to)),
       ]);
       if (!active) return;
       if (unitError || inquiryError || salesError) {
@@ -352,7 +372,12 @@ export function InquiryRegister() {
       }
       setLoadFailed(false);
       setUnits((unitData ?? []).map((row) => ({ id: row.id, name: row.name, slug: row.slug, accent: row.brand_color || "#2563eb", active: row.is_active, logo: row.logo_url, sortOrder: row.sort_order ?? 0, visibleInConsultas: row.visible_in_consultas ?? true, visibleInLeads: row.visible_in_leads ?? true })));
-      setRecords((inquiryData ?? []).map((row) => mapInquiry(row as Record<string, unknown>)));
+      const motivos = new Map((motivosData ?? []).map((fila) => [fila.id, fila]));
+      setRecords((inquiryData ?? []).map((row) => {
+        const consulta = mapInquiry(row as Record<string, unknown>);
+        const motivo = motivos.get(consulta.id);
+        return motivo ? { ...consulta, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail } : consulta;
+      }));
       setSalesEntries((salesData ?? []).map((row) => mapSalesEntry(row as Record<string, unknown>)));
       if (authData.user) {
         setCurrentUserId(authData.user.id);
@@ -612,6 +637,12 @@ export function InquiryRegister() {
 
   async function confirmRegistration() {
     if (!pending || busy) return;
+    const nacePerdida = fichaNueva.status === "perdido";
+    if (nacePerdida) {
+      const falta = faltaEnElMotivo(motivoNueva);
+      if (falta) { setMessage(falta); return; }
+    }
+    const motivoDeAlta = motivoParaGuardar(nacePerdida, motivoNueva);
     let saleValue: number | null = null;
     if (ESTADOS_CON_IMPORTE.includes(fichaNueva.status)) {
       const trimmed = fichaNueva.saleValue.trim();
@@ -643,6 +674,8 @@ export function InquiryRegister() {
           notes: fichaNueva.notes.trim() || null,
           status: fichaNueva.status,
           saleValue,
+          lostReason: motivoDeAlta.lost_reason,
+          lostDetail: motivoDeAlta.lost_detail,
         };
       } else {
         const { data, error } = await createClient().from("inquiries").insert({
@@ -656,9 +689,10 @@ export function InquiryRegister() {
           notes: fichaNueva.notes.trim() || null,
           status: fichaNueva.status,
           sale_value: saleValue,
-        }).select("id, business_unit_id, inquiry_type, entry_mode, week_start, count, contact_name, company_name, phone, email, product_interest, notes, status, sale_value, created_by, created_at").single();
+          ...(nacePerdida ? motivoDeAlta : {}),
+        }).select(COLUMNAS_CONSULTA).single();
         if (error) throw error;
-        newRecord = mapInquiry(data as Record<string, unknown>);
+        newRecord = { ...mapInquiry(data as Record<string, unknown>), lostReason: motivoDeAlta.lost_reason, lostDetail: motivoDeAlta.lost_detail };
       }
       setRecords((current) => [newRecord, ...current]);
 
@@ -694,6 +728,7 @@ export function InquiryRegister() {
       setMessage(`Consulta ${channelLabel} registrada correctamente para ${pending.unit.name}${saleSuffix}.`);
       setPending(null);
       setFichaNueva(FICHA_VACIA);
+      setMotivoNueva(MOTIVO_VACIO);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo registrar la consulta."));
     } finally {
@@ -736,6 +771,7 @@ export function InquiryRegister() {
     if (!ESTADOS_CON_IMPORTE.includes(status)) { void cambiarEstadoConsulta(record, status, null); return; }
     setPendingStatus({ record, status });
     setPendingStatusValue(record.saleValue === null || record.saleValue === undefined ? "" : String(record.saleValue));
+    setMotivoLista({ reason: record.lostReason ?? "", detail: record.lostDetail ?? "" });
     setMessage(null);
   }
 
@@ -747,14 +783,24 @@ export function InquiryRegister() {
       return;
     }
     const { record, status } = pendingStatus;
+    if (status === "perdido") {
+      const falta = faltaEnElMotivo(motivoLista);
+      if (falta) { setMessage(falta); return; }
+    }
     setPendingStatus(null);
-    await cambiarEstadoConsulta(record, status, importe);
+    await cambiarEstadoConsulta(record, status, importe, motivoParaGuardar(status === "perdido", motivoLista));
   }
 
-  async function cambiarEstadoConsulta(record: InquiryRecord, status: InquiryStatus, saleValue: number | null) {
+  async function cambiarEstadoConsulta(
+    record: InquiryRecord,
+    status: InquiryStatus,
+    saleValue: number | null,
+    motivo: { lost_reason: LossReason | null; lost_detail: string | null } = { lost_reason: null, lost_detail: null },
+  ) {
     const anterior = record.status ?? "contactado";
     const valorAnterior = record.saleValue ?? null;
-    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status, saleValue } : item));
+    const motivoAnterior = { lostReason: record.lostReason ?? null, lostDetail: record.lostDetail ?? null };
+    setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status, saleValue, lostReason: motivo.lost_reason, lostDetail: motivo.lost_detail } : item));
     if (!configured) {
       // En la vista de demo no hay disparador: el apunte se simula aquí.
       const saleType = VENTA_DEL_ESTADO[status];
@@ -779,7 +825,7 @@ export function InquiryRegister() {
     }
     try {
       await writeRows(
-        createClient().from("inquiries").update({ status, sale_value: saleValue }).eq("id", record.id),
+        createClient().from("inquiries").update({ status, sale_value: saleValue, ...(status === "perdido" ? motivo : {}) }).eq("id", record.id),
         "No se pudo cambiar el estado: puede que alguien haya borrado la consulta o que tu rol no permita cambiarla.",
       );
       // La venta la lleva la base: se recoge como quedó para verla al momento.
@@ -790,7 +836,7 @@ export function InquiryRegister() {
       });
       setMessage(`${record.contactName || "La consulta"}: ${contactStatusLabels[status]}.`);
     } catch (cause) {
-      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: anterior, saleValue: valorAnterior } : item));
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: anterior, saleValue: valorAnterior, ...motivoAnterior } : item));
       setMessage(reportSafeError(cause, "No se pudo cambiar el estado de la consulta."));
     }
   }
@@ -810,6 +856,8 @@ export function InquiryRegister() {
       productInterest: record.productInterest ?? "",
       notes: record.notes ?? "",
     });
+    setEstadoAlAbrirEdicion(record.status ?? "contactado");
+    setMotivoEdicion({ reason: record.lostReason ?? "", detail: record.lostDetail ?? "" });
     setMessage(null);
     cargarHistorial(record.id);
   }
@@ -855,6 +903,34 @@ export function InquiryRegister() {
   }
 
   /*
+    Abrir una consulta concreta desde fuera, con «?consulta=…».
+
+    Es lo que usa el aviso de consultas por cerrar: dice cuál y lleva a ella.
+    La lista solo trae las del periodo que se mira, así que si la pedida es de
+    antes se trae ella sola. Y se espera a saber quién entra, porque eso decide
+    si la ficha se abre para editarla o solo para mirarla.
+  */
+  const searchParams = useSearchParams();
+  const urlConsulta = searchParams.get("consulta") ?? "";
+  const [consultaPorUrl, setConsultaPorUrl] = useState("");
+  useEffect(() => {
+    if (!urlConsulta || urlConsulta === consultaPorUrl || access !== "allowed") return;
+    let activo = true;
+    void (async () => {
+      let pedida = records.find((item) => item.id === urlConsulta) ?? null;
+      if (!pedida && configured) {
+        const { data } = await createClient().from("inquiries").select(COLUMNAS_CONSULTA).eq("id", urlConsulta).maybeSingle();
+        pedida = data ? mapInquiry(data as Record<string, unknown>) : null;
+      }
+      if (!activo || !pedida) return;
+      setConsultaPorUrl(urlConsulta);
+      abrirFicha(pedida);
+    })();
+    return () => { activo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- abrirFicha se rehace en cada render; lo que decide es la consulta pedida, la lista y el acceso
+  }, [urlConsulta, consultaPorUrl, access, records, configured]);
+
+  /*
     Pulsar en la fila también abre la ficha, menos donde ya hay algo que pulsar.
 
     En la fila hay un desplegable de estado y los botones del final: sin esta
@@ -882,6 +958,14 @@ export function InquiryRegister() {
       setMessage("El valor tiene que ser un número igual o mayor que cero.");
       return;
     }
+    // Al pasar a perdida hace falta el motivo; si ya lo estaba, solo se
+    // comprueba lo que se haya escrito, que puede no ser nada.
+    const quedaPerdida = editingRecord.entryMode !== "weekly" && editDraft.status === "perdido";
+    if (quedaPerdida && (estadoAlAbrirEdicion !== "perdido" || motivoEdicion.reason)) {
+      const falta = faltaEnElMotivo(motivoEdicion);
+      if (falta) { setMessage(falta); return; }
+    }
+    const motivoEditado = motivoParaGuardar(quedaPerdida, motivoEdicion);
     setBusy(true);
     try {
       if (configured) {
@@ -898,6 +982,7 @@ export function InquiryRegister() {
               email: editDraft.email.trim() || null,
               product_interest: editDraft.productInterest.trim() || null,
               notes: editDraft.notes.trim() || null,
+              ...(quedaPerdida ? motivoEditado : {}),
             }),
           }).eq("id", editingRecord.id),
           "No se pudo guardar la consulta: puede que alguien la haya borrado o que tu rol no permita cambiarla.",
@@ -926,6 +1011,8 @@ export function InquiryRegister() {
             email: editDraft.email.trim() || null,
             productInterest: editDraft.productInterest.trim() || null,
             notes: editDraft.notes.trim() || null,
+            lostReason: motivoEditado.lost_reason,
+            lostDetail: motivoEditado.lost_detail,
           }),
         }
         : item));
@@ -1054,18 +1141,24 @@ export function InquiryRegister() {
       setMessage("Ese estado no lleva venta.");
       return;
     }
+    const pierde = quickSaleStatus === "perdido";
+    if (pierde) {
+      const falta = faltaEnElMotivo(motivoRapido);
+      if (falta) { setMessage(falta); return; }
+    }
+    const motivoRapidoGuardado = motivoParaGuardar(pierde, motivoRapido);
     setBusy(true);
     try {
       // Aquí solo se mueve el estado de la consulta: el apunte de venta lo
       // escribe la base, igual que en los leads y en el CRM.
       if (configured) {
         await writeRows(
-          createClient().from("inquiries").update({ status: quickSaleStatus, sale_value: value }).eq("id", record.id),
+          createClient().from("inquiries").update({ status: quickSaleStatus, sale_value: value, ...(pierde ? motivoRapidoGuardado : {}) }).eq("id", record.id),
           "No se pudo guardar: no tienes permiso sobre esta consulta.",
           "id",
         );
       }
-      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: quickSaleStatus, saleValue: value } : item));
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: quickSaleStatus, saleValue: value, lostReason: motivoRapidoGuardado.lost_reason, lostDetail: motivoRapidoGuardado.lost_detail } : item));
       if (configured) {
         const { data: apunte } = await createClient()
           .from("sales_entries")
@@ -1094,6 +1187,7 @@ export function InquiryRegister() {
       }
       setMessage(`Consulta marcada como «${contactStatusLabels[quickSaleStatus]}» con ${currencyFormatter.format(value)}.`);
       setSaleChooserOpen(false);
+      setMotivoRapido(MOTIVO_VACIO);
     } catch (cause) {
       setMessage(reportSafeError(cause, "No se pudo registrar la venta."));
     } finally {
@@ -1553,6 +1647,7 @@ export function InquiryRegister() {
                       {inquiryStatusOrder.map((value) => <option key={value} value={value}>{contactStatusLabels[value]}</option>)}
                     </select>
                   ) : <span className={`badge badge-${contactStatusBadges[record.status ?? "contactado"]}`}>{contactStatusLabels[record.status ?? "contactado"]}</span>}
+                  {record.status === "perdido" && record.lostReason ? <small className="motivo-perdida-fila" title="Por qué se perdió">{motivoEnTexto(record.lostReason, record.lostDetail)}</small> : null}
                 </td>
                 <td>{record.entryMode === "weekly" ? "Semanal" : "Individual"}</td>
                 <td>{numberFormatter.format(record.count)}</td>
@@ -1811,6 +1906,7 @@ export function InquiryRegister() {
                     : "Se apunta abajo en «Ventas comerciales» con el estado que elijas."}
               </p>
             </div>
+            {pendingStatus.status === "perdido" ? <MotivoDePerdidaCampos value={motivoLista} onChange={setMotivoLista} disabled={busy} /> : null}
           </>
         ) : null}
       </ConfirmationDialog>
@@ -1839,6 +1935,11 @@ export function InquiryRegister() {
                 <label><span>{fichaNueva.status === "ganado" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
                   <input type="number" min="0" step="0.01" placeholder="0,00" value={fichaNueva.saleValue} onChange={(event) => setFichaNueva((actual) => ({ ...actual, saleValue: event.target.value }))} />
                 </label>
+              ) : null}
+              {fichaNueva.status === "perdido" ? (
+                <div className="form-field-wide">
+                  <MotivoDePerdidaCampos value={motivoNueva} onChange={setMotivoNueva} />
+                </div>
               ) : null}
               <label><span>Contacto</span><input value={fichaNueva.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setFichaNueva((actual) => ({ ...actual, contactName: event.target.value }))} /></label>
               <label><span>Empresa</span><input value={fichaNueva.companyName} onChange={(event) => setFichaNueva((actual) => ({ ...actual, companyName: event.target.value }))} /></label>
@@ -1891,6 +1992,11 @@ export function InquiryRegister() {
                 <label><span>{editDraft.status === "ganado" ? "Valor de la venta (€)" : "Valor de la oferta (€)"}</span>
                   <input type="number" min="0" step="0.01" placeholder="0,00" value={editDraft.saleValue} onChange={(event) => setEditDraft((current) => ({ ...current, saleValue: event.target.value }))} />
                 </label>
+              ) : null}
+              {editDraft.status === "perdido" ? (
+                <div className="form-field-wide">
+                  <MotivoDePerdidaCampos value={motivoEdicion} onChange={setMotivoEdicion} obligatorio={estadoAlAbrirEdicion !== "perdido"} />
+                </div>
               ) : null}
               <label><span>Contacto</span><input value={editDraft.contactName} placeholder="Nombre de quien pregunta" onChange={(event) => setEditDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
               <label><span>Empresa</span><input value={editDraft.companyName} onChange={(event) => setEditDraft((current) => ({ ...current, companyName: event.target.value }))} /></label>
@@ -2067,6 +2173,7 @@ export function InquiryRegister() {
                 <input type="number" min="0" step="0.01" placeholder="0,00" value={quickSaleValue} onChange={(event) => setQuickSaleValue(event.target.value)} />
               </label>
             </div>
+            {quickSaleStatus === "perdido" ? <MotivoDePerdidaCampos value={motivoRapido} onChange={setMotivoRapido} disabled={busy} /> : null}
             {quickSaleUnitRecords.length === 0 ? <p className="muted">No hay consultas recientes registradas para esta unidad.</p> : null}
             <div className="modal-actions">
               <button type="button" className="button button-secondary" onClick={() => setSaleChooserMode("menu")}>Atrás</button>

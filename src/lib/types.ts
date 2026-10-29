@@ -54,6 +54,22 @@ export type CrmStatus = "sin_contactar" | "contactado" | "oferta_enviada" | "int
  */
 export type InquiryStatus = CrmStatus | "seguimiento" | "informacion";
 
+/**
+ * Por qué se perdió un lead o una consulta. Una sola lista para los dos: es el
+ * mismo embudo, y el motivo tiene que poder sumarse entre ambos. La base solo
+ * admite estos, y «otro» con su explicación.
+ */
+export type LossReason =
+  | "precio"
+  | "plazo"
+  | "competencia"
+  | "sin_stock"
+  | "condiciones"
+  | "sin_presupuesto"
+  | "no_encaja"
+  | "no_contesta"
+  | "otro";
+
 export type CrmContact = {
   id: string;
   businessUnitId: string;
@@ -103,6 +119,9 @@ export type Lead = {
   source: string;
   notes?: string;
   saleValue: number | null;
+  /** Por qué se perdió, si está perdido. Fuera de «perdido» la base lo borra sola. */
+  lostReason?: LossReason | null;
+  lostDetail?: string | null;
   /** Comerciales que llevan el lead. Vive en lead_assignees, lo pone administración. */
   assignees?: string[];
   statusHistory?: LeadStatusEvent[];
@@ -152,6 +171,9 @@ export type InquiryRecord = {
   status?: InquiryStatus;
   /** Lo que vale la oferta o la venta. El estado decide si se pide. */
   saleValue?: number | null;
+  /** Por qué se perdió, si está perdida. Fuera de «perdido» la base lo borra sola. */
+  lostReason?: LossReason | null;
+  lostDetail?: string | null;
 };
 
 export type SaleType = "oferta" | "seguimiento" | "pedido" | "perdido";

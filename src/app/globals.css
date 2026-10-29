@@ -823,6 +823,12 @@ td.recent-inquiries-actions > * + * { margin-left: 8px; }
 .pending-lead-name strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-lead-name small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-lead-delay { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: 700; white-space: nowrap; }
+/* Lo que hay por cerrar: ámbar y no rojo, porque no es un retraso con el cliente sino una ficha sin apuntar. */
+.por-cerrar-grupo h3 { margin: 14px 0 0; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.por-cerrar-delay { background: #fef3c7; color: #92400e; }
+.por-cerrar-mas { padding: 6px 12px; border: 0; background: none; font-size: 12.5px; }
+/* El motivo de pérdida, debajo del estado en la fila. */
+.motivo-perdida-fila { display: block; margin-top: 3px; color: #b91c1c; font-size: 11.5px; line-height: 1.25; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* La línea de apoyo de una tarjeta (el gasto y el coste por lead en Leads) */
 .kpi-value-stack { display: grid; gap: 2px; min-width: 0; }
