@@ -145,7 +145,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-29 albaranes-uno-a-uno"
+$VersionAgente = "2026-10-29 familias-con-comercial"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -1166,7 +1166,12 @@ function Sql-ClientesFamilia($cfg, $mesDesde, $mesHasta) {
   # familia entera. Sin columna de subfamilia va vacia y fuera del group by:
   # SQL Server no deja agrupar por un valor fijo.
   $subfamilia = "''"
-  $grupos = @("a.CodigoEmpresa", $cliente, "convert(char(7), a.FechaAlbaran, 120)", $familia)
+  # El comercial y la serie de cada compra, para que la compra por cliente y
+  # familia se pueda filtrar igual que el resto del panel: con un comercial
+  # marcado, solo lo facturado a el.
+  $comercial = "case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end"
+  $serie = "isnull(ltrim(rtrim(a.SerieAlbaran)), '')"
+  $grupos = @("a.CodigoEmpresa", $cliente, "convert(char(7), a.FechaAlbaran, 120)", $familia, $comercial, $serie)
   if ($cfg.Subfamilia -ne "''") {
     $subfamilia = "isnull(ltrim(rtrim(cast($($cfg.Subfamilia) as nvarchar(40)))), '')"
     $grupos += $subfamilia
@@ -1174,6 +1179,8 @@ function Sql-ClientesFamilia($cfg, $mesDesde, $mesHasta) {
   return @"
 select a.CodigoEmpresa, $cliente as Cliente, convert(char(7), a.FechaAlbaran, 120) as Mes, $familia as Familia,
   $subfamilia as Subfamilia,
+  $comercial as Comercial,
+  $serie as Serie,
   sum(isnull(l.[$($cfg.Importe)], 0)) as Neto,
   sum(isnull($($cfg.Coste), 0)) as Coste,
   sum(case when isnull($($cfg.Coste), 0) = 0 then isnull(l.[$($cfg.Importe)], 0) else 0 end) as NetoSinCoste,
@@ -2472,6 +2479,8 @@ if (-not $SoloVentas) {
             month          = "$([string]$fila["Mes"])-01"
             familyCode     = (Texto $fila["Familia"] 40)
             subfamilyCode  = (Texto $fila["Subfamilia"] 40)
+            repCode        = (Entero-O-Nulo $fila["Comercial"])
+            series         = (Texto $fila["Serie"] 20)
             netAmount      = (Numero $fila["Neto"])
             costAmount     = (Numero $fila["Coste"])
             netWithoutCost = (Numero $fila["NetoSinCoste"])

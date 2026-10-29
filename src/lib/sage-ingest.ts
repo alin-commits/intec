@@ -176,6 +176,13 @@ export const sageIngestSchema = z.object({
     familyCode: code.default(""),
     /** La subfamilia. En blanco si esa instalación de Sage no la tiene. */
     subfamilyCode: code.default(""),
+    /*
+      El comercial y la serie de la compra, desde el agente «2026-10-29
+      familias-con-comercial». Un agente anterior no los manda: sin serie, la
+      fila queda sin marcar y cuenta para cualquier comercial y canal.
+    */
+    repCode: z.number().int().nullable().optional(),
+    series: z.string().trim().max(20).optional(),
     netAmount: amount,
     costAmount: amount.default(0),
     netWithoutCost: amount.default(0),
@@ -766,6 +773,9 @@ export function toDatabasePayload(body: SageIngestBody): Record<string, unknown>
       month: row.month,
       family_code: row.familyCode,
       subfamily_code: row.subfamilyCode,
+      rep_code: row.repCode ?? null,
+      series: row.series ?? "",
+      with_rep: row.series !== undefined,
       net_amount: row.netAmount,
       cost_amount: row.costAmount,
       net_without_cost: row.netWithoutCost,

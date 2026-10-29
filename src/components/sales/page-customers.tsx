@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Cifras, type Cifra } from "@/components/ui/cifras";
 import { lostCustomers, type CustomerKind, type SalesContext } from "./sales-context";
 import { rpcAllRows, snapshotTotal, useCustomerCounts, useCustomerTotals, type CustomerCounts } from "./sales-queries";
-import { DataTable, LoadFailed, Panel, puntosQueFaltan, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
+import { changeCell, DataTable, LoadFailed, Panel, puntosQueFaltan, RankList, share, shortDate, useSageQuery, type Column } from "./sales-ui";
 import type { CustomerRow } from "./sales-list-modal";
 
 /*
@@ -214,6 +214,14 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   const listArgs = { p_kind: "activos", p_from: period.from, p_to: period.to, ...ctx.rpc };
   const top = useSageQuery<CustomerRow[]>(ctx.detail.customers ? JSON.stringify(["clientes-top", listArgs, reload]) : null, async () =>
     await rpcAllRows<CustomerRow>("sage_customer_list", listArgs, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]));
+  /*
+    Lo mismo en el periodo con el que se compara, para poner al lado lo que
+    compraba cada uno entonces, como en familias. Con los mismos filtros: con
+    una familia marcada, lo de esa familia entonces.
+  */
+  const compareListArgs = period.compare ? { p_kind: "activos", p_from: period.compare.from, p_to: period.compare.to, ...ctx.rpcCompare } : null;
+  const topAntes = useSageQuery<CustomerRow[]>(ctx.detail.customers && compareListArgs ? JSON.stringify(["clientes-top-antes", compareListArgs, reload]) : null, async () =>
+    await rpcAllRows<CustomerRow>("sage_customer_list", compareListArgs ?? {}, [{ column: "net_amount", ascending: false }, { column: "company_code" }, { column: "customer_code" }]));
 
   /*
     Los meses que se dibujan: los marcados, si hay alguno. Con el filtro puesto
@@ -273,6 +281,9 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
   };
 
   type TopRow = CustomerRow;
+  const compraAntes = new Map((topAntes.data ?? []).map((row) => [`${row.company_code}|${row.customer_code}`, Number(row.net_amount)]));
+  const antesDe = (row: TopRow) => compraAntes.get(`${row.company_code}|${row.customer_code}`) ?? 0;
+  const totalAntes = (rows: TopRow[]) => rows.reduce((suma, row) => suma + antesDe(row), 0);
   /* El Total de esta tabla es el de los clientes que salen en ella, no el del periodo: por eso dice cuántos son. */
   const totalTop = (rows: TopRow[]) => sumParts(rows, partsOf);
   const topColumns: Column<TopRow>[] = [
@@ -283,21 +294,18 @@ export function CustomersPage({ ctx }: { ctx: SalesContext }) {
       </span>
     ), sort: (row) => row.trade_name || row.name, total: (rows) => `Total · ${numberFormatter.format(rows.length)} clientes` },
     { key: "compra", header: "Compra", render: (row) => euros(Number(row.net_amount)), sort: (row) => Number(row.net_amount), total: (rows) => euros(totalTop(rows).net) },
+    // Lo que compraba en el periodo con el que se compara y cuánto se ha movido, como en familias.
+    ...(period.compare && period.compareShort
+      ? [
+        { key: "antes", header: period.compareShort, optional: true, render: (row: TopRow) => (antesDe(row) ? euros(antesDe(row)) : <span className="muted">—</span>), sort: (row: TopRow) => antesDe(row), total: (rows: TopRow[]) => euros(totalAntes(rows)) },
+        { key: "var", header: `vs ${period.compareShort}`, render: (row: TopRow) => changeCell(Number(row.net_amount), antesDe(row)), sort: (row: TopRow) => variation(Number(row.net_amount), antesDe(row)) ?? -Infinity, total: (rows: TopRow[]) => changeCell(totalTop(rows).net, totalAntes(rows)) },
+      ]
+      : []),
     { key: "dto", header: "Dto.", render: (row) => { const value = discountPercent(row.gross_amount, row.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); }, sort: (row) => discountPercent(row.gross_amount, row.gross_net) ?? -Infinity, total: (rows) => { const sum = totalTop(rows); const value = discountPercent(sum.gross_amount, sum.gross_net); return value === null ? <span className="muted">—</span> : formatPercent(value); } },
     // Con una familia marcada los albaranes no se saben: un albarán puede llevar varias familias.
     { key: "albaranes", header: "Albaranes", optional: true, render: (row) => (row.documents === null ? <span className="muted">—</span> : numberFormatter.format(Number(row.documents))), sort: (row) => Number(row.documents ?? -1), total: (rows) => (rows.some((row) => row.documents === null) ? <span className="muted">—</span> : numberFormatter.format(totalTop(rows).documents)) },
     { key: "comercial", header: "Comercial", text: true, optional: true, render: (row) => (row.rep_code === null ? <span className="muted">—</span> : ctx.repOf(row.company_code, row.rep_code).label), sort: (row) => (row.rep_code === null ? "" : ctx.repOf(row.company_code, row.rep_code).label) },
-    { key: "contacto", header: "Contacto", text: true, optional: true, render: (row) => {
-      const phone = row.contact_phone || row.phone;
-      if (!row.contact_name && !phone) return <span className="muted">—</span>;
-      return (
-        <span className="sales-contact">
-          {row.contact_name ? <strong>{row.contact_name}</strong> : null}
-          {phone ? <a href={`tel:${phone.replace(/\s+/g, "")}`} onClick={(event) => event.stopPropagation()}>{phone}</a> : null}
-        </span>
-      );
-    } },
-    { key: "ultima", header: "Última compra", render: (row) => shortDate(row.last_purchase), sort: (row) => row.last_purchase ?? "" },
+    // El contacto y la última compra están en la ficha, que se abre al pulsar el cliente.
   ];
 
   const dormant = totals.data ? snapshotTotal(totals.data.snapshots, "clientes_dormidos", filters.companies) : null;

@@ -294,3 +294,20 @@ test("los albaranes uno a uno viajan con su tramo, aunque no vayan los totales p
     rep_code: 51, author_user: 26, tpv_operator: "", net_amount: 312.4,
   }]);
 });
+
+test("la compra por cliente y familia lleva su comercial y su serie, y lo de un agente viejo queda sin marcar", () => {
+  const base = { coveredFrom: "2026-10-01", coveredTo: "2026-10-29", companies: [], reps: [], sales: [] };
+  const fila = { companyCode: 1, customerCode: "4300123", month: "2026-10-01", familyCode: "AC", netAmount: 400 };
+  const nuevo = toDatabasePayload(sageIngestSchema.parse({ ...base, customerFamilies: [{ ...fila, repCode: 54, series: " A " }] }));
+  const [conComercial] = nuevo.customer_families as Record<string, unknown>[];
+  assert.equal(conComercial.rep_code, 54);
+  assert.equal(conComercial.series, "A");
+  assert.equal(conComercial.with_rep, true);
+  // Sin comercial también es un dato: el cliente no tiene ninguno.
+  const sinComercial = toDatabasePayload(sageIngestSchema.parse({ ...base, customerFamilies: [{ ...fila, repCode: null, series: "" }] }));
+  assert.equal((sinComercial.customer_families as Record<string, unknown>[])[0].with_rep, true);
+  const viejo = toDatabasePayload(sageIngestSchema.parse({ ...base, customerFamilies: [fila] }));
+  const [sinMarcar] = viejo.customer_families as Record<string, unknown>[];
+  assert.equal(sinMarcar.rep_code, null);
+  assert.equal(sinMarcar.with_rep, false);
+});
