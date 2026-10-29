@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeIngest, sageIngestSchema, toDatabasePayload } from "../src/lib/sage-ingest.ts";
+import { describeIngest, hasAuthorParts, sageIngestSchema, toAuthorsPayload, toDatabasePayload } from "../src/lib/sage-ingest.ts";
 import {
   addMonths,
   familyMargin,
@@ -238,4 +238,43 @@ test("las piezas de una fila sin coste fiable cuentan como cero, no rompen la su
   assert.equal(total.net, 500);
   assert.equal(total.documents, 5);
   assert.equal(familyMargin(total), null, "sin coste no hay margen que enseñar en el pie");
+});
+
+test("quién hace cada albarán: el tramo viaja con los autores, y sin ellos no se toca nada", () => {
+  const body = sageIngestSchema.parse({
+    ...oldAgentBody,
+    deliveryAuthors: [
+      { companyCode: 1, day: "2026-09-28", authorUser: 26, tpvOperator: "", repCode: 150, documents: 4, netAmount: 812.5 },
+      { companyCode: 1, day: "2026-09-28", authorUser: 0, tpvOperator: " 51 ", repCode: null, documents: 1, netAmount: 40 },
+    ],
+  });
+  assert.equal(hasAuthorParts(body), true);
+  const payload = toAuthorsPayload(body);
+  // La función de la base borra este tramo y lo escribe entero: sin él no sabría cuál.
+  assert.equal(payload.covered_from, "2026-09-26");
+  assert.equal(payload.covered_to, "2026-09-28");
+  assert.deepEqual((payload.delivery_authors as Record<string, unknown>[])[0], {
+    company_code: 1, day: "2026-09-28", author_user: 26, tpv_operator: "", rep_code: 150, documents: 4, net_amount: 812.5,
+  });
+  assert.equal((payload.delivery_authors as Record<string, unknown>[])[1].tpv_operator, "51", "el operador llega sin espacios");
+
+  // Un envío del agente de antes no trae autores: no hay nada que mandar y nada se borra.
+  const antiguo = sageIngestSchema.parse(oldAgentBody);
+  assert.equal(hasAuthorParts(antiguo), false);
+  assert.deepEqual(toAuthorsPayload(antiguo), {});
+});
+
+test("de los usuarios de Sage solo pasa el código, el nombre y si está activo", () => {
+  const body = sageIngestSchema.parse({
+    ...oldAgentBody,
+    // Si un agente mal hecho mandara la contraseña, el esquema la tira antes de llegar a la base.
+    sageUsers: [{ code: 25, name: "Usuario Ejemplo", isActive: true, sysPassword: "no-deberia-llegar" }],
+    tpvOperators: [{ companyCode: 1, code: "150", description: "Caja 1", sageUserName: "Usuario Ejemplo" }],
+  });
+  const payload = toAuthorsPayload(body);
+  assert.deepEqual(payload.sage_users, [{ code: 25, name: "Usuario Ejemplo", is_active: true }]);
+  assert.equal(JSON.stringify(payload).includes("no-deberia-llegar"), false);
+  assert.deepEqual(payload.tpv_operators, [{ company_code: 1, code: "150", description: "Caja 1", sage_user_name: "Usuario Ejemplo" }]);
+  // Sin albaranes por autor no va el tramo: la función no borraría nada aunque lo trajera.
+  assert.equal("covered_from" in payload, false);
 });

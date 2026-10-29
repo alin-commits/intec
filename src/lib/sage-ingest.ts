@@ -431,6 +431,32 @@ export const sageIngestSchema = z.object({
     movement: amount.default(0),
   })).max(20000).optional(),
   bankBalancesReplace: z.boolean().optional(),
+  /*
+    Quién hace cada albarán: por día, autor y comercial asignado. El autor es
+    el usuario de Sage (_TS_SysUsuario, 0 si no lo lleva) o, en la tienda, el
+    operador del TPV. Los usuarios y los operadores van aparte, para ponerles
+    nombre; de los usuarios, solo el código y el nombre, nunca su contraseña.
+  */
+  deliveryAuthors: z.array(z.object({
+    companyCode: z.number().int(),
+    day,
+    authorUser: z.number().int().min(0).default(0),
+    tpvOperator: z.string().trim().max(20).default(""),
+    repCode,
+    documents: count,
+    netAmount: amount,
+  })).max(20000).optional(),
+  sageUsers: z.array(z.object({
+    code: z.number().int().min(0),
+    name: z.string().trim().min(1).max(80),
+    isActive: z.boolean().default(true),
+  })).max(2000).optional(),
+  tpvOperators: z.array(z.object({
+    companyCode: z.number().int(),
+    code: z.string().trim().min(1).max(20),
+    description: optionalText(120),
+    sageUserName: optionalText(80),
+  })).max(2000).optional(),
 });
 
 /** Si el envío trae algo de pagos, que va a una función aparte. */
@@ -500,6 +526,42 @@ export function toPaymentsPayload(body: SageIngestBody): Record<string, unknown>
 }
 
 export type SageIngestBody = z.infer<typeof sageIngestSchema>;
+
+/** Si este envío trae algo de quién hace los albaranes. */
+export function hasAuthorParts(body: SageIngestBody): boolean {
+  return Boolean(body.deliveryAuthors || body.sageUsers || body.tpvOperators);
+}
+
+/**
+ * Los autores de los albaranes van a su propia función, como compras y pagos.
+ * El tramo viaja con ellos: la función borra ese tramo y lo escribe entero,
+ * así que un envío sin esa parte no puede borrar nada.
+ */
+export function toAuthorsPayload(body: SageIngestBody): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (body.deliveryAuthors) {
+    payload.covered_from = body.coveredFrom;
+    payload.covered_to = body.coveredTo;
+    payload.delivery_authors = body.deliveryAuthors.map((row) => ({
+      company_code: row.companyCode,
+      day: row.day,
+      author_user: row.authorUser,
+      tpv_operator: row.tpvOperator,
+      rep_code: row.repCode,
+      documents: row.documents,
+      net_amount: row.netAmount,
+    }));
+  }
+  if (body.sageUsers) {
+    payload.sage_users = body.sageUsers.map((row) => ({ code: row.code, name: row.name, is_active: row.isActive }));
+  }
+  if (body.tpvOperators) {
+    payload.tpv_operators = body.tpvOperators.map((row) => ({
+      company_code: row.companyCode, code: row.code, description: row.description, sage_user_name: row.sageUserName,
+    }));
+  }
+  return payload;
+}
 
 /** Lo que recibe `sage_ingest`: los nombres de las columnas de la base de datos. */
 /** Si este envío trae algo de compras. */
@@ -808,6 +870,9 @@ export function describeIngest(body: SageIngestBody, counts: Record<string, numb
     ["order_documents", "pedidos uno a uno"],
     ["purchase_orders", "pedidos a proveedor"],
     ["purchase_order_lines", "líneas de pedido a proveedor"],
+    ["delivery_authors", "de albaranes por autor"],
+    ["sage_users", "usuarios de Sage"],
+    ["tpv_operators", "operadores de TPV"],
     ["incidents", "de abonos e incidencias"],
     ["lookups", "códigos de Sage"],
     ["customer_contacts", "contactos de clientes"],

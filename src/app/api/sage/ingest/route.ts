@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isSageAgent } from "@/lib/sage-agent-auth";
-import { describeIngest, hasPaymentParts, hasPurchaseParts, sageIngestSchema, toDatabasePayload, toPaymentsPayload, toPurchasesPayload, type SageIngestBody } from "@/lib/sage-ingest";
+import { describeIngest, hasAuthorParts, hasPaymentParts, hasPurchaseParts, sageIngestSchema, toAuthorsPayload, toDatabasePayload, toPaymentsPayload, toPurchasesPayload, type SageIngestBody } from "@/lib/sage-ingest";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /*
@@ -107,6 +107,16 @@ export async function POST(request: Request) {
       falloDeCompras = compras.error.message.slice(0, 180);
     } else data = { ...(data ?? {}), ...(compras.data ?? {}) };
   }
+  // Quién hace cada albarán: un añadido como compras. Si falla, se dice en el
+  // resumen de la lectura y se sigue: lo que ya está guardado no se pierde.
+  let falloDeAutores: string | null = null;
+  if (!error && hasAuthorParts(body)) {
+    const autores = await saveBlock(admin, toAuthorsPayload(body), "sage_ingest_authors");
+    if (autores.error) {
+      console.warn(`Sage: no se pudo guardar quién hace los albaranes: ${autores.error.message}`);
+      falloDeAutores = autores.error.message.slice(0, 180);
+    } else data = { ...(data ?? {}), ...(autores.data ?? {}) };
+  }
   if (error) {
     const message = `No se guardó nada de este envío: ${error.message}`;
     if (runId) await admin.from("sage_sync_runs").update({ finished_at: new Date().toISOString(), ok: false, message: message.slice(0, 2000) }).eq("id", runId);
@@ -121,9 +131,11 @@ export async function POST(request: Request) {
       finished_at: new Date().toISOString(),
       rows_written: counts.sales ?? 0,
       ok: true,
-      message: falloDeCompras
-        ? `${describeIngest(body, counts)} AVISO: compras no se guardó: ${falloDeCompras}`.slice(0, 2000)
-        : describeIngest(body, counts),
+      message: [
+        describeIngest(body, counts),
+        falloDeCompras ? `AVISO: compras no se guardó: ${falloDeCompras}` : null,
+        falloDeAutores ? `AVISO: los autores de los albaranes no se guardaron: ${falloDeAutores}` : null,
+      ].filter(Boolean).join(" ").slice(0, 2000),
     }).eq("id", runId);
   }
 

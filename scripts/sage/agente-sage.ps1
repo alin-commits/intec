@@ -532,6 +532,100 @@ function Filas-Venta($tabla, $base) {
   return ,$lista
 }
 
+# --- Quién hace cada albarán ------------------------------------------------
+# Un albarán lo hace una persona, pero la venta se le cuenta al comercial del
+# cliente. Sage guarda quién lo hizo en _TS_SysUsuario y, en los de la tienda,
+# el operador del TPV en T_CodigoOperador. Con las dos y el comercial asignado
+# se ve cuántos albaranes hace alguien que se le apuntan a otro.
+#
+# El número de usuario de Sage NO es el de comercial (el usuario 24 no es el
+# comercial 24): quién es quién se apunta en el Hub, no se deduce aquí.
+function Preparar-Autores {
+  $usuario = if (Tiene "CabeceraAlbaranCliente" "_TS_SysUsuario") { "isnull(a.[_TS_SysUsuario], 0)" } else { $null }
+  $operador = if (Tiene "CabeceraAlbaranCliente" "T_CodigoOperador") { "isnull(ltrim(rtrim(cast(a.[T_CodigoOperador] as nvarchar(20)))), '')" } else { $null }
+  if (-not $usuario -and -not $operador) { Avisar $avisosDeArranque "autores de albaran: no hay _TS_SysUsuario ni T_CodigoOperador"; return $null }
+  return @{
+    Usuario   = if ($usuario) { $usuario } else { "cast(0 as smallint)" }
+    Operador  = if ($operador) { $operador } else { "cast('' as nvarchar(20))" }
+    Usuarios  = (Columnas "lsysUsuarios").Count -gt 0
+    Operadores = (Columnas "T_OperadorTPV").Count -gt 0
+  }
+}
+
+# Los mismos filtros que la venta por día —sociedades excluidas, el comercial
+# 0 o 9999 como sin asignar, BaseImponible como importe— para que cuadren.
+function Sql-Autores($cfg, $desdeBloque, $hastaBloque) {
+  return @"
+select
+  a.CodigoEmpresa,
+  cast(a.FechaAlbaran as date) as Dia,
+  $($cfg.Usuario) as Usuario,
+  $($cfg.Operador) as Operador,
+  case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end as Comercial,
+  count(*) as Documentos,
+  sum(isnull(a.BaseImponible, 0)) as Neto
+from CabeceraAlbaranCliente a
+where a.FechaAlbaran >= convert(datetime, '$desdeBloque', 112) and a.FechaAlbaran < convert(datetime, '$hastaBloque', 112)
+  and a.CodigoEmpresa not in ($excluidas)
+group by
+  a.CodigoEmpresa,
+  cast(a.FechaAlbaran as date),
+  $($cfg.Usuario),
+  $($cfg.Operador),
+  case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end;
+"@
+}
+
+function Filas-Autores($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode = [int]$fila["CodigoEmpresa"]
+      day         = ([datetime]$fila["Dia"]).ToString("yyyy-MM-dd")
+      authorUser  = [int](Numero $fila["Usuario"])
+      tpvOperator = (Texto $fila["Operador"] 20)
+      repCode     = (Entero-O-Nulo $fila["Comercial"])
+      documents   = [int]$fila["Documentos"]
+      netAmount   = [double]$fila["Neto"]
+    })
+  }
+  return ,$lista
+}
+
+# Los usuarios de Sage: SOLO el código, el nombre y si está activo. Esta tabla
+# guarda también contraseñas y tokens, y esas columnas no se leen nunca.
+function Leer-UsuariosSage {
+  $activo = if (Tiene "lsysUsuarios" "sysActivo") { "isnull(sysActivo, 1)" } else { "1" }
+  $tabla = Consultar $servidorBueno "select sysUsuario as Codigo, sysUserName as Nombre, $activo as Activo from lsysUsuarios;"
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $nombre = Texto $fila["Nombre"] 80
+    if ($nombre -eq "") { continue }
+    $lista.Add([PSCustomObject]@{ code = [int](Numero $fila["Codigo"]); name = $nombre; isActive = ((Numero $fila["Activo"]) -ne 0) })
+  }
+  return ,$lista
+}
+
+# Los operadores del TPV y el usuario de Sage con el que entran: es lo que
+# permite poner nombre a los albaranes de tienda, que no llevan usuario.
+function Leer-OperadoresTpv {
+  $descripcion = if (Tiene "T_OperadorTPV" "T_DescripcionOperador") { "T_DescripcionOperador" } else { "cast(null as nvarchar(120))" }
+  $usuario = if (Tiene "T_OperadorTPV" "sysUserName") { "sysUserName" } else { "cast(null as nvarchar(80))" }
+  $tabla = Consultar $servidorBueno "select CodigoEmpresa, cast(T_CodigoOperador as nvarchar(20)) as Codigo, $descripcion as Descripcion, $usuario as Usuario from T_OperadorTPV where CodigoEmpresa not in ($excluidas);"
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $codigo = Texto $fila["Codigo"] 20
+    if ($codigo -eq "") { continue }
+    $lista.Add([PSCustomObject]@{
+      companyCode  = [int]$fila["CodigoEmpresa"]
+      code         = $codigo
+      description  = (Texto-O-Nulo $fila["Descripcion"] 120)
+      sageUserName = (Texto-O-Nulo $fila["Usuario"] 80)
+    })
+  }
+  return ,$lista
+}
+
 # --- Ofertas y pedidos: cabeceras, totales por día, serie y comercial -------
 function Preparar-Documentos($nombre, $tabla, $fecha, [string[]]$series) {
   $faltan = Faltan $tabla @("CodigoEmpresa", $fecha)
@@ -2150,6 +2244,7 @@ $cfgArticulos = $null
 $cfgClientes = $null
 $cfgOfertasDetalle = $null
 $cfgPedidosDetalle = $null
+$cfgAutores = $null
 if (-not $SoloVentas) {
   try { $cfgOfertas = Preparar-Documentos "ofertas" "CabeceraOfertaCliente" "FechaOferta" @("SerieOferta") } catch { Avisar $avisosDeArranque "ofertas: $($_.Exception.Message)" }
   try { $cfgPedidos = Preparar-Documentos "pedidos" "CabeceraPedidoCliente" "FechaPedido" @("SeriePedido") } catch { Avisar $avisosDeArranque "pedidos: $($_.Exception.Message)" }
@@ -2162,6 +2257,7 @@ if (-not $SoloVentas) {
   try { $cfgCompras = Preparar-Compras } catch { Avisar $avisosDeArranque "pedidos a proveedor: $($_.Exception.Message)" }
   if ($cfgFamilias -and -not $cfgFamilias.ConArticulo) { Avisar $avisosDeArranque "venta por articulo: las lineas no traen CodigoArticulo" }
   try { $cfgPagos = Preparar-Pagos } catch { Avisar $avisosDeArranque "pagos: $($_.Exception.Message)" }
+  try { $cfgAutores = Preparar-Autores } catch { Avisar $avisosDeArranque "autores de albaran: $($_.Exception.Message)" }
 }
 
 # ---------------------------------------------------------------------------
@@ -2287,6 +2383,7 @@ while ($cursor -lt $finVentana) {
   if ($cfgOfertasDetalle) { Intentar $envio "offerDocuments" $avisos "ofertas una a una ($etiqueta)" { Filas-OfertasDetalle (Consultar $servidorBueno (Sql-OfertasDetalle $cfgOfertasDetalle $desdeSql $hastaSql)) } }
   if ($cfgPedidosDetalle) { Intentar $envio "orderDocuments" $avisos "pedidos uno a uno ($etiqueta)" { Filas-PedidosDetalle (Consultar $servidorBueno (Sql-PedidosDetalle $cfgPedidosDetalle $desdeSql $hastaSql)) } }
   if (-not $SoloVentas) { Intentar $envio "incidents" $avisos "abonos e incidencias ($etiqueta)" { Filas-Incidencias (Consultar $servidorBueno (Sql-Incidencias $desdeSql $hastaSql)) } }
+  if ($cfgAutores) { Intentar $envio "deliveryAuthors" $avisos "autores de albaran ($etiqueta)" { Filas-Autores (Consultar $servidorBueno (Sql-Autores $cfgAutores $desdeSql $hastaSql)) } }
 
   if ($avisos.Count -gt 0) { $envio.notes = $avisos }
   Enviar $envio $etiqueta
@@ -2486,6 +2583,12 @@ if (-not $SoloVentas) {
     try { $contactos = Leer-ContactosClientes $avisos } catch { Avisar $avisos "contactos de clientes: $($_.Exception.Message)" }
   }
   if ($null -eq $envio["families"]) { $envio.Remove("families") }
+  # Quién es quién en Sage, para poner nombre a quien hace cada albarán. Son
+  # unas decenas de filas: van en cada lectura.
+  if ($cfgAutores) {
+    if ($cfgAutores.Usuarios) { Intentar $envio "sageUsers" $avisos "usuarios de Sage" { Leer-UsuariosSage } }
+    if ($cfgAutores.Operadores) { Intentar $envio "tpvOperators" $avisos "operadores de TPV" { Leer-OperadoresTpv } }
+  }
   for ($k = $avisosEnviados; $k -lt $avisosDeArranque.Count; $k++) { if ($avisos.Count -lt 30) { $avisos.Add($avisosDeArranque[$k]) } }
   if ($avisos.Count -gt 0) { $envio.notes = $avisos }
   Enviar $envio "anexo"
