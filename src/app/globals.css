@@ -2214,6 +2214,8 @@ select:not([multiple]):not([size]):disabled { opacity: .6; }
 .autores-fila select { min-width: 0; min-height: 34px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; font-size: 12.5px; background: var(--surface); color: inherit; }
 .autores-fila select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 .autores-fila select:disabled { opacity: 0.55; }
+/* «Ver los N»: la lista entera de una de las dos caras, junto a su título. */
+.autores-ver-todos { margin-left: 10px; padding: 0; border: 0; background: none; cursor: pointer; font-size: 12px; }
 /* El código de comisionista junto al nombre, como en Sage. */
 .autores-codigo { margin-left: 7px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
 /* Los usuarios de Sage de un comercial, como fichas que se quitan con la ×. */

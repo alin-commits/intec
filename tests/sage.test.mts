@@ -278,3 +278,19 @@ test("de los usuarios de Sage solo pasa el código, el nombre y si está activo"
   // Sin albaranes por autor no va el tramo: la función no borraría nada aunque lo trajera.
   assert.equal("covered_from" in payload, false);
 });
+
+test("los albaranes uno a uno viajan con su tramo, aunque no vayan los totales por autor", () => {
+  const body = sageIngestSchema.parse({
+    coveredFrom: "2026-10-01", coveredTo: "2026-10-29", companies: [], reps: [], sales: [],
+    deliveryDocuments: [{ companyCode: 1, fiscalYear: 2026, series: " B ", number: 4512, day: "2026-10-20", customerCode: "4300123", repCode: 51, authorUser: 26, netAmount: 312.4 }],
+  });
+  assert.equal(hasAuthorParts(body), true);
+  const payload = toAuthorsPayload(body);
+  assert.equal(payload.covered_from, "2026-10-01");
+  assert.equal(payload.covered_to, "2026-10-29");
+  assert.equal(payload.delivery_authors, undefined);
+  assert.deepEqual(payload.delivery_documents, [{
+    company_code: 1, fiscal_year: 2026, series: "B", number: 4512, day: "2026-10-20", customer_code: "4300123",
+    rep_code: 51, author_user: 26, tpv_operator: "", net_amount: 312.4,
+  }]);
+});

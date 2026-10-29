@@ -145,7 +145,7 @@ function Apuntar($texto) {
 # Qué versión del agente es. Sale en el registro y en el envío de pagos de la
 # lectura larga, para saber desde el Hub qué copia hay en el servidor. Se cambia
 # cada vez que se manda una versión nueva al servidor.
-$VersionAgente = "2026-10-27 cerrar-recibidos"
+$VersionAgente = "2026-10-29 albaranes-uno-a-uno"
 
 # Las sociedades de demostración y de pruebas de Sage no son negocio.
 $EmpresasExcluidas = @(9999, 10000)
@@ -549,6 +549,8 @@ function Preparar-Autores {
     Operador  = if ($operador) { $operador } else { "cast('' as nvarchar(20))" }
     Usuarios  = (Columnas "lsysUsuarios").Count -gt 0
     Operadores = (Columnas "T_OperadorTPV").Count -gt 0
+    # Para mandarlos uno a uno hace falta la clave del albaran y el cliente.
+    Documentos = (Faltan "CabeceraAlbaranCliente" @("EjercicioAlbaran", "SerieAlbaran", "NumeroAlbaran", "CodigoCliente")).Count -eq 0
   }
 }
 
@@ -587,6 +589,47 @@ function Filas-Autores($tabla) {
       repCode     = (Entero-O-Nulo $fila["Comercial"])
       documents   = [int]$fila["Documentos"]
       netAmount   = [double]$fila["Neto"]
+    })
+  }
+  return ,$lista
+}
+
+# Y los mismos albaranes uno a uno: numero, cliente, comisionista, autor e
+# importe. Es lo que abre el panel al pulsar "le hizo 64 a fulano": la lista
+# de esos 64. Solo la cabecera, como los pedidos uno a uno.
+function Sql-AlbaranesUnoAUno($cfg, $desdeBloque, $hastaBloque) {
+  return @"
+select
+  a.CodigoEmpresa,
+  a.EjercicioAlbaran as Ejercicio,
+  isnull(ltrim(rtrim(a.SerieAlbaran)), '') as Serie,
+  a.NumeroAlbaran as Numero,
+  cast(a.FechaAlbaran as date) as Dia,
+  ltrim(rtrim(cast(a.CodigoCliente as nvarchar(40)))) as Cliente,
+  case when a.CodigoComisionista in (0, 9999) then null else a.CodigoComisionista end as Comercial,
+  $($cfg.Usuario) as Usuario,
+  $($cfg.Operador) as Operador,
+  isnull(a.BaseImponible, 0) as Neto
+from CabeceraAlbaranCliente a
+where a.FechaAlbaran >= convert(datetime, '$desdeBloque', 112) and a.FechaAlbaran < convert(datetime, '$hastaBloque', 112)
+  and a.CodigoEmpresa not in ($excluidas);
+"@
+}
+
+function Filas-AlbaranesUnoAUno($tabla) {
+  $lista = New-Object System.Collections.Generic.List[object]
+  foreach ($fila in $tabla.Rows) {
+    $lista.Add([PSCustomObject]@{
+      companyCode  = [int]$fila["CodigoEmpresa"]
+      fiscalYear   = [int]$fila["Ejercicio"]
+      series       = (Texto $fila["Serie"] 20)
+      number       = [int]$fila["Numero"]
+      day          = ([datetime]$fila["Dia"]).ToString("yyyy-MM-dd")
+      customerCode = (Texto-O-Nulo $fila["Cliente"] 40)
+      repCode      = (Entero-O-Nulo $fila["Comercial"])
+      authorUser   = [int](Numero $fila["Usuario"])
+      tpvOperator  = (Texto $fila["Operador"] 20)
+      netAmount    = [double]$fila["Neto"]
     })
   }
   return ,$lista
@@ -2384,6 +2427,7 @@ while ($cursor -lt $finVentana) {
   if ($cfgPedidosDetalle) { Intentar $envio "orderDocuments" $avisos "pedidos uno a uno ($etiqueta)" { Filas-PedidosDetalle (Consultar $servidorBueno (Sql-PedidosDetalle $cfgPedidosDetalle $desdeSql $hastaSql)) } }
   if (-not $SoloVentas) { Intentar $envio "incidents" $avisos "abonos e incidencias ($etiqueta)" { Filas-Incidencias (Consultar $servidorBueno (Sql-Incidencias $desdeSql $hastaSql)) } }
   if ($cfgAutores) { Intentar $envio "deliveryAuthors" $avisos "autores de albaran ($etiqueta)" { Filas-Autores (Consultar $servidorBueno (Sql-Autores $cfgAutores $desdeSql $hastaSql)) } }
+  if ($cfgAutores -and $cfgAutores.Documentos) { Intentar $envio "deliveryDocuments" $avisos "albaranes uno a uno ($etiqueta)" { Filas-AlbaranesUnoAUno (Consultar $servidorBueno (Sql-AlbaranesUnoAUno $cfgAutores $desdeSql $hastaSql)) } }
 
   if ($avisos.Count -gt 0) { $envio.notes = $avisos }
   Enviar $envio $etiqueta

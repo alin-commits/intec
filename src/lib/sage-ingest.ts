@@ -446,6 +446,23 @@ export const sageIngestSchema = z.object({
     documents: count,
     netAmount: amount,
   })).max(20000).optional(),
+  /*
+    Y los albaranes uno a uno, con lo mismo: para poder abrir la lista de los
+    que hace uno y se facturan a otro. Solo la cabecera: número, cliente,
+    comisionista, autor e importe.
+  */
+  deliveryDocuments: z.array(z.object({
+    companyCode: z.number().int(),
+    fiscalYear: z.number().int(),
+    series: z.string().trim().max(20).default(""),
+    number: z.number().int(),
+    day,
+    customerCode: optionalText(40),
+    repCode,
+    authorUser: z.number().int().min(0).default(0),
+    tpvOperator: z.string().trim().max(20).default(""),
+    netAmount: amount,
+  })).max(20000).optional(),
   sageUsers: z.array(z.object({
     code: z.number().int().min(0),
     name: z.string().trim().min(1).max(80),
@@ -529,7 +546,7 @@ export type SageIngestBody = z.infer<typeof sageIngestSchema>;
 
 /** Si este envío trae algo de quién hace los albaranes. */
 export function hasAuthorParts(body: SageIngestBody): boolean {
-  return Boolean(body.deliveryAuthors || body.sageUsers || body.tpvOperators);
+  return Boolean(body.deliveryAuthors || body.deliveryDocuments || body.sageUsers || body.tpvOperators);
 }
 
 /**
@@ -539,9 +556,25 @@ export function hasAuthorParts(body: SageIngestBody): boolean {
  */
 export function toAuthorsPayload(body: SageIngestBody): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
-  if (body.deliveryAuthors) {
+  if (body.deliveryAuthors || body.deliveryDocuments) {
     payload.covered_from = body.coveredFrom;
     payload.covered_to = body.coveredTo;
+  }
+  if (body.deliveryDocuments) {
+    payload.delivery_documents = body.deliveryDocuments.map((row) => ({
+      company_code: row.companyCode,
+      fiscal_year: row.fiscalYear,
+      series: row.series,
+      number: row.number,
+      day: row.day,
+      customer_code: row.customerCode,
+      rep_code: row.repCode,
+      author_user: row.authorUser,
+      tpv_operator: row.tpvOperator,
+      net_amount: row.netAmount,
+    }));
+  }
+  if (body.deliveryAuthors) {
     payload.delivery_authors = body.deliveryAuthors.map((row) => ({
       company_code: row.companyCode,
       day: row.day,
@@ -871,6 +904,7 @@ export function describeIngest(body: SageIngestBody, counts: Record<string, numb
     ["purchase_orders", "pedidos a proveedor"],
     ["purchase_order_lines", "líneas de pedido a proveedor"],
     ["delivery_authors", "de albaranes por autor"],
+    ["delivery_documents", "albaranes uno a uno"],
     ["sage_users", "usuarios de Sage"],
     ["tpv_operators", "operadores de TPV"],
     ["incidents", "de abonos e incidencias"],

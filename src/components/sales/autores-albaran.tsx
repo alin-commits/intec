@@ -16,6 +16,7 @@ import {
 import { numberFormatter } from "@/lib/format";
 import { comercialMarcado, euros, marcado, mesMarcado } from "@/lib/sales-model";
 import { createClient } from "@/lib/supabase/client";
+import { ListaDeAlbaranes, type PeticionDeAlbaranes } from "./albaranes-lista";
 import type { SalesContext } from "./sales-context";
 import { rpcAllRows } from "./sales-queries";
 import { DataTable, LoadFailed, Panel, RankList, share, useSageQuery, type Column } from "./sales-ui";
@@ -65,6 +66,8 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
   const [editando, setEditando] = useState(false);
   const [guardando, setGuardando] = useState<string | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
+  /** Los albaranes que se han pedido ver, pulsando una cifra. */
+  const [peticion, setPeticion] = useState<PeticionDeAlbaranes | null>(null);
   /** Lo apuntado desde que se abrió la página: null es «quitado». */
   const [cambios, setCambios] = useState<Record<string, QuienEs | null>>({});
 
@@ -108,6 +111,9 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
     if (fila) quienEs.set(author, fila);
     else quienEs.delete(author);
   }
+
+  /** Las fichas de comisionista de una persona, como las pide la base: "1:51". */
+  const fichasDe = (key: string) => ctx.reps.filter((rep) => ctx.repOf(rep.company_code, rep.code).key === key).map((rep) => `${rep.company_code}:${rep.code}`);
 
   /** "comisionista 51", o los varios que tenga en distintas sociedades: lo que se ve en Sage. */
   const comoComisionista = (key: string) => {
@@ -314,24 +320,70 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
           <div className="sales-row-detail-inner sales-two-columns">
             <div>
               <p className="sales-row-detail-title">
-                {fila.aQuien.length > 0 ? "Los que hace y se facturan a otro: a quién" : "No ha hecho albaranes que se facturen a otro comercial"}
+                {fila.aQuien.length > 0 ? "Los que hace y se facturan a otro: a quién. Pulsa uno para ver sus albaranes" : "No ha hecho albaranes que se facturen a otro comercial"}
+                {fila.aQuien.length > 1 ? (
+                  <button type="button" className="text-link autores-ver-todos" onClick={() => setPeticion({
+                    titulo: `Los que hace ${fila.label} y se facturan a otro`,
+                    descripcion: `Albaranes de ${ctx.periodName} hechos por ${fila.label} para clientes de otros comisionistas.`,
+                    authors: usuariosDe(fila.key),
+                    reps: fila.aQuien.flatMap((destino) => fichasDe(destino.key)),
+                    esperados: fila.paraOtros.documentos,
+                  })}>Ver los {numberFormatter.format(fila.paraOtros.documentos)}</button>
+                ) : null}
               </p>
               {fila.aQuien.length > 0 ? (
-                <RankList items={fila.aQuien.map((destino) => ({
-                  key: destino.key, label: destino.label, value: destino.documentos,
-                  valueLabel: numberFormatter.format(destino.documentos), extra: euros(destino.neto),
-                }))} />
+                <RankList
+                  items={fila.aQuien.map((destino) => ({
+                    key: destino.key, label: destino.label, value: destino.documentos,
+                    valueLabel: numberFormatter.format(destino.documentos), extra: euros(destino.neto),
+                  }))}
+                  onSelect={(key) => {
+                    const destino = fila.aQuien.find((item) => item.key === key);
+                    if (!destino) return;
+                    setPeticion({
+                      titulo: `${fila.label}, para clientes de ${destino.label}`,
+                      descripcion: `Albaranes de ${ctx.periodName} que hizo ${fila.label} y se facturan a ${destino.label}.`,
+                      authors: usuariosDe(fila.key),
+                      reps: fichasDe(destino.key),
+                      esperados: destino.documentos,
+                    });
+                  }}
+                />
               ) : null}
             </div>
             <div>
               <p className="sales-row-detail-title">
-                {fila.deQuien.length > 0 ? "Los de su facturación que le hizo otro: quién" : "Nadie más le ha hecho albaranes de su facturación"}
+                {fila.deQuien.length > 0 ? "Los de su facturación que le hizo otro: quién. Pulsa uno para ver sus albaranes" : "Nadie más le ha hecho albaranes de su facturación"}
+                {fila.deQuien.length > 1 ? (
+                  <button type="button" className="text-link autores-ver-todos" onClick={() => setPeticion({
+                    titulo: `Los de ${fila.label} que le hizo otro`,
+                    descripcion: `Albaranes de ${ctx.periodName} que se facturan a ${fila.label} y los hizo otra persona.`,
+                    notAuthors: usuariosDe(fila.key),
+                    reps: fichasDe(fila.key),
+                    esperados: fila.hechosPorOtros.documentos,
+                  })}>Ver los {numberFormatter.format(fila.hechosPorOtros.documentos)}</button>
+                ) : null}
               </p>
               {fila.deQuien.length > 0 ? (
-                <RankList items={fila.deQuien.map((origen) => ({
-                  key: origen.key, label: origen.label, value: origen.documentos,
-                  valueLabel: numberFormatter.format(origen.documentos), extra: euros(origen.neto),
-                }))} />
+                <RankList
+                  items={fila.deQuien.map((origen) => ({
+                    key: origen.key, label: origen.label, value: origen.documentos,
+                    valueLabel: numberFormatter.format(origen.documentos), extra: euros(origen.neto),
+                  }))}
+                  onSelect={(key) => {
+                    const origen = fila.deQuien.find((item) => item.key === key);
+                    if (!origen) return;
+                    // «Otros empleados» es todo el que no es de ningún comisionista.
+                    const deComisionistas = [...quienEs.values()].filter((quien) => quien.rep_key).map((quien) => quien.author);
+                    setPeticion({
+                      titulo: `${origen.label}, para clientes de ${fila.label}`,
+                      descripcion: `Albaranes de ${ctx.periodName} que se facturan a ${fila.label} y los hizo ${origen.key === "otros" ? "otro empleado" : origen.label}.`,
+                      ...(origen.key === "otros" ? { notAuthors: deComisionistas } : { authors: usuariosDe(origen.key) }),
+                      reps: fichasDe(fila.key),
+                      esperados: origen.documentos,
+                    });
+                  }}
+                />
               ) : null}
             </div>
           </div>
@@ -340,6 +392,7 @@ export function AutoresDeAlbaran({ ctx }: { ctx: SalesContext }) {
           ? "Todavía no hay usuarios de Sage asignados: elige arriba los de cada comercial y aquí saldrá lo que hace cada uno."
           : conComercial ? "Ningún usuario de Sage asignado a este comercial ha hecho albaranes en este periodo." : "Ningún comercial ha hecho albaranes en este periodo."}
       />
+      <ListaDeAlbaranes ctx={ctx} peticion={peticion} onCerrar={() => setPeticion(null)} />
       {/* Lo que no es de ningún comercial, para que el total cuadre con los albaranes del periodo. */}
       {!conComercial ? (
         <div className="sales-inline-stats">
