@@ -402,6 +402,14 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 }
 
 /* Operational phase */
+/*
+  Cuándo se leyó Sage, al pie del menú y en todas las pantallas. Discreto
+  mientras va al día; en naranja si el agente se ha saltado alguna pasada.
+*/
+.lectura-sage { display: flex; align-items: center; gap: 9px; margin: 0; padding: 4px 12px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.lectura-sage-punto { width: 7px; height: 7px; flex-shrink: 0; border-radius: 999px; background: var(--success); }
+.lectura-sage.is-old { color: #9a3412; }
+.lectura-sage.is-old .lectura-sage-punto { background: #ea580c; }
 .sidebar-logout { cursor: pointer; }
 .sidebar-logout:hover { background: #fef2f2; color: #b91c1c; }
 .form-error { padding: 10px 12px; border-radius: 9px; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; font-size: 13px; }

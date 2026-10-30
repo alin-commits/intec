@@ -11,6 +11,7 @@ import { PendingLeadsNotice } from "@/components/leads/pending-leads-notice";
 import { AvisoCompras } from "@/components/compras/aviso-compras";
 import { AvisoPorCerrar } from "@/components/aviso-por-cerrar";
 import { CampanaComercial } from "@/components/campana-comercial";
+import { LecturaDeSage } from "@/components/lectura-de-sage";
 import { GlobalSearch, NotificationsBell } from "@/components/topbar-tools";
 import { TabBarsWheel } from "@/components/ui/tab-bars-wheel";
 import { displayName } from "@/lib/format";
@@ -122,6 +123,7 @@ const departamentos: { id: string; label: string; entradas: Entrada[] }[] = [
 const pageTitles: Record<string, string> = {
   "/dashboard": "Actividad comercial",
   "/ventas": "Ventas de Sage",
+  "/compras": "Compras",
   "/administracion": "Administración",
   "/consultas": "Consultas",
   "/leads": "Leads",
@@ -298,6 +300,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-bottom">
+          {/* Cuándo se leyó Sage, en todas las pantallas. A la agencia no: es
+              gente de fuera y nada de lo que ve sale de Sage. */}
+          {configured && profile.roles.some((role) => role !== "agency") ? <LecturaDeSage /> : null}
           {/* Only shown in the mobile menu, where the topbar just shows the initials. */}
           <div className="sidebar-user">
             <span className="user-avatar" aria-hidden="true">{initials}</span>
